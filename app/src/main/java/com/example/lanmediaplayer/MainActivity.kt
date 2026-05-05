@@ -24,7 +24,7 @@ import com.example.lanmediaplayer.controller.NetworkProtocol
 import com.example.lanmediaplayer.ui.theme.LanMediaPlayerTheme
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
