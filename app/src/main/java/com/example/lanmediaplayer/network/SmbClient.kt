@@ -79,7 +79,7 @@ class SmbClient {
                     val fileName = fileInfo.fileName
                     if (fileName == "." || fileName == "..") continue
                     
-                    val isDirectory = fileInfo.fileAttributes.toInt() and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.toInt() != 0
+                    val isDirectory = fileInfo.fileAttributes.contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
                     
                     files.add(SmbFileInfo(
                         name = fileName,
