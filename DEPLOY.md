@@ -51,22 +51,9 @@ git push -u origin main
 
 ## 注意事项
 
-⚠️ **重要**: 项目需要 `gradle-wrapper.jar` 文件才能正常构建。
+✅ **gradle-wrapper.jar 已包含**
 
-如果 GitHub Actions 构建失败，提示找不到 gradle-wrapper.jar，请执行：
-
-```bash
-# 在本地生成 gradle wrapper
-gradle wrapper
-
-# 或者手动下载
-curl -L https://raw.githubusercontent.com/gradle/gradle/master/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
-
-# 然后重新提交
-git add gradle/wrapper/gradle-wrapper.jar
-git commit -m "Add gradle wrapper jar"
-git push
-```
+项目已经包含了必需的 `gradle-wrapper.jar` 文件，可以直接推送到 GitHub 进行构建。
 
 ## 故障排除
 
