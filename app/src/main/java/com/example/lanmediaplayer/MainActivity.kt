@@ -110,19 +110,21 @@ fun MainScreen(mediaController: MediaController) {
                 if (file.isDirectory) {
                     currentPath = file.path
                     isLoading = true
-                    mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
-                        override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                            files = loadedFiles
-                            isLoading = false
-                        }
-                        
-                        override fun onError(error: String) {
-                            errorMessage = error
-                            isLoading = false
-                        }
-                        
-                        override fun onPlaybackStateChanged(state: Int) {}
-                    })
+                    coroutineScope.launch {
+                        mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
+                            override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                files = loadedFiles
+                                isLoading = false
+                            }
+                            
+                            override fun onError(error: String) {
+                                errorMessage = error
+                                isLoading = false
+                            }
+                            
+                            override fun onPlaybackStateChanged(state: Int) {}
+                        })
+                    }
                 } else {
                     mediaController.playMedia(file, object : MediaController.MediaCallback {
                         override fun onFilesLoaded(files: List<MediaFile>) {}
@@ -141,19 +143,21 @@ fun MainScreen(mediaController: MediaController) {
                     val parentPath = currentPath.substringBeforeLast("/")
                     currentPath = if (parentPath.isEmpty()) "/" else parentPath
                     isLoading = true
-                    mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
-                        override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                            files = loadedFiles
-                            isLoading = false
-                        }
-                        
-                        override fun onError(error: String) {
-                            errorMessage = error
-                            isLoading = false
-                        }
-                        
-                        override fun onPlaybackStateChanged(state: Int) {}
-                    })
+                    coroutineScope.launch {
+                        mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
+                            override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                files = loadedFiles
+                                isLoading = false
+                            }
+                            
+                            override fun onError(error: String) {
+                                errorMessage = error
+                                isLoading = false
+                            }
+                            
+                            override fun onPlaybackStateChanged(state: Int) {}
+                        })
+                    }
                 }
             },
             isLoading = isLoading
