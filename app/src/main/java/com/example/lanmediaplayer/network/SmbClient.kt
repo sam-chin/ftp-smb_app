@@ -2,6 +2,7 @@ package com.example.lanmediaplayer.network
 
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
+import com.hierynomus.mssmb2.FileIdBothDirectoryInformation
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2ShareAccess
 import com.hierynomus.smbj.SMBClient
@@ -74,7 +75,7 @@ class SmbClient {
             val files = mutableListOf<SmbFileInfo>()
             
             diskShare?.let { share ->
-                val fileInfos = share.list(normalizedPath)
+                val fileInfos: List<FileIdBothDirectoryInformation> = share.list(normalizedPath)
                 for (fileInfo in fileInfos) {
                     val fileName = fileInfo.fileName
                     if (fileName == "." || fileName == "..") continue
