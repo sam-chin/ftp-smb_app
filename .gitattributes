@@ -1,0 +1,10 @@
+* text=auto
+
+# Shell scripts should use LF
+*.sh text eol=lf
+
+# Batch files should use CRLF
+*.bat text eol=crlf
+
+# Gradle wrapper jar is binary
+gradle/wrapper/gradle-wrapper.jar binary
