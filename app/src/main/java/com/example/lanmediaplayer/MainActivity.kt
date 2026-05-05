@@ -23,6 +23,8 @@ import com.example.lanmediaplayer.controller.MediaFile
 import com.example.lanmediaplayer.controller.NetworkProtocol
 import com.example.lanmediaplayer.ui.theme.LanMediaPlayerTheme
 
+@OptIn(ExperimentalMaterial3Api::class)
+
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
     
@@ -59,6 +61,8 @@ fun MainScreen(mediaController: MediaController) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     
+    val coroutineScope = rememberCoroutineScope()
+    
     when (currentScreen) {
         Screen.Connection -> ConnectionScreen(
             onConnect = { protocol, host, port, username, password, share, domain ->
@@ -66,7 +70,7 @@ fun MainScreen(mediaController: MediaController) {
                 isLoading = true
                 errorMessage = null
                 
-                rememberCoroutineScope().launch {
+                coroutineScope.launch {
                     val success = when (protocol) {
                         is NetworkProtocol.FTP -> {
                             mediaController.connectToFtp(host, port, username, password)
