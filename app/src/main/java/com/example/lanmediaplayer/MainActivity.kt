@@ -375,8 +375,24 @@ fun ConnectionScreen(
                 value = share,
                 onValueChange = { smbShare = it },
                 label = { Text("Share") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g., Media, Documents, Public") }
             )
+            
+            // Quick select common share names
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val commonShares = listOf("Media", "Documents", "Public", "Users", "Share")
+                for (shareName in commonShares) {
+                    AssistChip(
+                        onClick = { smbShare = shareName },
+                        label = { Text(shareName, style = MaterialTheme.typography.bodySmall) }
+                    )
+                }
+            }
             
             Spacer(modifier = Modifier.height(8.dp))
             
