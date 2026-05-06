@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -17,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
@@ -467,6 +470,8 @@ fun ConnectionScreen(
         
         // Debug logs section
         if (debugLogs.isNotEmpty()) {
+            val clipboardManager = LocalClipboardManager.current
+            
             Spacer(modifier = Modifier.height(16.dp))
             Card(
                 modifier = Modifier
@@ -479,11 +484,29 @@ fun ConnectionScreen(
                         .fillMaxWidth()
                         .padding(8.dp)
                 ) {
-                    Text(
-                        text = "Connection Logs",
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Connection Logs",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        IconButton(
+                            onClick = {
+                                val logText = debugLogs.joinToString("\n")
+                                clipboardManager.setText(AnnotatedString(logText))
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy logs",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -535,6 +558,8 @@ fun FileBrowserScreen(
         
         // Debug logs section
         if (debugLogs.isNotEmpty()) {
+            val clipboardManager = LocalClipboardManager.current
+            
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -547,11 +572,29 @@ fun FileBrowserScreen(
                         .padding(8.dp)
                         .heightIn(max = 200.dp)
                 ) {
-                    Text(
-                        text = "Debug Logs",
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Debug Logs",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        IconButton(
+                            onClick = {
+                                val logText = debugLogs.joinToString("\n")
+                                clipboardManager.setText(AnnotatedString(logText))
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy logs",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth()
                     ) {
