@@ -24,16 +24,30 @@ import com.example.lanmediaplayer.controller.MediaController
 import com.example.lanmediaplayer.controller.MediaFile
 import com.example.lanmediaplayer.controller.NetworkProtocol
 import com.example.lanmediaplayer.ui.theme.LanMediaPlayerTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
     private lateinit var connectionPrefs: ConnectionPreferences
+    private val debugLogs = mutableListOf<String>()
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        mediaController = MediaController(this)
+        // Create log callback function
+        val logCallback: (String) -> Unit = { message ->
+            runOnUiThread {
+                val timestamp = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
+                debugLogs.add("$timestamp - $message")
+                // Keep only last 100 logs to avoid memory issues
+                if (debugLogs.size > 100) {
+                    debugLogs.removeAt(0)
+                }
+            }
+        }
+        
+        mediaController = MediaController(this, logCallback)
         mediaController.initializePlayer()
         connectionPrefs = ConnectionPreferences(this)
         
@@ -43,7 +57,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(mediaController, connectionPrefs)
+                    MainScreen(mediaController, connectionPrefs) { debugLogs.toList() }
                 }
             }
         }
@@ -56,14 +70,28 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPreferences) {
+fun MainScreen(
+    mediaController: MediaController,
+    connectionPrefs: ConnectionPreferences,
+    getDebugLogs: () -> List<String>
+) {
     var currentScreen by remember { mutableStateOf(Screen.Connection) }
     var files by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var currentPath by remember { mutableStateOf("/") }
     var selectedProtocol by remember { mutableStateOf<NetworkProtocol>(NetworkProtocol.FTP) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    
+    // Use logs from Activity instead of local state
     var debugLogs by remember { mutableStateOf<List<String>>(emptyList()) }
+    
+    // Update logs periodically
+    LaunchedEffect(Unit) {
+        while (true) {
+            debugLogs = getDebugLogs()
+            kotlinx.coroutines.delay(500)
+        }
+    }
     
     fun addLog(message: String) {
         debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"

@@ -23,13 +23,18 @@ data class MediaFile(
     val protocol: NetworkProtocol
 )
 
-class MediaController(private val context: Context) {
+class MediaController(private val context: Context, private val logCallback: ((String) -> Unit)? = null) {
     private var exoPlayer: ExoPlayer? = null
     private var httpProxy: HttpProxyServer? = null
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    
+    private fun log(message: String) {
+        println(message)
+        logCallback?.invoke(message)
+    }
     
     interface MediaCallback {
         fun onFilesLoaded(files: List<MediaFile>)
@@ -46,64 +51,64 @@ class MediaController(private val context: Context) {
     
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
         return try {
-            println("[Controller] === FTP Connection Start ===")
-            println("[Controller] Received parameters:")
-            println("[Controller]   Host: '$host' (length: ${host.length})")
-            println("[Controller]   Port: $port")
-            println("[Controller]   Username: '$username' (length: ${username.length})")
-            println("[Controller]   Password length: ${password.length}")
+            log("[Controller] === FTP Connection Start ===")
+            log("[Controller] Received parameters:")
+            log("[Controller]   Host: '$host' (length: ${host.length})")
+            log("[Controller]   Port: $port")
+            log("[Controller]   Username: '$username' (length: ${username.length})")
+            log("[Controller]   Password length: ${password.length}")
             
             if (username.isEmpty()) {
-                println("[Controller] WARNING: Username is empty!")
+                log("[Controller] WARNING: Username is empty!")
             }
             if (password.isEmpty()) {
-                println("[Controller] WARNING: Password is empty!")
+                log("[Controller] WARNING: Password is empty!")
             }
             
             ftpClient = FtpClient()
             
             val connected = ftpClient?.connect(host, port) ?: false
             if (!connected) {
-                println("[Controller] FTP socket connection failed")
+                log("[Controller] FTP socket connection failed")
                 return Pair(false, "Failed to connect to FTP server (network error)")
             }
             
-            println("[Controller] FTP socket connected, attempting login...")
+            log("[Controller] FTP socket connected, attempting login...")
             val loggedIn = ftpClient?.login(username, password) ?: false
             if (loggedIn) {
-                println("[Controller] === FTP Login successful ===")
+                log("[Controller] === FTP Login successful ===")
                 Pair(true, "Success")
             } else {
-                println("[Controller] === FTP Login failed ===")
+                log("[Controller] === FTP Login failed ===")
                 Pair(false, "Login failed (check username/password)")
             }
         } catch (e: Exception) {
-            println("[Controller] === FTP Error ===")
-            println("[Controller] Error type: ${e.javaClass.simpleName}")
-            println("[Controller] Error message: ${e.message}")
+            log("[Controller] === FTP Error ===")
+            log("[Controller] Error type: ${e.javaClass.simpleName}")
+            log("[Controller] Error message: ${e.message}")
             e.printStackTrace()
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[Controller] Full stack trace:\n${writer.toString()}")
+            log("[Controller] Full stack trace:\n${writer.toString()}")
             Pair(false, "Error: ${e.message}")
         }
     }
     
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
-            println("[Controller] === SMB Connection Start ===")
-            println("[Controller] Received parameters:")
-            println("[Controller]   Host: '$host' (length: ${host.length})")
-            println("[Controller]   Share: '$share'")
-            println("[Controller]   Username: '$username' (length: ${username.length})")
-            println("[Controller]   Password length: ${password.length}")
-            println("[Controller]   Domain: '$domain'")
+            log("[Controller] === SMB Connection Start ===")
+            log("[Controller] Received parameters:")
+            log("[Controller]   Host: '$host' (length: ${host.length})")
+            log("[Controller]   Share: '$share'")
+            log("[Controller]   Username: '$username' (length: ${username.length})")
+            log("[Controller]   Password length: ${password.length}")
+            log("[Controller]   Domain: '$domain'")
             
             if (username.isEmpty()) {
-                println("[Controller] WARNING: Username is empty!")
+                log("[Controller] WARNING: Username is empty!")
             }
             if (password.isEmpty()) {
-                println("[Controller] WARNING: Password is empty!")
+                log("[Controller] WARNING: Password is empty!")
             }
             
             smbClient = SmbClient()
@@ -113,36 +118,36 @@ class MediaController(private val context: Context) {
             val connected = smbClient?.connect(host, connectShare, username, password, domain) ?: false
             
             if (!connected) {
-                println("[Controller] === SMB connection failed ===")
+                log("[Controller] === SMB connection failed ===")
                 return Pair(false, "Failed to connect to SMB server (network/auth error)")
             }
             
-            println("[Controller] SMB connection successful")
+            log("[Controller] SMB connection successful")
             
             // If no share was specified, list available shares
             if (share.isEmpty()) {
-                println("[Controller] No share specified, listing available shares...")
+                log("[Controller] No share specified, listing available shares...")
                 val shares = smbClient?.listShares() ?: emptyList()
                 if (shares.isNotEmpty()) {
                     val sharesList = shares.joinToString(", ")
-                    println("[Controller] Available shares: $sharesList")
+                    log("[Controller] Available shares: $sharesList")
                     Pair(true, "Connected! Available shares: $sharesList")
                 } else {
-                    println("[Controller] No shares found")
+                    log("[Controller] No shares found")
                     Pair(true, "Connected but no shares found")
                 }
             } else {
-                println("[Controller] === SMB Connection established to share ===")
+                log("[Controller] === SMB Connection established to share ===")
                 Pair(true, "Success")
             }
         } catch (e: Exception) {
-            println("[Controller] === SMB Error ===")
-            println("[Controller] Error type: ${e.javaClass.simpleName}")
-            println("[Controller] Error message: ${e.message}")
+            log("[Controller] === SMB Error ===")
+            log("[Controller] Error type: ${e.javaClass.simpleName}")
+            log("[Controller] Error message: ${e.message}")
             e.printStackTrace()
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[Controller] Full stack trace:\n${writer.toString()}")
+            log("[Controller] Full stack trace:\n${writer.toString()}")
             Pair(false, "Error: ${e.message}")
         }
     }
