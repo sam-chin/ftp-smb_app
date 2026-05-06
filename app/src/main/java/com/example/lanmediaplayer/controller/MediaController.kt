@@ -1,6 +1,7 @@
 package com.example.lanmediaplayer.controller
 
 import android.content.Context
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.lanmediaplayer.network.FtpClient
@@ -34,6 +35,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var browseScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
     private fun log(message: String) {
+        // Use Android Log with UTF-8 support
+        Log.i("MediaController", message)
         println(message)
         logCallback?.invoke(message)
     }
@@ -337,6 +340,26 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 withContext(Dispatchers.Main) {
                     exoPlayer?.setMediaItem(mediaItem)
                     exoPlayer?.prepare()
+                    
+                    // Add error listener
+                    exoPlayer?.addListener(object : androidx.media3.common.Player.Listener {
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            log("[Controller] Player error: ${error.message}")
+                            error.printStackTrace()
+                        }
+                        
+                        override fun onPlaybackStateChanged(state: Int) {
+                            val stateStr = when (state) {
+                                androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                                androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                                androidx.media3.common.Player.STATE_READY -> "READY"
+                                androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                                else -> "UNKNOWN"
+                            }
+                            log("[Controller] Playback state: $stateStr")
+                        }
+                    })
+                    
                     exoPlayer?.play()
                     log("[Controller] Player started")
                 }

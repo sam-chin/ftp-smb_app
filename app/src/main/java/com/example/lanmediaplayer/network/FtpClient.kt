@@ -1,5 +1,6 @@
 package com.example.lanmediaplayer.network
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.*
@@ -32,6 +33,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     private var serverEncoding: Charset? = null
     
     private fun log(message: String) {
+        // Use Android Log with UTF-8 support
+        Log.i("FtpClient", message)
         println(message)
         logCallback?.invoke(message)
     }
@@ -266,7 +269,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             }
             
             val dataPort = parsePasvPort(pasvResponse.message)
-            val dataHost = pasvResponse.message.substringBefore("(").trim()
+            // Use the control connection host instead of parsing from PASV response
+            // The PASV response may contain encoding issues in the host part
+            val dataHost = this@FtpClient.host
             
             log("[FTP] Connecting to data socket: $dataHost:$dataPort")
             dataSocket = Socket(dataHost, dataPort)

@@ -1,5 +1,6 @@
 package com.example.lanmediaplayer.network
 
+import android.util.Log
 import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
@@ -35,6 +36,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     private var serverEncoding: Charset? = null
     
     private fun log(message: String) {
+        // Use Android Log with UTF-8 support
+        Log.i("SmbClient", message)
         println(message)
         logCallback?.invoke(message)
     }
