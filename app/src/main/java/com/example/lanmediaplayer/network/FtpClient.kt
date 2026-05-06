@@ -349,6 +349,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         commandMutex.withLock {
             try {
+                log("[FTP] Getting file size for: '$remotePath'")
+                
                 // Clear any pending responses before sending new commands
                 clearPendingResponses()
                 
@@ -359,12 +361,15 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 do {
                     response = readResponse()
                     if (response.code == 213) {
-                        return@withContext response.message.trim().toLongOrNull() ?: 0L
+                        val fileSize = response.message.trim().toLongOrNull() ?: 0L
+                        log("[FTP] File size: $fileSize bytes")
+                        return@withContext fileSize
                     }
                     // If we get a different response, it might be from a previous command
                     log("[FTP] Ignoring unexpected response for SIZE: ${response.code} ${response.message}")
                 } while (response != null)
                 
+                log("[FTP] SIZE command failed - no valid response")
                 0L
             } catch (e: Exception) {
                 log("[FTP] Error getting file size: ${e.message}")
@@ -394,17 +399,14 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun sendCommand(command: String) {
-        // Use server's detected encoding if available, otherwise use UTF-8 for non-ASCII commands
-        val commandBytes = if (command.any { it.code > 127 }) {
-            // Command contains non-ASCII characters (e.g., Chinese paths)
-            val encoding = serverEncoding ?: StandardCharsets.UTF_8
-            log("[FTP] Sending command with non-ASCII chars, using encoding: ${encoding.name()}")
-            "${command}\r\n".toByteArray(encoding)
-        } else {
-            // Pure ASCII command
-            "${command}\r\n".toByteArray(StandardCharsets.US_ASCII)
+        // Use smart encoding selection based on content and server capabilities
+        val charset = EncodingConverter.selectEncoding(command, serverEncoding)
+        
+        if (EncodingConverter.containsNonAscii(command)) {
+            log("[FTP] Sending command with non-ASCII chars, using encoding: ${charset.name()}")
         }
         
+        val commandBytes = EncodingConverter.encode("$command\r\n", charset)
         controlOutputStream?.write(commandBytes)
         controlOutputStream?.flush()
         log("[FTP] Sent: $command")
