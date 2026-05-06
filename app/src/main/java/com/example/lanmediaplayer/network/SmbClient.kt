@@ -30,7 +30,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     private var domain: String = ""
     
     private fun log(message: String) {
-            log(message)
+        println(message)
         logCallback?.invoke(message)
     }
     

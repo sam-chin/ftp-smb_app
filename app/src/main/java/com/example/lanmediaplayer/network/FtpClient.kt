@@ -27,7 +27,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     private var passiveMode: Boolean = true
     
     private fun log(message: String) {
-            log(message)
+        println(message)
         logCallback?.invoke(message)
     }
     
