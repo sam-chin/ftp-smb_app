@@ -67,6 +67,14 @@ class SmbClient {
             println("[SMB-JCIFS] Username set: '$username' (length: ${username.length})")
             println("[SMB-JCIFS] Password length: ${password.length}")
             
+            // Debug: Print all properties for verification
+            println("[SMB-JCIFS] === Configuration Properties ===")
+            properties.stringPropertyNames().forEach { key ->
+                val value = if (key.contains("password")) "***" else properties.getProperty(key)
+                println("[SMB-JCIFS]   $key = $value")
+            }
+            println("[SMB-JCIFS] ===============================")
+            
             println("[SMB-JCIFS] Creating configuration...")
             val config = PropertyConfiguration(properties)
             context = BaseContext(config)
