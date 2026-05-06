@@ -366,7 +366,7 @@ fun ConnectionScreen(
             modifier = Modifier.fillMaxWidth()
         )
         
-        if (selectedProtocol is NetworkProtocol.SMB) {
+        if (protocol is NetworkProtocol.SMB) {
             Spacer(modifier = Modifier.height(8.dp))
             
             OutlinedTextField(
