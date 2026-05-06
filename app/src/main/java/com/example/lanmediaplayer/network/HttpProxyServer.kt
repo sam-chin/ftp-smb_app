@@ -85,13 +85,15 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             log("[HTTP Proxy] Encoded path: $encodedPath")
             
             val filePath = try {
-                java.net.URLDecoder.decode(encodedPath, "UTF-8")
+                val decodedPath = java.net.URLDecoder.decode(encodedPath, "UTF-8")
+                log("[HTTP Proxy] Decoded file path: $decodedPath")
+                decodedPath
             } catch (e: Exception) {
                 log("[HTTP Proxy] URL decode failed: ${e.message}")
                 encodedPath // Fallback to original if decoding fails
             }
             
-            log("[HTTP Proxy] Decoded file path: $filePath")
+            log("[HTTP Proxy] Final file path passed to provider: '$filePath'")
             
             // Read all headers
             val headers = mutableMapOf<String, String>()
