@@ -252,7 +252,19 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             }
             
             val fileList = smbFile.listFiles()
-            log("[SMB-JCIFS] Found ${fileList.size} items")
+            log("[SMB-JCIFS] Found ${fileList.size} items in $fullPath")
+            
+            // Debug: List all files found
+            if (fileList.isNotEmpty()) {
+                log("[SMB-JCIFS] Files in directory:")
+                for (file in fileList.take(5)) { // Only log first 5 to avoid spam
+                    val debugName = file.name.trimEnd('/')
+                    log("[SMB-JCIFS]   - $debugName (${if (file.isDirectory) "DIR" else "FILE"})")
+                }
+                if (fileList.size > 5) {
+                    log("[SMB-JCIFS]   ... and ${fileList.size - 5} more items")
+                }
+            }
             
             // Detect server encoding from file names if not already determined
             if (serverEncoding == null && fileList.isNotEmpty()) {
@@ -294,11 +306,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     size = fileSize,
                     isDirectory = isDirectory,
                     path = if (normalizedPath == "") {
-                        "/$fileName"
-                    } else if (normalizedPath.endsWith("/")) {
-                        "/$normalizedPath$fileName"
+                        "/$fileName"  // Root path
                     } else {
-                        "/$normalizedPath/$fileName"
+                        "/$normalizedPath/$fileName"  // Full path from root
                     }
                 ))
             }
