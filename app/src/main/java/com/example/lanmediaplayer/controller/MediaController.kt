@@ -44,28 +44,47 @@ class MediaController(private val context: Context) {
     
     fun getPlayer(): ExoPlayer? = exoPlayer
     
-    suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Boolean {
+    suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
         return try {
             ftpClient = FtpClient()
+            println("[Controller] Connecting to FTP: $host:$port")
             val connected = ftpClient?.connect(host, port) ?: false
-            if (connected) {
-                ftpClient?.login(username, password) ?: false
+            if (!connected) {
+                println("[Controller] FTP connection failed")
+                return Pair(false, "Failed to connect to FTP server")
+            }
+            println("[Controller] FTP connected, logging in...")
+            val loggedIn = ftpClient?.login(username, password) ?: false
+            if (loggedIn) {
+                println("[Controller] FTP login successful")
+                Pair(true, "Success")
             } else {
-                false
+                println("[Controller] FTP login failed")
+                Pair(false, "Login failed")
             }
         } catch (e: Exception) {
+            println("[Controller] FTP error: ${e.message}")
             e.printStackTrace()
-            false
+            Pair(false, "Error: ${e.message}")
         }
     }
     
-    suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Boolean {
+    suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
             smbClient = SmbClient()
-            smbClient?.connect(host, share, username, password, domain) ?: false
+            println("[Controller] Connecting to SMB: $host, share: $share")
+            val connected = smbClient?.connect(host, share, username, password, domain) ?: false
+            if (connected) {
+                println("[Controller] SMB connection successful")
+                Pair(true, "Success")
+            } else {
+                println("[Controller] SMB connection failed")
+                Pair(false, "Failed to connect to SMB server")
+            }
         } catch (e: Exception) {
+            println("[Controller] SMB error: ${e.message}")
             e.printStackTrace()
-            false
+            Pair(false, "Error: ${e.message}")
         }
     }
     

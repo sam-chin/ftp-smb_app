@@ -116,7 +116,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                 }
                 
                 coroutineScope.launch {
-                    val success = when (protocol) {
+                    val (success, message) = when (protocol) {
                         is NetworkProtocol.FTP -> {
                             addLog("Attempting FTP connection...")
                             mediaController.connectToFtp(host, port, username, password)
@@ -128,6 +128,8 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                     }
                     
                     isLoading = false
+                    addLog(message)
+                    
                     if (success) {
                         addLog("Connection successful!")
                         currentScreen = Screen.FileBrowser
@@ -149,8 +151,8 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                             override fun onPlaybackStateChanged(state: Int) {}
                         })
                     } else {
-                        addLog("Connection failed!")
-                        errorMessage = "Connection failed"
+                        addLog("Connection failed: $message")
+                        errorMessage = message
                     }
                 }
             },
