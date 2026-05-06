@@ -45,31 +45,27 @@ class MediaController(private val context: Context) {
     fun getPlayer(): ExoPlayer? = exoPlayer
     
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                ftpClient = FtpClient()
-                val connected = ftpClient?.connect(host, port) ?: false
-                if (connected) {
-                    ftpClient?.login(username, password) ?: false
-                } else {
-                    false
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        return try {
+            ftpClient = FtpClient()
+            val connected = ftpClient?.connect(host, port) ?: false
+            if (connected) {
+                ftpClient?.login(username, password) ?: false
+            } else {
                 false
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
     
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                smbClient = SmbClient()
-                smbClient?.connect(host, share, username, password, domain) ?: false
-            } catch (e: Exception) {
-                e.printStackTrace()
-                false
-            }
+        return try {
+            smbClient = SmbClient()
+            smbClient?.connect(host, share, username, password, domain) ?: false
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
     

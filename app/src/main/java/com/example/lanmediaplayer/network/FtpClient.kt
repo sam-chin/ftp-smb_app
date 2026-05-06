@@ -25,11 +25,11 @@ class FtpClient {
     private var password: String = ""
     private var passiveMode: Boolean = true
     
-    fun connect(host: String, port: Int = 21): Boolean {
-        this.host = host
-        this.port = port
+    suspend fun connect(host: String, port: Int = 21): Boolean = withContext(Dispatchers.IO) {
+        this@FtpClient.host = host
+        this@FtpClient.port = port
         
-        return try {
+        return@withContext try {
             controlSocket = Socket(host, port)
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
