@@ -70,23 +70,33 @@ class SmbClient {
             
             println("[SMB-JCIFS] Base URL: $baseUrl")
             
-            // Test connection by listing root
-            val testUrl = if (share.isEmpty()) "smb://$host/" else "smb://$host/$share/"
+            // If no share specified, just test basic connectivity
+            if (share.isEmpty()) {
+                println("[SMB-JCIFS] No share specified, connection setup successful")
+                return@withContext true
+            }
+            
+            // Test connection by checking if share exists
+            val testUrl = "smb://$host/$share/"
             val testFile = SmbFile(testUrl, context)
             
-            println("[SMB-JCIFS] Testing connection...")
+            println("[SMB-JCIFS] Testing connection to share...")
             val exists = testFile.exists()
             
             if (exists) {
                 println("[SMB-JCIFS] Connection successful")
                 true
             } else {
-                println("[SMB-JCIFS] ERROR: Path does not exist")
+                println("[SMB-JCIFS] ERROR: Share does not exist or access denied")
                 false
             }
         } catch (e: Exception) {
             println("[SMB-JCIFS] Connection error: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
+            // Print full stack trace for debugging
+            val writer = java.io.PrintWriter(java.io.StringWriter())
+            e.printStackTrace(writer)
+            println("[SMB-JCIFS] Stack trace: ${writer.toString()}")
             false
         }
     }

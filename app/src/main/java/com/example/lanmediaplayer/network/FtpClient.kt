@@ -53,25 +53,29 @@ class FtpClient {
             }
             success
         } catch (e: Exception) {
-            println("[FTP] Connection error: ${e.message}")
+            println("[FTP] Connection error: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
+            // Print full stack trace for debugging
+            val writer = java.io.PrintWriter(java.io.StringWriter())
+            e.printStackTrace(writer)
+            println("[FTP] Stack trace: ${writer.toString()}")
             disconnect()
             false
         }
     }
     
-    suspend fun login(username: String, password: String): Boolean {
+    suspend fun login(username: String, password: String): Boolean = withContext(Dispatchers.IO) {
         this@FtpClient.username = username
         this@FtpClient.password = password
         
-        return try {
+        return@withContext try {
             println("[FTP] Logging in as $username...")
             sendCommand("USER $username")
             val userResponse = readResponse()
             println("[FTP] USER response: ${userResponse.code} ${userResponse.message}")
             if (userResponse.code !in 200..399) {
                 println("[FTP] USER command failed")
-                return false
+                return@withContext false
             }
             
             sendCommand("PASS $password")

@@ -103,14 +103,15 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                 isLoading = true
                 errorMessage = null
                 // Don't clear debug logs, keep them for troubleshooting
-                addLog("Connecting to ${protocol::class.simpleName}://$host:$port...")
                 
-                // Save connection info separately
+                // Log connection parameters (hide password)
                 when (protocol) {
                     is NetworkProtocol.FTP -> {
+                        addLog("FTP Connection: host=$host, port=$port, user=$username")
                         connectionPrefs.saveFtpConnection(host, port, username, password)
                     }
                     is NetworkProtocol.SMB -> {
+                        addLog("SMB Connection: host=$host, share=$share, user=$username, domain=$domain")
                         connectionPrefs.saveSmbConnection(host, port, username, password, share, domain)
                     }
                 }
@@ -122,7 +123,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                             mediaController.connectToFtp(host, port, username, password)
                         }
                         is NetworkProtocol.SMB -> {
-                            addLog("Attempting SMB connection to share: $share...")
+                            addLog("Attempting SMB connection...")
                             mediaController.connectToSmb(host, share, username, password, domain)
                         }
                     }
