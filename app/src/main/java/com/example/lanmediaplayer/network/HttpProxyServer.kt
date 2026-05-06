@@ -142,36 +142,50 @@ class HttpProxyServer {
         contentType: String
     ) {
         println("[HTTP Proxy] Handling full request for: $filePath")
-        val fileStream = fileProvider.getFileStream(filePath)
-        if (fileStream == null) {
-            println("[HTTP Proxy] Failed to get file stream")
-            sendErrorResponse(outputStream, 404, "File Not Found")
-            return
-        }
-        
-        println("[HTTP Proxy] File stream opened, starting to send data...")
-        
-        val responseHeader = "HTTP/1.1 200 OK\r\n" +
-                "Content-Type: $contentType\r\n" +
-                "Content-Length: $fileSize\r\n" +
-                "Accept-Ranges: bytes\r\n" +
-                "Connection: close\r\n" +
-                "\r\n"
-        
-        outputStream.write(responseHeader.toByteArray())
-        outputStream.flush()
-        
-        // Stream the file in chunks for progressive playback
-        val buffer = ByteArray(64 * 1024) // 64KB buffer
-        var bytesRead: Int
-        var totalBytesRead = 0L
-        while (fileStream.read(buffer).also { bytesRead = it } != -1) {
-            outputStream.write(buffer, 0, bytesRead)
+        var fileStream: InputStream? = null
+        try {
+            fileStream = fileProvider.getFileStream(filePath)
+            if (fileStream == null) {
+                println("[HTTP Proxy] Failed to get file stream")
+                sendErrorResponse(outputStream, 404, "File Not Found")
+                return
+            }
+            
+            println("[HTTP Proxy] File stream opened, size: $fileSize, starting to send data...")
+            
+            val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: $contentType\r\n" +
+                    "Content-Length: $fileSize\r\n" +
+                    "Accept-Ranges: bytes\r\n" +
+                    "Connection: close\r\n" +
+                    "\r\n"
+            
+            outputStream.write(responseHeader.toByteArray())
             outputStream.flush()
-            totalBytesRead += bytesRead
+            
+            // Stream the file in chunks for progressive playback
+            val buffer = ByteArray(64 * 1024) // 64KB buffer
+            var bytesRead: Int
+            var totalBytesRead = 0L
+            while (fileStream.read(buffer).also { bytesRead = it } != -1) {
+                outputStream.write(buffer, 0, bytesRead)
+                outputStream.flush()
+                totalBytesRead += bytesRead
+            }
+            
+            println("[HTTP Proxy] Sent $totalBytesRead bytes")
+        } catch (e: Exception) {
+            println("[HTTP Proxy] Error in handleFullRequest: ${e.message}")
+            e.printStackTrace()
+        } finally {
+            // IMPORTANT: Close the file stream to release FTP/SMB resources
+            try {
+                fileStream?.close()
+                println("[HTTP Proxy] File stream closed")
+            } catch (e: Exception) {
+                println("[HTTP Proxy] Error closing stream: ${e.message}")
+            }
         }
-        
-        fileStream.close()
     }
     
     private suspend fun handleRangeRequest(
@@ -182,59 +196,77 @@ class HttpProxyServer {
         rangeHeader: String,
         contentType: String
     ) {
-        // Parse range: "bytes=start-end" or "bytes=start-"
-        val range = rangeHeader.substring(6) // Remove "bytes="
-        val rangeParts = range.split("-")
-        
-        val start = rangeParts[0].toLongOrNull() ?: 0L
-        val end = if (rangeParts[1].isNotEmpty()) {
-            rangeParts[1].toLongOrNull() ?: (fileSize - 1)
-        } else {
-            fileSize - 1
-        }
-        
-        // Validate range
-        if (start >= fileSize || start > end) {
-            sendErrorResponse(outputStream, 416, "Range Not Satisfiable")
-            return
-        }
-        
-        val contentLength = end - start + 1
-        
-        val fileStream = fileProvider.getFileStream(filePath)
-        if (fileStream == null) {
-            sendErrorResponse(outputStream, 404, "File Not Found")
-            return
-        }
-        
-        // Skip to start position
-        fileStream.skip(start)
-        
-        val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
-                "Content-Type: $contentType\r\n" +
-                "Content-Length: $contentLength\r\n" +
-                "Content-Range: bytes $start-$end/$fileSize\r\n" +
-                "Accept-Ranges: bytes\r\n" +
-                "Connection: close\r\n" +
-                "\r\n"
-        
-        outputStream.write(responseHeader.toByteArray())
-        outputStream.flush()
-        
-        // Stream the requested range
-        val buffer = ByteArray(64 * 1024) // 64KB buffer
-        var remainingBytes = contentLength
-        while (remainingBytes > 0) {
-            val bytesRead = fileStream.read(buffer)
-            if (bytesRead == -1) break
+        var fileStream: InputStream? = null
+        try {
+            // Parse range: "bytes=start-end" or "bytes=start-"
+            val range = rangeHeader.substring(6) // Remove "bytes="
+            val rangeParts = range.split("-")
             
-            val bytesToWrite = minOf(bytesRead.toLong(), remainingBytes).toInt()
-            outputStream.write(buffer, 0, bytesToWrite)
+            val start = rangeParts[0].toLongOrNull() ?: 0L
+            val end = if (rangeParts[1].isNotEmpty()) {
+                rangeParts[1].toLongOrNull() ?: (fileSize - 1)
+            } else {
+                fileSize - 1
+            }
+            
+            // Validate range
+            if (start >= fileSize || start > end) {
+                sendErrorResponse(outputStream, 416, "Range Not Satisfiable")
+                return
+            }
+            
+            val contentLength = end - start + 1
+            println("[HTTP Proxy] Range request: bytes $start-$end/$fileSize (content length: $contentLength)")
+            
+            fileStream = fileProvider.getFileStream(filePath)
+            if (fileStream == null) {
+                sendErrorResponse(outputStream, 404, "File Not Found")
+                return
+            }
+            
+            // Skip to start position
+            val skipped = fileStream.skip(start)
+            println("[HTTP Proxy] Skipped $skipped bytes to reach start position")
+            
+            val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
+                    "Content-Type: $contentType\r\n" +
+                    "Content-Length: $contentLength\r\n" +
+                    "Content-Range: bytes $start-$end/$fileSize\r\n" +
+                    "Accept-Ranges: bytes\r\n" +
+                    "Connection: close\r\n" +
+                    "\r\n"
+            
+            outputStream.write(responseHeader.toByteArray())
             outputStream.flush()
-            remainingBytes -= bytesToWrite
+            
+            // Stream the requested range
+            val buffer = ByteArray(64 * 1024) // 64KB buffer
+            var remainingBytes = contentLength
+            var totalSent = 0L
+            while (remainingBytes > 0) {
+                val bytesRead = fileStream.read(buffer)
+                if (bytesRead == -1) break
+                
+                val bytesToWrite = minOf(bytesRead.toLong(), remainingBytes).toInt()
+                outputStream.write(buffer, 0, bytesToWrite)
+                outputStream.flush()
+                remainingBytes -= bytesToWrite
+                totalSent += bytesToWrite
+            }
+            
+            println("[HTTP Proxy] Range request completed, sent $totalSent bytes")
+        } catch (e: Exception) {
+            println("[HTTP Proxy] Error in handleRangeRequest: ${e.message}")
+            e.printStackTrace()
+        } finally {
+            // IMPORTANT: Close the file stream to release FTP/SMB resources
+            try {
+                fileStream?.close()
+                println("[HTTP Proxy] Range request file stream closed")
+            } catch (e: Exception) {
+                println("[HTTP Proxy] Error closing stream: ${e.message}")
+            }
         }
-        
-        fileStream.close()
     }
     
     private fun detectContentType(filePath: String): String {

@@ -263,14 +263,33 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             try {
                 log("[FTP] Opening stream for: $remotePath")
                 
+                // Clear any pending responses before sending new commands
+                clearPendingResponses()
+                
                 sendCommand("TYPE I")
-                readResponse()
+                // Read response and verify it's for TYPE command (code 200)
+                var typeResponse: FtpResponse?
+                do {
+                    typeResponse = readResponse()
+                    if (typeResponse.code == 200) {
+                        break
+                    }
+                    log("[FTP] Ignoring unexpected response for TYPE: ${typeResponse.code} ${typeResponse.message}")
+                } while (typeResponse != null)
                 
                 sendCommand("PASV")
-                val pasvResponse = readResponse()
+                // Read response and verify it's for PASV command (code 227)
+                var pasvResponse: FtpResponse?
+                do {
+                    pasvResponse = readResponse()
+                    if (pasvResponse.code == 227) {
+                        break
+                    }
+                    log("[FTP] Ignoring unexpected response for PASV: ${pasvResponse.code} ${pasvResponse.message}")
+                } while (pasvResponse != null)
                 
-                if (pasvResponse.code != 227) {
-                    log("[FTP] PASV failed: ${pasvResponse.code}")
+                if (pasvResponse?.code != 227) {
+                    log("[FTP] PASV failed: ${pasvResponse?.code}")
                     return@withContext null
                 }
                 
@@ -283,10 +302,18 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 dataSocket = Socket(dataHost, dataPort)
                 
                 sendCommand("RETR $remotePath")
-                val retrResponse = readResponse()
+                // Read response and verify it's for RETR command (code 1xx)
+                var retrResponse: FtpResponse?
+                do {
+                    retrResponse = readResponse()
+                    if (retrResponse.code in 100..199) {
+                        break
+                    }
+                    log("[FTP] Ignoring unexpected response for RETR: ${retrResponse.code} ${retrResponse.message}")
+                } while (retrResponse != null)
                 
-                if (retrResponse.code !in 100..199) {
-                    log("[FTP] RETR failed: ${retrResponse.code} ${retrResponse.message}")
+                if (retrResponse?.code !in 100..199) {
+                    log("[FTP] RETR failed: ${retrResponse?.code}")
                     closeDataConnection()
                     return@withContext null
                 }
@@ -308,16 +335,26 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         commandMutex.withLock {
             try {
-                sendCommand("SIZE $remotePath")
-                val response = readResponse()
+                // Clear any pending responses before sending new commands
+                clearPendingResponses()
                 
-                if (response.code == 213) {
-                    response.message.trim().toLongOrNull() ?: 0L
-                } else {
-                    0L
-                }
+                sendCommand("SIZE $remotePath")
+                
+                // Read responses until we get the SIZE response (code 213)
+                var response: FtpResponse?
+                do {
+                    response = readResponse()
+                    if (response.code == 213) {
+                        return@withContext response.message.trim().toLongOrNull() ?: 0L
+                    }
+                    // If we get a different response, it might be from a previous command
+                    log("[FTP] Ignoring unexpected response for SIZE: ${response.code} ${response.message}")
+                } while (response != null)
+                
+                0L
             } catch (e: Exception) {
                 log("[FTP] Error getting file size: ${e.message}")
+                e.printStackTrace()
                 0L
             }
         }
@@ -367,6 +404,46 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         
         log("[FTP] Received: $firstLine")
         return FtpResponse(code, message)
+    }
+    
+    /**
+     * Clear any pending responses from the control connection
+     * This prevents response mixing when commands are sent in quick succession
+     */
+    private fun clearPendingResponses() {
+        try {
+            val reader = controlReader ?: return
+            
+            // Set a short timeout to avoid blocking indefinitely
+            val originalTimeout = controlSocket?.soTimeout ?: 0
+            controlSocket?.soTimeout = 100 // 100ms timeout
+            
+            var clearedCount = 0
+            while (true) {
+                try {
+                    if (!reader.ready()) {
+                        // No more data available immediately
+                        break
+                    }
+                    val line = reader.readLine()
+                    if (line == null) break
+                    log("[FTP] Cleared stale response: $line")
+                    clearedCount++
+                } catch (e: java.net.SocketTimeoutException) {
+                    // Timeout means no more data
+                    break
+                }
+            }
+            
+            // Restore original timeout
+            controlSocket?.soTimeout = originalTimeout
+            
+            if (clearedCount > 0) {
+                log("[FTP] Cleared $clearedCount pending responses")
+            }
+        } catch (e: Exception) {
+            log("[FTP] Error clearing pending responses: ${e.message}")
+        }
     }
     
     private fun closeDataConnection() {
