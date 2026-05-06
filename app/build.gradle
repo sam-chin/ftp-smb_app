@@ -66,7 +66,8 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.1.1'
     implementation 'androidx.media3:media3-ui:1.1.1'
     
-    implementation 'com.hierynomus:smbj:0.14.0'
+    // JCIFS-NG for SMB with share enumeration support
+    implementation 'com.github.agaldos:jcifs-ng:2.1.6'
     
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1'
