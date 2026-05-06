@@ -315,6 +315,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 }
                 
                 val fullPath = "$baseUrl$normalizedPath"
+                log("[SMB-JCIFS] Full path: $fullPath")
                 
                 val smbFile = SmbFile(fullPath, context)
                 
@@ -328,8 +329,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     return@withContext null
                 }
                 
+                val fileSize = smbFile.length()
+                log("[SMB-JCIFS] File exists, size: $fileSize, opening stream...")
+                
+                val inputStream = smbFile.getInputStream()
                 log("[SMB-JCIFS] Stream opened successfully")
-                smbFile.getInputStream()
+                inputStream
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error opening stream: ${e.message}")
                 e.printStackTrace()
@@ -344,6 +349,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             try {
+                log("[SMB-JCIFS] Getting file size for: $remotePath")
+                
                 // Normalize path
                 val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
                     remotePath.substring(1)
@@ -354,15 +361,21 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 }
                 
                 val fullPath = "$baseUrl$normalizedPath"
+                log("[SMB-JCIFS] Full path: $fullPath")
+                
                 val smbFile = SmbFile(fullPath, context)
                 
                 if (smbFile.exists() && !smbFile.isDirectory) {
-                    smbFile.length()
+                    val size = smbFile.length()
+                    log("[SMB-JCIFS] File size: $size")
+                    size
                 } else {
+                    log("[SMB-JCIFS] File does not exist or is directory")
                     0L
                 }
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error getting file size: ${e.message}")
+                e.printStackTrace()
                 0L
             }
         }

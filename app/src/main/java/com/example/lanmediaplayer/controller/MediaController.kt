@@ -3,7 +3,9 @@ package com.example.lanmediaplayer.controller
 import android.content.Context
 import android.util.Log
 import androidx.media3.common.MediaItem
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.example.lanmediaplayer.network.FtpClient
 import com.example.lanmediaplayer.network.HttpProxyServer
 import com.example.lanmediaplayer.network.SmbClient
@@ -334,17 +336,25 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: ""
                 log("[Controller] Proxy URL: $proxyUrl")
                 
-                val mediaItem = MediaItem.fromUri(proxyUrl)
-                log("[Controller] Setting media item...")
-                
                 withContext(Dispatchers.Main) {
-                    exoPlayer?.setMediaItem(mediaItem)
-                    exoPlayer?.prepare()
+                    // Create a DefaultHttpDataSource.Factory for HTTP streaming
+                    val dataSourceFactory = DefaultHttpDataSource.Factory()
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(10000)
+                        .setReadTimeoutMs(10000)
                     
-                    // Add error listener
+                    // Create media source
+                    val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                        .createMediaSource(MediaItem.fromUri(proxyUrl))
+                    
+                    log("[Controller] Setting media source...")
+                    
+                    // Add error listener before setting media source
                     exoPlayer?.addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             log("[Controller] Player error: ${error.message}")
+                            log("[Controller] Error code: ${error.errorCode}")
+                            log("[Controller] Error code name: ${error.errorCodeName}")
                             error.printStackTrace()
                         }
                         
@@ -360,6 +370,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         }
                     })
                     
+                    exoPlayer?.setMediaSource(mediaSource)
+                    exoPlayer?.prepare()
                     exoPlayer?.play()
                     log("[Controller] Player started")
                 }
