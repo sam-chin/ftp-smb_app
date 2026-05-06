@@ -289,6 +289,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${mediaFile.protocol::class.simpleName}")
         log("[Controller] Size: ${mediaFile.size}")
         
+        // Additional debug for path structure
+        log("[CONTROLLER-PATH-DEBUG] MediaFile path analysis: path='${mediaFile.path}', name='${mediaFile.name}'")
+        
         // Check if file is an image (ExoPlayer doesn't support images)
         val extension = mediaFile.name.substringAfterLast('.', "").lowercase()
         val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
@@ -320,7 +323,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         }
                         
                         override suspend fun getFileSize(path: String): Long {
-                            log("[Controller] getFileSize called for: $path")
+                            log("[CONTROLLER-PATH-DEBUG] getFileSize called for: $path")
+                            log("[CONTROLLER-PATH-DEBUG] Original mediaFile path: ${mediaFile.path}")
+                            log("[CONTROLLER-PATH-DEBUG] Comparing paths - received: '$path', expected: '${mediaFile.path.substring(1)}' (without leading slash)")
                             return when (mediaFile.protocol) {
                                 is NetworkProtocol.FTP -> {
                                     ftpClient?.getFileSize(path) ?: mediaFile.size
