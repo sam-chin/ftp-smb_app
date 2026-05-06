@@ -98,17 +98,21 @@ class SmbClient {
     
     suspend fun listFiles(remotePath: String = ""): List<SmbFileInfo> = withContext(Dispatchers.IO) {
         try {
+            // Normalize path - convert "/" to empty string for SMB root
             val normalizedPath = normalizePath(remotePath)
-            println("[SMB] Listing files in: '$normalizedPath'")
+            val smbPath = if (normalizedPath == "/" || normalizedPath.isEmpty()) "" else normalizedPath
+            
+            println("[SMB] Listing files - original path: '$remotePath', normalized: '$normalizedPath', smbPath: '$smbPath'")
             val files = mutableListOf<SmbFileInfo>()
             
             diskShare?.let { share ->
-                // For root path, use empty string
-                val listPath = if (normalizedPath == "/" || normalizedPath.isEmpty()) "" else normalizedPath
-                println("[SMB] Actual list path: '$listPath'")
-                
-                val fileInfos = share.list(listPath)
+                println("[SMB] Calling share.list('$smbPath')...")
+                val fileInfos = share.list(smbPath)
                 println("[SMB] Raw file count: ${fileInfos.size}")
+                
+                if (fileInfos.isEmpty()) {
+                    println("[SMB] WARNING: share.list() returned empty list!")
+                }
                 
                 for (fileInfo in fileInfos) {
                     val fileName = fileInfo.fileName
@@ -126,11 +130,11 @@ class SmbClient {
                         name = fileName,
                         size = fileInfo.endOfFile,
                         isDirectory = isDirectory,
-                        path = if (listPath.isEmpty()) "/$fileName" else if (listPath.endsWith("/")) "$listPath$fileName" else "$listPath/$fileName"
+                        path = if (smbPath.isEmpty()) "/$fileName" else if (smbPath.endsWith("/")) "$smbPath$fileName" else "$smbPath/$fileName"
                     ))
                 }
             } ?: run {
-                println("[SMB] diskShare is null!")
+                println("[SMB] ERROR: diskShare is null! Connection may not be established.")
             }
             
             println("[SMB] Total files found: ${files.size}")
