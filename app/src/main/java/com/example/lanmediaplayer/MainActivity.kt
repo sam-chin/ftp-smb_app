@@ -28,12 +28,14 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
+    private lateinit var connectionPrefs: ConnectionPreferences
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         mediaController = MediaController(this)
         mediaController.initializePlayer()
+        connectionPrefs = ConnectionPreferences(this)
         
         setContent {
             LanMediaPlayerTheme {
@@ -41,7 +43,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(mediaController)
+                    MainScreen(mediaController, connectionPrefs)
                 }
             }
         }
@@ -54,7 +56,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(mediaController: MediaController) {
+fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPreferences) {
     var currentScreen by remember { mutableStateOf(Screen.Connection) }
     var files by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var currentPath by remember { mutableStateOf("/") }
@@ -69,14 +71,34 @@ fun MainScreen(mediaController: MediaController) {
     
     val coroutineScope = rememberCoroutineScope()
     
+    // Load saved connection info
+    val savedProtocol = remember { connectionPrefs.getProtocol() }
+    val savedHost = remember { connectionPrefs.getHost() }
+    val savedPort = remember { connectionPrefs.getPort() }
+    val savedUsername = remember { connectionPrefs.getUsername() }
+    val savedPassword = remember { connectionPrefs.getPassword() }
+    val savedShare = remember { connectionPrefs.getShare() }
+    val savedDomain = remember { connectionPrefs.getDomain() }
+    
     when (currentScreen) {
         Screen.Connection -> ConnectionScreen(
+            savedProtocol = savedProtocol,
+            savedHost = savedHost,
+            savedPort = savedPort,
+            savedUsername = savedUsername,
+            savedPassword = savedPassword,
+            savedShare = savedShare,
+            savedDomain = savedDomain,
             onConnect = { protocol, host, port, username, password, share, domain ->
                 selectedProtocol = protocol
                 isLoading = true
                 errorMessage = null
                 debugLogs = emptyList()
                 addLog("Connecting to ${protocol::class.simpleName}://$host:$port...")
+                
+                // Save connection info
+                val protocolStr = if (protocol is NetworkProtocol.FTP) "FTP" else "SMB"
+                connectionPrefs.saveConnection(protocolStr, host, port, username, password, share, domain)
                 
                 coroutineScope.launch {
                     val success = when (protocol) {
@@ -211,16 +233,25 @@ enum class Screen {
 
 @Composable
 fun ConnectionScreen(
+    savedProtocol: String,
+    savedHost: String,
+    savedPort: Int,
+    savedUsername: String,
+    savedPassword: String,
+    savedShare: String,
+    savedDomain: String,
     onConnect: (NetworkProtocol, String, Int, String, String, String, String) -> Unit,
     isLoading: Boolean
 ) {
-    var selectedProtocol by remember { mutableStateOf<NetworkProtocol>(NetworkProtocol.FTP) }
-    var host by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("21") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var share by remember { mutableStateOf("") }
-    var domain by remember { mutableStateOf("") }
+    var selectedProtocol by remember { 
+        mutableStateOf(if (savedProtocol == "SMB") NetworkProtocol.SMB else NetworkProtocol.FTP)
+    }
+    var host by remember { mutableStateOf(savedHost) }
+    var port by remember { mutableStateOf(savedPort.toString()) }
+    var username by remember { mutableStateOf(savedUsername) }
+    var password by remember { mutableStateOf(savedPassword) }
+    var share by remember { mutableStateOf(savedShare) }
+    var domain by remember { mutableStateOf(savedDomain) }
     
     Column(
         modifier = Modifier

@@ -96,7 +96,8 @@ class FtpClient {
             val files = mutableListOf<FtpFileInfo>()
             dataSocket?.let { socket ->
                 val inputStream = socket.getInputStream()
-                val reader = BufferedReader(InputStreamReader(inputStream))
+                // Use UTF-8 encoding to handle Chinese filenames
+                val reader = BufferedReader(InputStreamReader(inputStream, "UTF-8"))
                 
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {

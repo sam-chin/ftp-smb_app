@@ -71,16 +71,24 @@ class SmbClient {
     suspend fun listFiles(remotePath: String = ""): List<SmbFileInfo> = withContext(Dispatchers.IO) {
         try {
             val normalizedPath = normalizePath(remotePath)
-            println("[SMB] Listing files in: $normalizedPath")
+            println("[SMB] Listing files in: '$normalizedPath'")
             val files = mutableListOf<SmbFileInfo>()
             
             diskShare?.let { share ->
-                val fileInfos = share.list(normalizedPath)
+                // For root path, use empty string
+                val listPath = if (normalizedPath == "/" || normalizedPath.isEmpty()) "" else normalizedPath
+                println("[SMB] Actual list path: '$listPath'")
+                
+                val fileInfos = share.list(listPath)
                 println("[SMB] Raw file count: ${fileInfos.size}")
                 
                 for (fileInfo in fileInfos) {
                     val fileName = fileInfo.fileName
-                    if (fileName == "." || fileName == "..") continue
+                    println("[SMB] Raw entry: '$fileName'")
+                    if (fileName == "." || fileName == "..") {
+                        println("[SMB] Skipping: $fileName")
+                        continue
+                    }
                     
                     // Use Java EnumSet contains method
                     val isDirectory = (fileInfo.fileAttributes as java.util.EnumSet<FileAttributes>).contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
@@ -90,7 +98,7 @@ class SmbClient {
                         name = fileName,
                         size = fileInfo.endOfFile,
                         isDirectory = isDirectory,
-                        path = if (normalizedPath.endsWith("/")) "$normalizedPath$fileName" else "$normalizedPath/$fileName"
+                        path = if (listPath.isEmpty()) "/$fileName" else if (listPath.endsWith("/")) "$listPath$fileName" else "$listPath/$fileName"
                     ))
                 }
             } ?: run {
