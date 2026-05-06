@@ -238,11 +238,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         try {
             log("[SMB-JCIFS] Downloading: $remotePath to ${localFile.absolutePath}")
             
-            // Normalize path: remove leading slash if present
+            // Normalize path: remove leading slash for JCIFS-NG, same approach as listFiles
             val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
-                remotePath.substring(1)
+                remotePath.substring(1)  // "/2025/file.mp4" → "2025/file.mp4"
+            } else if (remotePath == "/") {
+                ""  // Root directory
             } else {
-                remotePath
+                remotePath  // Already in correct format
             }
             
             val fullPath = "$baseUrl$normalizedPath"
@@ -250,7 +252,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             val smbFile = SmbFile(fullPath, context)
             
             if (!smbFile.exists()) {
-            log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
+                log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
                 return@withContext false
             }
             
