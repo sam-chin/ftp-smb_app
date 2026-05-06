@@ -18,6 +18,7 @@ class FtpClient {
     private var dataSocket: Socket? = null
     private var controlOutputStream: OutputStream? = null
     private var controlInputStream: InputStream? = null
+    private var controlReader: BufferedReader? = null
     
     private var host: String = ""
     private var port: Int = 21
@@ -38,6 +39,7 @@ class FtpClient {
             println("[FTP] Socket connected, getting streams...")
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
+            controlReader = BufferedReader(InputStreamReader(controlInputStream))
             
             println("[FTP] Reading server response...")
             val response = readResponse()
@@ -227,9 +229,11 @@ class FtpClient {
             e.printStackTrace()
         } finally {
             closeDataConnection()
+            controlReader?.close()
             controlInputStream?.close()
             controlOutputStream?.close()
             controlSocket?.close()
+            controlReader = null
             controlInputStream = null
             controlOutputStream = null
             controlSocket = null
@@ -242,12 +246,12 @@ class FtpClient {
     }
     
     private fun readResponse(): FtpResponse {
-        val reader = BufferedReader(InputStreamReader(controlInputStream))
-        val firstLine = reader.readLine() ?: throw IOException("No response from server")
+        val firstLine = controlReader?.readLine() ?: throw IOException("No response from server")
         
         val code = firstLine.substring(0, 3).toInt()
-        val message = firstLine.substring(4)
+        val message = if (firstLine.length > 4) firstLine.substring(4) else ""
         
+        println("[FTP] Received: $firstLine")
         return FtpResponse(code, message)
     }
     
