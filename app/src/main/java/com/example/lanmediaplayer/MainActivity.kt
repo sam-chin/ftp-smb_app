@@ -200,22 +200,32 @@ fun MainScreen(
             debugLogs = debugLogs,
             onFileClick = { file ->
                 if (file.isDirectory) {
+                    addLog("Clicking directory: ${file.name}, path: ${file.path}")
                     currentPath = file.path
                     isLoading = true
+                    addLog("Starting to browse: ${file.path}")
                     coroutineScope.launch {
-                        mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
-                            override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                files = loadedFiles
-                                isLoading = false
-                            }
-                            
-                            override fun onError(error: String) {
-                                errorMessage = error
-                                isLoading = false
-                            }
-                            
-                            override fun onPlaybackStateChanged(state: Int) {}
-                        })
+                        try {
+                            mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
+                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                    addLog("Browse completed: ${loadedFiles.size} files loaded")
+                                    files = loadedFiles
+                                    isLoading = false
+                                }
+                                
+                                override fun onError(error: String) {
+                                    addLog("Browse error: $error")
+                                    errorMessage = error
+                                    isLoading = false
+                                }
+                                
+                                override fun onPlaybackStateChanged(state: Int) {}
+                            })
+                        } catch (e: Exception) {
+                            addLog("Exception in browseFiles: ${e.message}")
+                            e.printStackTrace()
+                            isLoading = false
+                        }
                     }
                 } else {
                     mediaController.playMedia(file, object : MediaController.MediaCallback {
