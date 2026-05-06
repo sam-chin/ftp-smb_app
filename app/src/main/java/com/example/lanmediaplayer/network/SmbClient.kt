@@ -67,7 +67,8 @@ class SmbClient {
                 AuthenticationContext(username, password.toCharArray(), domain)
             } else {
                 println("[SMB] Creating auth context without domain")
-                AuthenticationContext(username, password.toCharArray(), null)
+                // Use empty string instead of null for domain
+                AuthenticationContext(username, password.toCharArray(), "")
             }
             
             println("[SMB] Authenticating...")
