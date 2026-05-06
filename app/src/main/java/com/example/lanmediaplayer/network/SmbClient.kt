@@ -210,7 +210,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     name = fileName,
                     size = fileSize,
                     isDirectory = isDirectory,
-                    path = if (remotePath.endsWith("/")) "$remotePath$fileName" else "$remotePath/$fileName"
+                    path = if (remotePath == "/") {
+                        "/$fileName"
+                    } else if (remotePath.endsWith("/")) {
+                        "$remotePath$fileName"
+                    } else {
+                        "$remotePath/$fileName"
+                    }
                 ))
             }
             

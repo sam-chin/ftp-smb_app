@@ -171,7 +171,14 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     is NetworkProtocol.FTP -> {
                         log("[Controller] Calling ftpClient.listFiles($path)")
                         ftpClient?.listFiles(path)?.map { ftpFile ->
-                            val filePath = if (path.endsWith("/")) "$path${ftpFile.name}" else "$path/${ftpFile.name}"
+                            // Build proper path: ensure no double slashes
+                            val filePath = if (path == "/") {
+                                "/${ftpFile.name}"
+                            } else if (path.endsWith("/")) {
+                                "$path${ftpFile.name}"
+                            } else {
+                                "$path/${ftpFile.name}"
+                            }
                             log("[Controller] FTP file: ${ftpFile.name}, path: $filePath")
                             MediaFile(
                                 name = ftpFile.name,
@@ -183,7 +190,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         } ?: emptyList()
                     }
                     is NetworkProtocol.SMB -> {
+                        log("[Controller] Calling smbClient.listFiles($path)")
                         smbClient?.listFiles(path)?.map { smbFile ->
+                            log("[Controller] SMB file: ${smbFile.name}, path: ${smbFile.path}")
                             MediaFile(
                                 name = smbFile.name,
                                 path = smbFile.path,
