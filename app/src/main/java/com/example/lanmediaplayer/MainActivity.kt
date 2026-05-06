@@ -164,22 +164,37 @@ fun MainScreen(
                     
                     if (success) {
                         addLog("Connection successful!")
+                        addLog("=== Protocol Switch Debug ===")
+                        addLog("Current protocol: ${protocol::class.simpleName}")
+                        addLog("Previous files count: ${files.size}")
+                        
                         currentScreen = Screen.FileBrowser
                         // Clear files before browsing to avoid showing old protocol's files
                         files = emptyList()
+                        addLog("Files cleared: ${files.size}")
                         
                         // SMB root directory should be "", FTP uses "/"
                         val rootPath = if (protocol is NetworkProtocol.SMB) "" else "/"
-                        currentPath = if (protocol is NetworkProtocol.SMB) "/" else "/"  // Display path always starts with /
+                        currentPath = "/"  // Display path always starts with /
                         
-                        addLog("Browsing root directory: '$rootPath'")
+                        addLog("Root path for browseFiles: '$rootPath' (length: ${rootPath.length})")
+                        addLog("Display currentPath: '$currentPath'")
+                        addLog("Calling browseFiles...")
+                        
                         mediaController.browseFiles(rootPath, protocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                addLog("=== BrowseFiles Callback ===")
+                                addLog("Received ${loadedFiles.size} files")
+                                if (loadedFiles.isNotEmpty()) {
+                                    addLog("First file: ${loadedFiles[0].name}, path: ${loadedFiles[0].path}")
+                                    addLog("Protocol: ${loadedFiles[0].protocol::class.simpleName}")
+                                }
                                 files = loadedFiles
-                                addLog("Loaded ${loadedFiles.size} files")
+                                addLog("Files updated: ${files.size}")
                                 if (loadedFiles.isEmpty()) {
                                     addLog("WARNING: Directory is empty!")
                                 }
+                                addLog("=== Protocol Switch Complete ===")
                             }
                             
                             override fun onError(error: String) {
