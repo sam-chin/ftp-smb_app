@@ -233,11 +233,14 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         try {
             log("[SMB-JCIFS] Downloading: $remotePath to ${localFile.absolutePath}")
             
-            val fullPath = if (remotePath.startsWith("/")) {
-                "$baseUrl${remotePath.substring(1)}"
+            // Normalize path: remove leading slash if present
+            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+                remotePath.substring(1)
             } else {
-                "$baseUrl$remotePath"
+                remotePath
             }
+            
+            val fullPath = "$baseUrl$normalizedPath"
             
             val smbFile = SmbFile(fullPath, context)
             
