@@ -51,6 +51,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
         return try {
+            // Disconnect any existing connections
+            smbClient?.disconnect()
+            smbClient = null
+            
             log("[Controller] === FTP Connection Start ===")
             log("[Controller] Received parameters:")
             log("[Controller]   Host: '$host' (length: ${host.length})")
@@ -96,6 +100,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
+            // Disconnect any existing connections
+            ftpClient?.disconnect()
+            ftpClient = null
+            
             log("[Controller] === SMB Connection Start ===")
             log("[Controller] Received parameters:")
             log("[Controller]   Host: '$host' (length: ${host.length})")

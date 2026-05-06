@@ -165,6 +165,9 @@ fun MainScreen(
                     if (success) {
                         addLog("Connection successful!")
                         currentScreen = Screen.FileBrowser
+                        // Clear files before browsing to avoid showing old protocol's files
+                        files = emptyList()
+                        currentPath = "/"
                         addLog("Browsing root directory...")
                         mediaController.browseFiles("/", protocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
