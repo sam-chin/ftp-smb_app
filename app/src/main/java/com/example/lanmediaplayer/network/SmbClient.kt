@@ -338,8 +338,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     /**
      * Get an InputStream for streaming file content without downloading to disk
      * This enables progressive playback and seeking
+     * @param remotePath The path to the remote file
+     * @param startOffset The byte offset to start reading from (for Range requests)
      */
-    suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
+    suspend fun getFileStream(remotePath: String, startOffset: Long = 0): InputStream? = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             try {
                 // Normalize path: remove leading slash for JCIFS-NG
@@ -358,7 +360,16 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     return@withContext null
                 }
                 
-                smbFile.getInputStream()
+                val inputStream = smbFile.getInputStream()
+                
+                // Skip to offset if needed
+                if (startOffset > 0) {
+                    log("[SMB-JCIFS] Skipping $startOffset bytes to reach offset")
+                    val skipped = inputStream.skip(startOffset)
+                    log("[SMB-JCIFS] Skipped $skipped bytes")
+                }
+                
+                inputStream
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error opening stream: ${e.message}")
                 null

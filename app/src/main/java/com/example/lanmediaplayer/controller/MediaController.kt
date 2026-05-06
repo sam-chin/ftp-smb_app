@@ -313,9 +313,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 }
                                 is NetworkProtocol.SMB -> {
                                     log("[Controller] Streaming via SMB...")
-                                    // SMB doesn't support offset in current implementation
-                                    // Would need to implement skip or use different approach
-                                    smbClient?.getFileStream(path)
+                                    smbClient?.getFileStream(path, startOffset)
                                 }
                             }
                         }
