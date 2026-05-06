@@ -29,7 +29,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
     
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // Separate scopes for different operations
+    private val connectionScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
     private fun log(message: String) {
         println(message)
@@ -54,9 +56,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] === Protocol Switch: Connecting to FTP ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
             
-            // Cancel any ongoing operations
-            scope.coroutineContext.cancelChildren()
-            log("[Controller] Cancelled ongoing coroutines")
+            // Cancel any ongoing browse operations
+            browseScope.coroutineContext.cancelChildren()
+            log("[Controller] Cancelled ongoing browse operations")
             
             // Disconnect any existing connections
             if (smbClient != null) {
@@ -120,9 +122,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] === Protocol Switch: Connecting to SMB ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
             
-            // Cancel any ongoing operations
-            scope.coroutineContext.cancelChildren()
-            log("[Controller] Cancelled ongoing coroutines")
+            // Cancel any ongoing browse operations
+            browseScope.coroutineContext.cancelChildren()
+            log("[Controller] Cancelled ongoing browse operations")
             
             // Disconnect any existing connections
             if (ftpClient != null) {
@@ -200,10 +202,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${protocol::class.simpleName}")
         log("[Controller] ftpClient is null: ${ftpClient == null}")
         log("[Controller] smbClient is null: ${smbClient == null}")
-        log("[Controller] Scope isActive: ${scope.isActive}")
-        log("[Controller] Scope job isCancelled: ${scope.coroutineContext[Job]?.isCancelled}")
+        log("[Controller] BrowseScope isActive: ${browseScope.isActive}")
+        log("[Controller] BrowseScope job isCancelled: ${browseScope.coroutineContext[Job]?.isCancelled}")
         
-        scope.launch {
+        browseScope.launch {
             log("[Controller] browseFiles coroutine started")
             try {
                 val files = when (protocol) {
@@ -277,7 +279,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${mediaFile.protocol::class.simpleName}")
         log("[Controller] Size: ${mediaFile.size}")
         
-        scope.launch {
+        browseScope.launch {
             try {
                 log("[Controller] HTTP Proxy port: ${httpProxy?.getPort()}")
                 
@@ -351,7 +353,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     fun release() {
-        scope.cancel()
+        connectionScope.cancel()
+        browseScope.cancel()
         exoPlayer?.release()
         exoPlayer = null
         httpProxy?.stop()
