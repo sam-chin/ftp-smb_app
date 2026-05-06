@@ -71,16 +71,20 @@ class SmbClient {
     suspend fun listFiles(remotePath: String = ""): List<SmbFileInfo> = withContext(Dispatchers.IO) {
         try {
             val normalizedPath = normalizePath(remotePath)
+            println("[SMB] Listing files in: $normalizedPath")
             val files = mutableListOf<SmbFileInfo>()
             
             diskShare?.let { share ->
                 val fileInfos = share.list(normalizedPath)
+                println("[SMB] Raw file count: ${fileInfos.size}")
+                
                 for (fileInfo in fileInfos) {
                     val fileName = fileInfo.fileName
                     if (fileName == "." || fileName == "..") continue
                     
                     // Use Java EnumSet contains method
                     val isDirectory = (fileInfo.fileAttributes as java.util.EnumSet<FileAttributes>).contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
+                    println("[SMB] File: $fileName, isDir: $isDirectory, size: ${fileInfo.endOfFile}")
                     
                     files.add(SmbFileInfo(
                         name = fileName,
@@ -89,10 +93,14 @@ class SmbClient {
                         path = if (normalizedPath.endsWith("/")) "$normalizedPath$fileName" else "$normalizedPath/$fileName"
                     ))
                 }
+            } ?: run {
+                println("[SMB] diskShare is null!")
             }
             
+            println("[SMB] Total files found: ${files.size}")
             files
         } catch (e: Exception) {
+            println("[SMB] Error listing files: ${e.message}")
             e.printStackTrace()
             emptyList()
         }

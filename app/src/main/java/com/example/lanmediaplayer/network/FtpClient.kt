@@ -63,25 +63,33 @@ class FtpClient {
     
     suspend fun listFiles(remotePath: String = "/"): List<FtpFileInfo> = withContext(Dispatchers.IO) {
         try {
+            println("[FTP] Listing files in: $remotePath")
+            
             sendCommand("TYPE I")
             readResponse()
             
             sendCommand("PASV")
             val pasvResponse = readResponse()
+            println("[FTP] PASV response: ${pasvResponse.code} ${pasvResponse.message}")
             
             if (pasvResponse.code != 227) {
+                println("[FTP] PASV failed with code: ${pasvResponse.code}")
                 return@withContext emptyList()
             }
             
             val dataPort = parsePasvPort(pasvResponse.message)
-            val dataHost = pasvResponse.message.substringBefore("(").trim()
+            // Use the same host as control connection
+            val dataHost = host
+            println("[FTP] Connecting to data socket: $dataHost:$dataPort")
             
             dataSocket = Socket(dataHost, dataPort)
             
             sendCommand("LIST $remotePath")
             val listResponse = readResponse()
+            println("[FTP] LIST response: ${listResponse.code} ${listResponse.message}")
             
             if (listResponse.code !in 100..199) {
+                println("[FTP] LIST command failed with code: ${listResponse.code}")
                 return@withContext emptyList()
             }
             
@@ -92,8 +100,10 @@ class FtpClient {
                 
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
+                    println("[FTP] Raw line: $line")
                     line?.let {
                         parseFtpLine(it)?.let { fileInfo ->
+                            println("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
                             files.add(fileInfo)
                         }
                     }
@@ -101,9 +111,11 @@ class FtpClient {
                 reader.close()
             }
             
+            println("[FTP] Total files found: ${files.size}")
             readResponse()
             files
         } catch (e: Exception) {
+            println("[FTP] Error listing files: ${e.message}")
             e.printStackTrace()
             emptyList()
         } finally {
