@@ -347,7 +347,7 @@ fun ConnectionScreen(
                 onConnect(selectedProtocol, host, portInt, username, password, share, domain)
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && host.isNotEmpty() && username.isNotEmpty()
+            enabled = !isLoading && host.isNotEmpty()
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
