@@ -97,11 +97,12 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
             savedSmbPassword = savedSmbPassword,
             savedSmbShare = savedSmbShare,
             savedSmbDomain = savedSmbDomain,
+            debugLogs = debugLogs,
             onConnect = { protocol, host, port, username, password, share, domain ->
                 selectedProtocol = protocol
                 isLoading = true
                 errorMessage = null
-                debugLogs = emptyList()
+                // Don't clear debug logs, keep them for troubleshooting
                 addLog("Connecting to ${protocol::class.simpleName}://$host:$port...")
                 
                 // Save connection info separately
@@ -264,6 +265,7 @@ fun ConnectionScreen(
     savedSmbPassword: String,
     savedSmbShare: String,
     savedSmbDomain: String,
+    debugLogs: List<String>,
     onConnect: (NetworkProtocol, String, Int, String, String, String, String) -> Unit,
     isLoading: Boolean
 ) {
@@ -403,6 +405,41 @@ fun ConnectionScreen(
                 )
             } else {
                 Text("Connect")
+            }
+        }
+        
+        // Debug logs section
+        if (debugLogs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 200.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = "Connection Logs",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(debugLogs) { log ->
+                            Text(
+                                text = log,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
