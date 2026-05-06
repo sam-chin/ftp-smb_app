@@ -67,7 +67,7 @@ dependencies {
     implementation 'androidx.media3:media3-ui:1.1.1'
     
     // JCIFS-NG for SMB with share enumeration support
-    implementation 'com.github.agaldos:jcifs-ng:2.1.6'
+    implementation 'org.codelibs:jcifs:2.1.34'
     
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1'
