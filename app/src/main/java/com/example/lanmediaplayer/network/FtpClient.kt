@@ -148,6 +148,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             dataSocket = Socket(dataHost, dataPort)
             
             sendCommand("LIST $remotePath")
+            log("[FTP] Sent: LIST $remotePath")
             val listResponse = readResponse()
             log("[FTP] LIST response: ${listResponse.code} ${listResponse.message}")
             

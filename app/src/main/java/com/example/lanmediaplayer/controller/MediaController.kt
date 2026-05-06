@@ -169,10 +169,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
             try {
                 val files = when (protocol) {
                     is NetworkProtocol.FTP -> {
+                        log("[Controller] Calling ftpClient.listFiles($path)")
                         ftpClient?.listFiles(path)?.map { ftpFile ->
+                            val filePath = if (path.endsWith("/")) "$path${ftpFile.name}" else "$path/${ftpFile.name}"
+                            log("[Controller] FTP file: ${ftpFile.name}, path: $filePath")
                             MediaFile(
                                 name = ftpFile.name,
-                                path = if (path.endsWith("/")) "$path${ftpFile.name}" else "$path/${ftpFile.name}",
+                                path = filePath,
                                 size = ftpFile.size,
                                 isDirectory = ftpFile.isDirectory,
                                 protocol = NetworkProtocol.FTP
