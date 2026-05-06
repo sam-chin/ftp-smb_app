@@ -168,7 +168,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 // Try multiple encodings for Chinese filenames
                 var lines = listOf<String>()
-                val encodings = listOf("UTF-8", "GBK", "GB2312", "ISO-8859-1")
+                // For Chinese FTP servers, try GBK first, then UTF-8
+                val encodings = listOf("GBK", "GB2312", "UTF-8", "ISO-8859-1")
                 
                 for (encoding in encodings) {
                     try {
@@ -176,11 +177,15 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                         val tempLines = text.lines().filter { it.isNotBlank() }
                         if (tempLines.isNotEmpty()) {
                             lines = tempLines
-            log("[FTP] Successfully decoded with encoding: $encoding (${lines.size} lines)")
+                            log("[FTP] Successfully decoded with encoding: $encoding (${lines.size} lines)")
+                            // Log first line to verify encoding is correct
+                            if (lines.isNotEmpty()) {
+                                log("[FTP] First line sample: ${lines[0].take(100)}")
+                            }
                             break
                         }
                     } catch (e: Exception) {
-            log("[FTP] Failed with encoding $encoding: ${e.message}")
+                        log("[FTP] Failed with encoding $encoding: ${e.message}")
                     }
                 }
                 
