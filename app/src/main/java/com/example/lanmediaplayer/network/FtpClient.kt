@@ -30,13 +30,28 @@ class FtpClient {
         this@FtpClient.port = port
         
         return@withContext try {
-            controlSocket = Socket(host, port)
+            println("[FTP] Connecting to $host:$port...")
+            controlSocket = Socket()
+            controlSocket?.soTimeout = 10000 // 10 seconds timeout
+            controlSocket?.connect(java.net.InetSocketAddress(host, port), 10000)
+            
+            println("[FTP] Socket connected, getting streams...")
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
             
+            println("[FTP] Reading server response...")
             val response = readResponse()
-            response.code in 200..299
+            println("[FTP] Server response: ${response.code} ${response.message}")
+            
+            val success = response.code in 200..299
+            if (success) {
+                println("[FTP] Connection successful")
+            } else {
+                println("[FTP] Connection failed with code: ${response.code}")
+            }
+            success
         } catch (e: Exception) {
+            println("[FTP] Connection error: ${e.message}")
             e.printStackTrace()
             disconnect()
             false
