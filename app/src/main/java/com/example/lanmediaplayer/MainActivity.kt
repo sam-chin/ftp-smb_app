@@ -167,9 +167,13 @@ fun MainScreen(
                         currentScreen = Screen.FileBrowser
                         // Clear files before browsing to avoid showing old protocol's files
                         files = emptyList()
-                        currentPath = "/"
-                        addLog("Browsing root directory...")
-                        mediaController.browseFiles("/", protocol, object : MediaController.MediaCallback {
+                        
+                        // SMB root directory should be "", FTP uses "/"
+                        val rootPath = if (protocol is NetworkProtocol.SMB) "" else "/"
+                        currentPath = if (protocol is NetworkProtocol.SMB) "/" else "/"  // Display path always starts with /
+                        
+                        addLog("Browsing root directory: '$rootPath'")
+                        mediaController.browseFiles(rootPath, protocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
                                 files = loadedFiles
                                 addLog("Loaded ${loadedFiles.size} files")
