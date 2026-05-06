@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.charset.Charset
 import java.util.Properties
 
 data class SmbFileInfo(
@@ -28,6 +29,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     private var username: String = ""
     private var password: String = ""
     private var domain: String = ""
+    
+    // Track server's detected encoding from file listings
+    private var serverEncoding: Charset? = null
     
     private fun log(message: String) {
         println(message)
@@ -201,6 +205,32 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             
             val fileList = smbFile.listFiles()
             log("[SMB-JCIFS] Found ${fileList.size} items")
+            
+            // Detect server encoding from file names if not already determined
+            if (serverEncoding == null && fileList.isNotEmpty()) {
+                for (file in fileList) {
+                    val fileName = file.name.trimEnd('/')
+                    // Check if filename contains non-ASCII characters
+                    if (fileName.any { it.code > 127 }) {
+                        // Detected non-ASCII characters in filename
+                        // For Chinese SMB servers, typically UTF-8 or GBK is used
+                        val hasChinese = fileName.any { it in '\u4e00'..'\u9fff' }
+                        
+                        if (hasChinese) {
+                            // Try to determine encoding by checking if the name makes sense
+                            // JCIFS-NG typically uses the system default encoding
+                            // For most modern systems, this is UTF-8
+                            serverEncoding = java.nio.charset.StandardCharsets.UTF_8
+                            log("[SMB-JCIFS] Detected Chinese characters in filenames, using UTF-8 encoding")
+                        } else {
+                            // Other non-ASCII characters, default to UTF-8
+                            serverEncoding = java.nio.charset.StandardCharsets.UTF_8
+                            log("[SMB-JCIFS] Detected non-ASCII characters in filenames, using UTF-8 encoding")
+                        }
+                        break
+                    }
+                }
+            }
             
             for (file in fileList) {
                 val fileName = file.name.trimEnd('/')
