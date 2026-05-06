@@ -73,11 +73,11 @@ class FtpClient {
         }
     }
     
-    suspend fun login(username: String, password: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun login(username: String, password: String): Boolean {
         this@FtpClient.username = username
         this@FtpClient.password = password
         
-        return@withContext try {
+        return try {
             println("[FTP] === Starting login ===")
             println("[FTP] Username: $username")
             println("[FTP] Password length: ${password.length}")
@@ -89,7 +89,7 @@ class FtpClient {
             
             if (userResponse.code !in 200..399) {
                 println("[FTP] === USER command failed ===")
-                return@withContext false
+                return false
             }
             
             println("[FTP] Sending PASS command...")

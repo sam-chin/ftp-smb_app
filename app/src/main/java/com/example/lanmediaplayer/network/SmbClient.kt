@@ -57,15 +57,18 @@ class SmbClient {
             properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
             properties.setProperty("jcifs.smb.client.soTimeout", "30000")
             
+            // Set authentication in properties
+            if (domain.isNotEmpty()) {
+                properties.setProperty("jcifs.smb.client.domain", domain)
+            }
+            properties.setProperty("jcifs.smb.client.username", username)
+            properties.setProperty("jcifs.smb.client.password", password)
+            
             println("[SMB-JCIFS] Creating configuration...")
             val config = PropertyConfiguration(properties)
-            val baseContext = BaseContext(config)
+            context = BaseContext(config)
             
-            // Create authentication context
-            val authDomain = if (domain.isNotEmpty()) domain else null
-            println("[SMB-JCIFS] Creating auth context with domain: '$authDomain'")
-            auth = NtlmPasswordAuthenticator(authDomain, username, password)
-            context = baseContext.withCredentials(auth)
+            println("[SMB-JCIFS] Configuration created with domain: '$domain', user: '$username'")
             
             // Build base URL
             baseUrl = if (share.isEmpty()) {
