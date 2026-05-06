@@ -61,6 +61,11 @@ fun MainScreen(mediaController: MediaController) {
     var selectedProtocol by remember { mutableStateOf<NetworkProtocol>(NetworkProtocol.FTP) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var debugLogs by remember { mutableStateOf<List<String>>(emptyList()) }
+    
+    fun addLog(message: String) {
+        debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+    }
     
     val coroutineScope = rememberCoroutineScope()
     
@@ -70,32 +75,44 @@ fun MainScreen(mediaController: MediaController) {
                 selectedProtocol = protocol
                 isLoading = true
                 errorMessage = null
+                debugLogs = emptyList()
+                addLog("Connecting to ${protocol::class.simpleName}://$host:$port...")
                 
                 coroutineScope.launch {
                     val success = when (protocol) {
                         is NetworkProtocol.FTP -> {
+                            addLog("Attempting FTP connection...")
                             mediaController.connectToFtp(host, port, username, password)
                         }
                         is NetworkProtocol.SMB -> {
+                            addLog("Attempting SMB connection to share: $share...")
                             mediaController.connectToSmb(host, share, username, password, domain)
                         }
                     }
                     
                     isLoading = false
                     if (success) {
+                        addLog("Connection successful!")
                         currentScreen = Screen.FileBrowser
+                        addLog("Browsing root directory...")
                         mediaController.browseFiles("/", protocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
                                 files = loadedFiles
+                                addLog("Loaded ${loadedFiles.size} files")
+                                if (loadedFiles.isEmpty()) {
+                                    addLog("WARNING: Directory is empty!")
+                                }
                             }
                             
                             override fun onError(error: String) {
                                 errorMessage = error
+                                addLog("Error: $error")
                             }
                             
                             override fun onPlaybackStateChanged(state: Int) {}
                         })
                     } else {
+                        addLog("Connection failed!")
                         errorMessage = "Connection failed"
                     }
                 }
@@ -106,6 +123,7 @@ fun MainScreen(mediaController: MediaController) {
         Screen.FileBrowser -> FileBrowserScreen(
             files = files,
             currentPath = currentPath,
+            debugLogs = debugLogs,
             onFileClick = { file ->
                 if (file.isDirectory) {
                     currentPath = file.path
@@ -316,6 +334,7 @@ fun ConnectionScreen(
 fun FileBrowserScreen(
     files: List<MediaFile>,
     currentPath: String,
+    debugLogs: List<String>,
     onFileClick: (MediaFile) -> Unit,
     onBackClick: () -> Unit,
     isLoading: Boolean
@@ -332,6 +351,41 @@ fun FileBrowserScreen(
             }
         )
         
+        // Debug logs section
+        if (debugLogs.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp)
+                        .heightIn(max = 200.dp)
+                ) {
+                    Text(
+                        text = "Debug Logs",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(debugLogs) { log ->
+                            Text(
+                                text = log,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
         if (isLoading) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -340,15 +394,27 @@ fun FileBrowserScreen(
                 CircularProgressIndicator()
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(8.dp)
-            ) {
-                items(files) { file ->
-                    FileListItem(
-                        file = file,
-                        onClick = { onFileClick(file) }
-                    )
+            if (files.isEmpty() && !isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("No files found", style = MaterialTheme.typography.bodyLarge)
+                        Text("Check debug logs above for details", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(8.dp)
+                ) {
+                    items(files) { file ->
+                        FileListItem(
+                            file = file,
+                            onClick = { onFileClick(file) }
+                        )
+                    }
                 }
             }
         }
