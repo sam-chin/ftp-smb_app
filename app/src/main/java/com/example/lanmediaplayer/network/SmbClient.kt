@@ -79,15 +79,8 @@ class SmbClient {
                     val fileName = fileInfo.fileName
                     if (fileName == "." || fileName == "..") continue
                     
-                    // Check directory by iterating through attributes
-                    val attrs = fileInfo.fileAttributes
-                    var isDirectory = false
-                    for (attr in attrs) {
-                        if (attr == FileAttributes.FILE_ATTRIBUTE_DIRECTORY) {
-                            isDirectory = true
-                            break
-                        }
-                    }
+                    // Use Java EnumSet contains method
+                    val isDirectory = (fileInfo.fileAttributes as java.util.EnumSet<FileAttributes>).contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
                     
                     files.add(SmbFileInfo(
                         name = fileName,
