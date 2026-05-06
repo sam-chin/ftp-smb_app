@@ -42,26 +42,53 @@ class SmbClient {
         domain: String = ""
     ): Boolean = withContext(Dispatchers.IO) {
         try {
+            println("[SMB] Starting connection to: $host")
+            println("[SMB] Share: $share, User: $username, Domain: $domain")
+            
             this@SmbClient.host = host
             this@SmbClient.share = share
             this@SmbClient.username = username
             this@SmbClient.password = password
             this@SmbClient.domain = domain
             
+            println("[SMB] Creating SMBClient...")
             smbClient = SMBClient()
+            
+            println("[SMB] Connecting to host...")
             connection = smbClient?.connect(host)
+            if (connection == null) {
+                println("[SMB] Failed to create connection")
+                return@withContext false
+            }
+            println("[SMB] Connection established")
             
             val authContext = if (domain.isNotEmpty()) {
+                println("[SMB] Creating auth context with domain: $domain")
                 AuthenticationContext(username, password.toCharArray(), domain)
             } else {
+                println("[SMB] Creating auth context without domain")
                 AuthenticationContext(username, password.toCharArray(), null)
             }
             
+            println("[SMB] Authenticating...")
             session = connection?.authenticate(authContext)
-            diskShare = session?.connectShare(share) as? DiskShare
+            if (session == null) {
+                println("[SMB] Authentication failed")
+                return@withContext false
+            }
+            println("[SMB] Authentication successful")
             
-            diskShare != null
+            println("[SMB] Connecting to share: $share")
+            diskShare = session?.connectShare(share) as? DiskShare
+            if (diskShare == null) {
+                println("[SMB] Failed to connect to share: $share")
+                return@withContext false
+            }
+            println("[SMB] Successfully connected to share")
+            
+            true
         } catch (e: Exception) {
+            println("[SMB] Connection error: ${e.message}")
             e.printStackTrace()
             disconnect()
             false
