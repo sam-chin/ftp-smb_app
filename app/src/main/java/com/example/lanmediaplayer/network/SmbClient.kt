@@ -37,8 +37,11 @@ class SmbClient {
         domain: String = ""
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            println("[SMB-JCIFS] Starting connection to: $host")
-            println("[SMB-JCIFS] Share: '$share', User: '$username', Domain: '$domain'")
+            println("[SMB-JCIFS] === Starting connection ===")
+            println("[SMB-JCIFS] Host: $host")
+            println("[SMB-JCIFS] Share: '$share'")
+            println("[SMB-JCIFS] Username: '$username'")
+            println("[SMB-JCIFS] Domain: '$domain'")
             
             this@SmbClient.host = host
             this@SmbClient.share = share
@@ -51,7 +54,10 @@ class SmbClient {
             properties.setProperty("jcifs.smb.client.minVersion", "SMB200")
             properties.setProperty("jcifs.smb.client.maxVersion", "SMB311")
             properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
+            properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
+            properties.setProperty("jcifs.smb.client.soTimeout", "30000")
             
+            println("[SMB-JCIFS] Creating configuration...")
             val config = PropertyConfiguration(properties)
             val baseContext = BaseContext(config)
             
@@ -73,30 +79,35 @@ class SmbClient {
             // If no share specified, just test basic connectivity
             if (share.isEmpty()) {
                 println("[SMB-JCIFS] No share specified, connection setup successful")
+                println("[SMB-JCIFS] === Connection established ===")
                 return@withContext true
             }
             
             // Test connection by checking if share exists
             val testUrl = "smb://$host/$share/"
+            println("[SMB-JCIFS] Testing connection to: $testUrl")
             val testFile = SmbFile(testUrl, context)
             
-            println("[SMB-JCIFS] Testing connection to share...")
+            println("[SMB-JCIFS] Checking if share exists...")
             val exists = testFile.exists()
             
             if (exists) {
-                println("[SMB-JCIFS] Connection successful")
+                println("[SMB-JCIFS] Share exists and is accessible")
+                println("[SMB-JCIFS] === Connection successful ===")
                 true
             } else {
-                println("[SMB-JCIFS] ERROR: Share does not exist or access denied")
+                println("[SMB-JCIFS] === ERROR: Share does not exist or access denied ===")
                 false
             }
         } catch (e: Exception) {
-            println("[SMB-JCIFS] Connection error: ${e.javaClass.simpleName}: ${e.message}")
+            println("[SMB-JCIFS] === Connection error ===")
+            println("[SMB-JCIFS] Error type: ${e.javaClass.simpleName}")
+            println("[SMB-JCIFS] Error message: ${e.message}")
             e.printStackTrace()
             // Print full stack trace for debugging
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[SMB-JCIFS] Stack trace: ${writer.toString()}")
+            println("[SMB-JCIFS] Full stack trace:\n${writer.toString()}")
             false
         }
     }

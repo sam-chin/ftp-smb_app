@@ -47,24 +47,33 @@ class MediaController(private val context: Context) {
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
         return try {
             ftpClient = FtpClient()
-            println("[Controller] Connecting to FTP: $host:$port")
+            println("[Controller] === FTP Connection Start ===")
+            println("[Controller] Target: $host:$port")
+            println("[Controller] User: $username")
+            
             val connected = ftpClient?.connect(host, port) ?: false
             if (!connected) {
-                println("[Controller] FTP connection failed")
-                return Pair(false, "Failed to connect to FTP server")
+                println("[Controller] FTP socket connection failed")
+                return Pair(false, "Failed to connect to FTP server (network error)")
             }
-            println("[Controller] FTP connected, logging in...")
+            
+            println("[Controller] FTP socket connected, attempting login...")
             val loggedIn = ftpClient?.login(username, password) ?: false
             if (loggedIn) {
-                println("[Controller] FTP login successful")
+                println("[Controller] === FTP Login successful ===")
                 Pair(true, "Success")
             } else {
-                println("[Controller] FTP login failed")
-                Pair(false, "Login failed")
+                println("[Controller] === FTP Login failed ===")
+                Pair(false, "Login failed (check username/password)")
             }
         } catch (e: Exception) {
-            println("[Controller] FTP error: ${e.message}")
+            println("[Controller] === FTP Error ===")
+            println("[Controller] Error type: ${e.javaClass.simpleName}")
+            println("[Controller] Error message: ${e.message}")
             e.printStackTrace()
+            val writer = java.io.PrintWriter(java.io.StringWriter())
+            e.printStackTrace(writer)
+            println("[Controller] Full stack trace:\n${writer.toString()}")
             Pair(false, "Error: ${e.message}")
         }
     }
@@ -72,15 +81,19 @@ class MediaController(private val context: Context) {
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
             smbClient = SmbClient()
-            println("[Controller] Connecting to SMB: $host, share: '$share'")
+            println("[Controller] === SMB Connection Start ===")
+            println("[Controller] Host: $host")
+            println("[Controller] Share: '$share'")
+            println("[Controller] User: '$username'")
+            println("[Controller] Domain: '$domain'")
             
             // Connect without share first if share is empty
             val connectShare = if (share.isEmpty()) "" else share
             val connected = smbClient?.connect(host, connectShare, username, password, domain) ?: false
             
             if (!connected) {
-                println("[Controller] SMB connection failed")
-                return Pair(false, "Failed to connect to SMB server")
+                println("[Controller] === SMB connection failed ===")
+                return Pair(false, "Failed to connect to SMB server (network/auth error)")
             }
             
             println("[Controller] SMB connection successful")
@@ -98,11 +111,17 @@ class MediaController(private val context: Context) {
                     Pair(true, "Connected but no shares found")
                 }
             } else {
+                println("[Controller] === SMB Connection established to share ===")
                 Pair(true, "Success")
             }
         } catch (e: Exception) {
-            println("[Controller] SMB error: ${e.message}")
+            println("[Controller] === SMB Error ===")
+            println("[Controller] Error type: ${e.javaClass.simpleName}")
+            println("[Controller] Error message: ${e.message}")
             e.printStackTrace()
+            val writer = java.io.PrintWriter(java.io.StringWriter())
+            e.printStackTrace(writer)
+            println("[Controller] Full stack trace:\n${writer.toString()}")
             Pair(false, "Error: ${e.message}")
         }
     }

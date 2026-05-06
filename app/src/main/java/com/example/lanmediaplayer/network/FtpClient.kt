@@ -31,34 +31,43 @@ class FtpClient {
         this@FtpClient.port = port
         
         return@withContext try {
-            println("[FTP] Connecting to $host:$port...")
-            controlSocket = Socket()
-            controlSocket?.soTimeout = 10000 // 10 seconds timeout
-            controlSocket?.connect(java.net.InetSocketAddress(host, port), 10000)
+            println("[FTP] === Starting connection ===")
+            println("[FTP] Target: $host:$port")
             
-            println("[FTP] Socket connected, getting streams...")
+            controlSocket = Socket()
+            controlSocket?.soTimeout = 30000 // 30 seconds timeout
+            controlSocket?.keepAlive = true
+            
+            println("[FTP] Attempting socket connection...")
+            controlSocket?.connect(java.net.InetSocketAddress(host, port), 30000)
+            
+            println("[FTP] Socket connected successfully")
+            println("[FTP] Local address: ${controlSocket?.localAddress}")
+            println("[FTP] Remote address: ${controlSocket?.remoteSocketAddress}")
+            
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
             controlReader = BufferedReader(InputStreamReader(controlInputStream))
             
-            println("[FTP] Reading server response...")
+            println("[FTP] Streams initialized, waiting for server greeting...")
             val response = readResponse()
-            println("[FTP] Server response: ${response.code} ${response.message}")
+            println("[FTP] Server greeting: ${response.code} ${response.message}")
             
             val success = response.code in 200..299
             if (success) {
-                println("[FTP] Connection successful")
+                println("[FTP] === Connection established ===")
             } else {
-                println("[FTP] Connection failed with code: ${response.code}")
+                println("[FTP] === Connection failed with code: ${response.code} ===")
             }
             success
         } catch (e: Exception) {
-            println("[FTP] Connection error: ${e.javaClass.simpleName}: ${e.message}")
+            println("[FTP] === Connection error ===")
+            println("[FTP] Error type: ${e.javaClass.simpleName}")
+            println("[FTP] Error message: ${e.message}")
             e.printStackTrace()
-            // Print full stack trace for debugging
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[FTP] Stack trace: ${writer.toString()}")
+            println("[FTP] Full stack trace:\n${writer.toString()}")
             disconnect()
             false
         }
@@ -69,29 +78,40 @@ class FtpClient {
         this@FtpClient.password = password
         
         return@withContext try {
-            println("[FTP] Logging in as $username...")
+            println("[FTP] === Starting login ===")
+            println("[FTP] Username: $username")
+            println("[FTP] Password length: ${password.length}")
+            
+            println("[FTP] Sending USER command...")
             sendCommand("USER $username")
             val userResponse = readResponse()
             println("[FTP] USER response: ${userResponse.code} ${userResponse.message}")
+            
             if (userResponse.code !in 200..399) {
-                println("[FTP] USER command failed")
+                println("[FTP] === USER command failed ===")
                 return@withContext false
             }
             
+            println("[FTP] Sending PASS command...")
             sendCommand("PASS $password")
             val passResponse = readResponse()
             println("[FTP] PASS response: ${passResponse.code} ${passResponse.message}")
             
             val success = passResponse.code in 200..299
             if (success) {
-                println("[FTP] Login successful")
+                println("[FTP] === Login successful ===")
             } else {
-                println("[FTP] Login failed with code: ${passResponse.code}")
+                println("[FTP] === Login failed with code: ${passResponse.code} ===")
             }
             success
         } catch (e: Exception) {
-            println("[FTP] Login error: ${e.message}")
+            println("[FTP] === Login error ===")
+            println("[FTP] Error type: ${e.javaClass.simpleName}")
+            println("[FTP] Error message: ${e.message}")
             e.printStackTrace()
+            val writer = java.io.PrintWriter(java.io.StringWriter())
+            e.printStackTrace(writer)
+            println("[FTP] Full stack trace:\n${writer.toString()}")
             false
         }
     }
