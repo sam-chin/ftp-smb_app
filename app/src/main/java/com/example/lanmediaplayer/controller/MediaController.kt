@@ -228,20 +228,34 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     fun playMedia(mediaFile: MediaFile, callback: MediaCallback) {
+        log("[Controller] === PlayMedia START ===")
+        log("[Controller] File: ${mediaFile.name}")
+        log("[Controller] Path: ${mediaFile.path}")
+        log("[Controller] Protocol: ${mediaFile.protocol::class.simpleName}")
+        log("[Controller] Size: ${mediaFile.size}")
+        
         scope.launch {
             try {
+                log("[Controller] HTTP Proxy port: ${httpProxy?.getPort()}")
+                
                 if (httpProxy?.getPort() == 0) {
+                    log("[Controller] Starting HTTP proxy...")
                     val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
                         override suspend fun getFileStream(path: String): InputStream? {
+                            log("[Controller] getFileStream called for: $path")
                             return when (mediaFile.protocol) {
                                 is NetworkProtocol.FTP -> {
+                                    log("[Controller] Downloading via FTP...")
                                     val tempFile = File.createTempFile("media_", ".tmp", context.cacheDir)
                                     val success = ftpClient?.downloadFile(path, tempFile) ?: false
+                                    log("[Controller] FTP download success: $success, file size: ${tempFile.length()}")
                                     if (success) tempFile.inputStream() else null
                                 }
                                 is NetworkProtocol.SMB -> {
+                                    log("[Controller] Downloading via SMB...")
                                     val tempFile = File.createTempFile("media_", ".tmp", context.cacheDir)
                                     val success = smbClient?.downloadFile(path, tempFile) ?: false
+                                    log("[Controller] SMB download success: $success, file size: ${tempFile.length()}")
                                     if (success) tempFile.inputStream() else null
                                 }
                             }
@@ -252,7 +266,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         }
                     }) ?: -1
                     
+                    log("[Controller] HTTP Proxy started on port: $port")
+                    
                     if (port <= 0) {
+                        log("[Controller] ERROR: Failed to start proxy server")
                         withContext(Dispatchers.Main) {
                             callback.onError("Failed to start proxy server")
                         }
@@ -260,14 +277,20 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                 }
                 
-                val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: return@launch
+                val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: ""
+                log("[Controller] Proxy URL: $proxyUrl")
+                
                 val mediaItem = MediaItem.fromUri(proxyUrl)
+                log("[Controller] Setting media item...")
                 
                 withContext(Dispatchers.Main) {
                     exoPlayer?.setMediaItem(mediaItem)
                     exoPlayer?.prepare()
                     exoPlayer?.play()
+                    log("[Controller] Player started")
                 }
+                
+                log("[Controller] === PlayMedia END ===")
                 
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
