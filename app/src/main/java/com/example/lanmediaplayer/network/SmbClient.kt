@@ -122,12 +122,15 @@ class SmbClient {
                         continue
                     }
                     
-                    // Check directory by iterating through attributes
+                    // Check directory by iterating through attributes using iterator
                     val attrs = fileInfo.fileAttributes
                     var isDirectory = false
-                    attrs.forEach { attr ->
+                    val iterator = attrs.iterator()
+                    while (iterator.hasNext()) {
+                        val attr = iterator.next()
                         if (attr == FileAttributes.FILE_ATTRIBUTE_DIRECTORY) {
                             isDirectory = true
+                            break
                         }
                     }
                     println("[SMB] File: $fileName, isDir: $isDirectory, size: ${fileInfo.endOfFile}")
