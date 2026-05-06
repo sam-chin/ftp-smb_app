@@ -133,7 +133,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                         addLog("Browsing root directory...")
                         mediaController.browseFiles("/", protocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                this@MainScreen.files = loadedFiles
+                                files = loadedFiles
                                 addLog("Loaded ${loadedFiles.size} files")
                                 if (loadedFiles.isEmpty()) {
                                     addLog("WARNING: Directory is empty!")
@@ -167,7 +167,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                     coroutineScope.launch {
                         mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                this@MainScreen.files = loadedFiles
+                                files = loadedFiles
                                 isLoading = false
                             }
                             
@@ -200,7 +200,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                     coroutineScope.launch {
                         mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                this@MainScreen.files = loadedFiles
+                                files = loadedFiles
                                 isLoading = false
                             }
                             
@@ -431,7 +431,7 @@ fun FileBrowserScreen(
                     Icon(
                         imageVector = Icons.Default.ArrowBack,
                         contentDescription = "Disconnect",
-                        modifier = androidx.compose.ui.Modifier.rotate(180f)
+                        modifier = Modifier.rotate(180f)
                     )
                 }
             }
