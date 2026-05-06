@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.lanmediaplayer
 
 import android.os.Bundle
@@ -23,10 +25,6 @@ import com.example.lanmediaplayer.controller.MediaFile
 import com.example.lanmediaplayer.controller.NetworkProtocol
 import com.example.lanmediaplayer.ui.theme.LanMediaPlayerTheme
 import kotlinx.coroutines.launch
-
-@file:OptIn(ExperimentalMaterial3Api::class)
-
-@OptIn(ExperimentalMaterial3Api::class)
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
