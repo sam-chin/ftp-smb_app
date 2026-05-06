@@ -62,15 +62,29 @@ class FtpClient {
         this@FtpClient.username = username
         this@FtpClient.password = password
         
-        try {
+        return@withContext try {
+            println("[FTP] Logging in as $username...")
             sendCommand("USER $username")
             val userResponse = readResponse()
-            if (userResponse.code !in 200..399) return@withContext false
+            println("[FTP] USER response: ${userResponse.code} ${userResponse.message}")
+            if (userResponse.code !in 200..399) {
+                println("[FTP] USER command failed")
+                return@withContext false
+            }
             
             sendCommand("PASS $password")
             val passResponse = readResponse()
-            passResponse.code in 200..299
+            println("[FTP] PASS response: ${passResponse.code} ${passResponse.message}")
+            
+            val success = passResponse.code in 200..299
+            if (success) {
+                println("[FTP] Login successful")
+            } else {
+                println("[FTP] Login failed with code: ${passResponse.code}")
+            }
+            success
         } catch (e: Exception) {
+            println("[FTP] Login error: ${e.message}")
             e.printStackTrace()
             false
         }

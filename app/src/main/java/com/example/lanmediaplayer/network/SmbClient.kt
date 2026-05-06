@@ -122,8 +122,14 @@ class SmbClient {
                         continue
                     }
                     
-                    // Use Java EnumSet contains method
-                    val isDirectory = (fileInfo.fileAttributes as java.util.EnumSet<FileAttributes>).contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
+                    // Check directory by iterating through attributes
+                    val attrs = fileInfo.fileAttributes
+                    var isDirectory = false
+                    attrs.forEach { attr ->
+                        if (attr == FileAttributes.FILE_ATTRIBUTE_DIRECTORY) {
+                            isDirectory = true
+                        }
+                    }
                     println("[SMB] File: $fileName, isDir: $isDirectory, size: ${fileInfo.endOfFile}")
                     
                     files.add(SmbFileInfo(
