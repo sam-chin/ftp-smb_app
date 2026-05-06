@@ -1,8 +1,9 @@
 package com.example.lanmediaplayer.network
 
+import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
-import jcifs.smb.NtlmPasswordAuthentication
+import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,7 +19,8 @@ data class SmbFileInfo(
 )
 
 class SmbClient {
-    private var auth: NtlmPasswordAuthentication? = null
+    private var auth: NtlmPasswordAuthenticator? = null
+    private var context: CIFSContext? = null
     private var baseUrl: String = ""
     
     private var host: String = ""
@@ -54,9 +56,10 @@ class SmbClient {
             val baseContext = BaseContext(config)
             
             // Create authentication context
-            val authDomain = if (domain.isNotEmpty()) domain else ""
+            val authDomain = if (domain.isNotEmpty()) domain else null
             println("[SMB-JCIFS] Creating auth context with domain: '$authDomain'")
-            auth = NtlmPasswordAuthentication(baseContext, authDomain, username, password.toCharArray())
+            auth = NtlmPasswordAuthenticator(authDomain, username, password)
+            context = baseContext.withCredentials(auth)
             
             // Build base URL
             baseUrl = if (share.isEmpty()) {
@@ -69,7 +72,7 @@ class SmbClient {
             
             // Test connection by listing root
             val testUrl = if (share.isEmpty()) "smb://$host/" else "smb://$host/$share/"
-            val testFile = SmbFile(testUrl, auth)
+            val testFile = SmbFile(testUrl, context)
             
             println("[SMB-JCIFS] Testing connection...")
             val exists = testFile.exists()
@@ -101,7 +104,7 @@ class SmbClient {
             
             // Connect to server root to enumerate shares
             val serverUrl = "smb://$host/"
-            val serverFile = SmbFile(serverUrl, auth)
+            val serverFile = SmbFile(serverUrl, context)
             
             try {
                 val files = serverFile.listFiles()
@@ -139,7 +142,7 @@ class SmbClient {
             
             println("[SMB-JCIFS] Full path: $fullPath")
             
-            val smbFile = SmbFile(fullPath, auth)
+            val smbFile = SmbFile(fullPath, context)
             
             if (!smbFile.exists()) {
                 println("[SMB-JCIFS] ERROR: Path does not exist: $fullPath")
@@ -190,7 +193,7 @@ class SmbClient {
                 "$baseUrl$remotePath"
             }
             
-            val smbFile = SmbFile(fullPath, auth)
+            val smbFile = SmbFile(fullPath, context)
             
             if (!smbFile.exists()) {
                 println("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
@@ -220,6 +223,7 @@ class SmbClient {
     fun disconnect() {
         println("[SMB-JCIFS] Disconnecting")
         auth = null
+        context = null
         baseUrl = ""
     }
     
