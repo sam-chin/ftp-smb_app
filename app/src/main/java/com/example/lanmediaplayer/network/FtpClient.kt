@@ -265,8 +265,11 @@ class FtpClient {
     }
     
     private fun sendCommand(command: String) {
-        controlOutputStream?.write("${command}\r\n".toByteArray())
+        // FTP protocol requires ASCII encoding for commands
+        val bytes = "${command}\r\n".toByteArray(Charsets.US_ASCII)
+        controlOutputStream?.write(bytes)
         controlOutputStream?.flush()
+        println("[FTP] Sent: $command")
     }
     
     private fun readResponse(): FtpResponse {

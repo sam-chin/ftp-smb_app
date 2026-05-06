@@ -60,9 +60,12 @@ class SmbClient {
             // Set authentication in properties
             if (domain.isNotEmpty()) {
                 properties.setProperty("jcifs.smb.client.domain", domain)
+                println("[SMB-JCIFS] Domain set: '$domain'")
             }
             properties.setProperty("jcifs.smb.client.username", username)
             properties.setProperty("jcifs.smb.client.password", password)
+            println("[SMB-JCIFS] Username set: '$username' (length: ${username.length})")
+            println("[SMB-JCIFS] Password length: ${password.length}")
             
             println("[SMB-JCIFS] Creating configuration...")
             val config = PropertyConfiguration(properties)
