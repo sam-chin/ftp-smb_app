@@ -52,7 +52,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
-            controlReader = BufferedReader(InputStreamReader(controlInputStream))
+            // Use UTF-8 encoding for reading server responses to support Chinese filenames
+            controlReader = BufferedReader(InputStreamReader(controlInputStream, Charsets.UTF_8))
             
             log("[FTP] Streams initialized, waiting for server greeting...")
             val response = readResponse()
