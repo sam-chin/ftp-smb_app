@@ -400,6 +400,30 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 val smbFile = SmbFile(fullPath, context)
                 
+                // Debug: If file doesn't exist, list parent directory to see actual files
+                if (!smbFile.exists()) {
+                    val parentPath = normalizedPath.substringBeforeLast('/', "")
+                    val parentFullPath = if (parentPath.isEmpty()) baseUrl else "$baseUrl$parentPath/"
+                    log("[SMB-JCIFS] File not found, listing parent directory: $parentFullPath")
+                    try {
+                        val parentFile = SmbFile(parentFullPath, context)
+                        if (parentFile.exists() && parentFile.isDirectory) {
+                            val siblings = parentFile.listFiles()
+                            log("[SMB-JCIFS] Parent directory contains ${siblings.size} items:")
+                            for (sibling in siblings) {
+                                val siblingName = sibling.name.trimEnd('/')
+                                if (siblingName != "." && siblingName != "..") {
+                                    log("[SMB-JCIFS]   - $siblingName (${if (sibling.isDirectory) "DIR" else "FILE"})")
+                                }
+                            }
+                        } else {
+                            log("[SMB-JCIFS] Parent directory does not exist or is not a directory")
+                        }
+                    } catch (e: Exception) {
+                        log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
+                    }
+                }
+                
                 if (smbFile.exists() && !smbFile.isDirectory) {
                     val size = smbFile.length()
                     log("[SMB-JCIFS] File exists, size: $size")
