@@ -122,16 +122,9 @@ class SmbClient {
                         continue
                     }
                     
-                    // Check directory by iterating through attributes using iterator
-                    val attrs = fileInfo.fileAttributes
-                    var isDirectory = false
-                    val iterator = attrs.iterator()
-                    while (iterator.hasNext()) {
-                        val attr = iterator.next()
-                        if (attr == FileAttributes.FILE_ATTRIBUTE_DIRECTORY) {
-                            isDirectory = true
-                            break
-                        }
+                    // Check if directory using EnumSet contains
+                    val isDirectory = java.util.EnumSet.of(FileAttributes.FILE_ATTRIBUTE_DIRECTORY).any { 
+                        fileInfo.fileAttributes.contains(it) 
                     }
                     println("[SMB] File: $fileName, isDir: $isDirectory, size: ${fileInfo.endOfFile}")
                     
