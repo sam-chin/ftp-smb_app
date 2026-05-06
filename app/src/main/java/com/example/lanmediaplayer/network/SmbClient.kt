@@ -7,6 +7,8 @@ import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -34,6 +36,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     
     // Track server's detected encoding from file listings
     private var serverEncoding: Charset? = null
+    
+    // Mutex to synchronize SMB operations
+    private val operationMutex = Mutex()
     
     private fun log(message: String) {
         // Use Android Log with UTF-8 support
@@ -296,38 +301,40 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
      * This enables progressive playback and seeking
      */
     suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
-        try {
-            log("[SMB-JCIFS] Opening stream for: $remotePath")
-            
-            // Normalize path: remove leading slash for JCIFS-NG
-            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
-                remotePath.substring(1)
-            } else if (remotePath == "/") {
-                ""
-            } else {
-                remotePath
+        operationMutex.withLock {
+            try {
+                log("[SMB-JCIFS] Opening stream for: $remotePath")
+                
+                // Normalize path: remove leading slash for JCIFS-NG
+                val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+                    remotePath.substring(1)
+                } else if (remotePath == "/") {
+                    ""
+                } else {
+                    remotePath
+                }
+                
+                val fullPath = "$baseUrl$normalizedPath"
+                
+                val smbFile = SmbFile(fullPath, context)
+                
+                if (!smbFile.exists()) {
+                    log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
+                    return@withContext null
+                }
+                
+                if (smbFile.isDirectory) {
+                    log("[SMB-JCIFS] ERROR: Path is a directory: $fullPath")
+                    return@withContext null
+                }
+                
+                log("[SMB-JCIFS] Stream opened successfully")
+                smbFile.getInputStream()
+            } catch (e: Exception) {
+                log("[SMB-JCIFS] Error opening stream: ${e.message}")
+                e.printStackTrace()
+                null
             }
-            
-            val fullPath = "$baseUrl$normalizedPath"
-            
-            val smbFile = SmbFile(fullPath, context)
-            
-            if (!smbFile.exists()) {
-                log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
-                return@withContext null
-            }
-            
-            if (smbFile.isDirectory) {
-                log("[SMB-JCIFS] ERROR: Path is a directory: $fullPath")
-                return@withContext null
-            }
-            
-            log("[SMB-JCIFS] Stream opened successfully")
-            smbFile.getInputStream()
-        } catch (e: Exception) {
-            log("[SMB-JCIFS] Error opening stream: ${e.message}")
-            e.printStackTrace()
-            null
         }
     }
     
@@ -335,27 +342,29 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
      * Get file size
      */
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
-        try {
-            // Normalize path
-            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
-                remotePath.substring(1)
-            } else if (remotePath == "/") {
-                ""
-            } else {
-                remotePath
-            }
-            
-            val fullPath = "$baseUrl$normalizedPath"
-            val smbFile = SmbFile(fullPath, context)
-            
-            if (smbFile.exists() && !smbFile.isDirectory) {
-                smbFile.length()
-            } else {
+        operationMutex.withLock {
+            try {
+                // Normalize path
+                val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+                    remotePath.substring(1)
+                } else if (remotePath == "/") {
+                    ""
+                } else {
+                    remotePath
+                }
+                
+                val fullPath = "$baseUrl$normalizedPath"
+                val smbFile = SmbFile(fullPath, context)
+                
+                if (smbFile.exists() && !smbFile.isDirectory) {
+                    smbFile.length()
+                } else {
+                    0L
+                }
+            } catch (e: Exception) {
+                log("[SMB-JCIFS] Error getting file size: ${e.message}")
                 0L
             }
-        } catch (e: Exception) {
-            log("[SMB-JCIFS] Error getting file size: ${e.message}")
-            0L
         }
     }
     

@@ -2,6 +2,8 @@ package com.example.lanmediaplayer.network
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.*
 import java.net.Socket
@@ -31,6 +33,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     
     // Track server's detected encoding from responses
     private var serverEncoding: Charset? = null
+    
+    // Mutex to synchronize FTP control connection commands
+    private val commandMutex = Mutex()
     
     private fun log(message: String) {
         // Use Android Log with UTF-8 support
@@ -254,44 +259,46 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
      * This enables progressive playback and seeking
      */
     suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
-        try {
-            log("[FTP] Opening stream for: $remotePath")
-            
-            sendCommand("TYPE I")
-            readResponse()
-            
-            sendCommand("PASV")
-            val pasvResponse = readResponse()
-            
-            if (pasvResponse.code != 227) {
-                log("[FTP] PASV failed: ${pasvResponse.code}")
-                return@withContext null
-            }
-            
-            val dataPort = parsePasvPort(pasvResponse.message)
-            // Use the control connection host instead of parsing from PASV response
-            // The PASV response may contain encoding issues in the host part
-            val dataHost = this@FtpClient.host
-            
-            log("[FTP] Connecting to data socket: $dataHost:$dataPort")
-            dataSocket = Socket(dataHost, dataPort)
-            
-            sendCommand("RETR $remotePath")
-            val retrResponse = readResponse()
-            
-            if (retrResponse.code !in 100..199) {
-                log("[FTP] RETR failed: ${retrResponse.code} ${retrResponse.message}")
+        commandMutex.withLock {
+            try {
+                log("[FTP] Opening stream for: $remotePath")
+                
+                sendCommand("TYPE I")
+                readResponse()
+                
+                sendCommand("PASV")
+                val pasvResponse = readResponse()
+                
+                if (pasvResponse.code != 227) {
+                    log("[FTP] PASV failed: ${pasvResponse.code}")
+                    return@withContext null
+                }
+                
+                val dataPort = parsePasvPort(pasvResponse.message)
+                // Use the control connection host instead of parsing from PASV response
+                // The PASV response may contain encoding issues in the host part
+                val dataHost = this@FtpClient.host
+                
+                log("[FTP] Connecting to data socket: $dataHost:$dataPort")
+                dataSocket = Socket(dataHost, dataPort)
+                
+                sendCommand("RETR $remotePath")
+                val retrResponse = readResponse()
+                
+                if (retrResponse.code !in 100..199) {
+                    log("[FTP] RETR failed: ${retrResponse.code} ${retrResponse.message}")
+                    closeDataConnection()
+                    return@withContext null
+                }
+                
+                log("[FTP] Stream opened successfully")
+                dataSocket?.getInputStream()
+            } catch (e: Exception) {
+                log("[FTP] Error opening stream: ${e.message}")
+                e.printStackTrace()
                 closeDataConnection()
-                return@withContext null
+                null
             }
-            
-            log("[FTP] Stream opened successfully")
-            dataSocket?.getInputStream()
-        } catch (e: Exception) {
-            log("[FTP] Error opening stream: ${e.message}")
-            e.printStackTrace()
-            closeDataConnection()
-            null
         }
     }
     
@@ -299,18 +306,20 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
      * Get file size using SIZE command
      */
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
-        try {
-            sendCommand("SIZE $remotePath")
-            val response = readResponse()
-            
-            if (response.code == 213) {
-                response.message.trim().toLongOrNull() ?: 0L
-            } else {
+        commandMutex.withLock {
+            try {
+                sendCommand("SIZE $remotePath")
+                val response = readResponse()
+                
+                if (response.code == 213) {
+                    response.message.trim().toLongOrNull() ?: 0L
+                } else {
+                    0L
+                }
+            } catch (e: Exception) {
+                log("[FTP] Error getting file size: ${e.message}")
                 0L
             }
-        } catch (e: Exception) {
-            log("[FTP] Error getting file size: ${e.message}")
-            0L
         }
     }
     
