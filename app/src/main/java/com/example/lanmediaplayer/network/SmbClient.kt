@@ -56,8 +56,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             
             // Configure JCIFS to use SMB2/SMB3 only (disable SMB1)
             val properties = Properties()
-            properties.setProperty("jcifs.smb.client.minVersion", "SMB200")
-            properties.setProperty("jcifs.smb.client.maxVersion", "SMB311")
+            properties.setProperty("jcifs.smb.client.minVersion", "SMB2")
+            properties.setProperty("jcifs.smb.client.maxVersion", "SMB3")
             properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
             properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
             properties.setProperty("jcifs.smb.client.soTimeout", "30000")

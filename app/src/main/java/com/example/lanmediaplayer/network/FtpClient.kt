@@ -78,11 +78,11 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         }
     }
     
-    suspend fun login(username: String, password: String): Boolean {
+    suspend fun login(username: String, password: String): Boolean = withContext(Dispatchers.IO) {
         this@FtpClient.username = username
         this@FtpClient.password = password
         
-        return try {
+        return@withContext try {
             log("[FTP] === Starting login ===")
             log("[FTP] Username: $username")
             log("[FTP] Password length: ${password.length}")
@@ -93,8 +93,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP] USER response: ${userResponse.code} ${userResponse.message}")
             
             if (userResponse.code !in 200..399) {
-            log("[FTP] === USER command failed ===")
-                return false
+                log("[FTP] === USER command failed ===")
+                return@withContext false
             }
             
             log("[FTP] Sending PASS command...")
