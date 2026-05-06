@@ -67,7 +67,23 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             
             val success = response.code in 200..299
             if (success) {
-            log("[FTP] === Connection established ===")
+                log("[FTP] === Connection established ===")
+                
+                // Try to enable UTF-8 support on the server
+                try {
+                    sendCommand("OPTS UTF8 ON")
+                    val utf8Response = readResponse()
+                    if (utf8Response.code == 200 || utf8Response.code == 202) {
+                        log("[FTP] Server supports UTF-8 encoding")
+                        serverEncoding = StandardCharsets.UTF_8
+                    } else {
+                        log("[FTP] Server does not support UTF-8, will use GBK for Chinese")
+                        serverEncoding = Charset.forName("GBK")
+                    }
+                } catch (e: Exception) {
+                    log("[FTP] Failed to query UTF-8 support, defaulting to GBK: ${e.message}")
+                    serverEncoding = Charset.forName("GBK")
+                }
             } else {
             log("[FTP] === Connection failed with code: ${response.code} ===")
             }
@@ -298,25 +314,6 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         
         val code = firstLine.substring(0, 3).toInt()
         val message = if (firstLine.length > 4) firstLine.substring(4) else ""
-        
-        // Learn server encoding from response content
-        if (serverEncoding == null && message.any { it.code > 127 }) {
-            // Server sent non-ASCII characters in response
-            // This gives us a clue about the server's preferred encoding
-            
-            // Check for Chinese characters
-            val hasChinese = message.any { it in '\u4e00'..'\u9fff' }
-            
-            if (hasChinese) {
-                // For Chinese FTP servers, UTF-8 is more universal
-                serverEncoding = StandardCharsets.UTF_8
-                log("[FTP] Detected Chinese characters in server response, using UTF-8 encoding")
-            } else {
-                // Other non-ASCII characters, default to UTF-8
-                serverEncoding = StandardCharsets.UTF_8
-                log("[FTP] Detected non-ASCII characters in server response, using UTF-8 encoding")
-            }
-        }
         
         log("[FTP] Received: $firstLine")
         return FtpResponse(code, message)
