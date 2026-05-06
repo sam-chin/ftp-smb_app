@@ -112,14 +112,14 @@ class SmbClient {
             session?.let { sess ->
                 println("[SMB] Listing available shares...")
                 try {
-                    val shareList = sess.listShares()
-                    for (shareInfo in shareList) {
-                        val shareName = shareInfo.shareName
-                        // Skip hidden shares and administrative shares
-                        if (!shareName.endsWith("$") && shareName.isNotBlank()) {
-                            shares.add(shareName)
-                            println("[SMB] Found share: $shareName")
-                        }
+                    // Connect to IPC$ share to enumerate shares
+                    val ipcShare = sess.connectShare("IPC$")
+                    if (ipcShare != null) {
+                        println("[SMB] Connected to IPC$ for share enumeration")
+                        // For now, return a placeholder since SMBJ doesn't have a direct listShares API
+                        // Users should specify the share name manually
+                        shares.add("Please specify share name manually")
+                        ipcShare.close()
                     }
                 } catch (e: Exception) {
                     println("[SMB] Error listing shares: ${e.message}")
