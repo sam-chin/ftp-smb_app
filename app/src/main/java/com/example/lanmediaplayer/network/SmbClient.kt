@@ -79,7 +79,8 @@ class SmbClient {
             println("[SMB] Authentication successful")
             
             println("[SMB] Connecting to share: $share")
-            diskShare = session?.connectShare(share) as? DiskShare
+            val connectedShare = session?.connectShare(share)
+            diskShare = if (connectedShare is DiskShare) connectedShare else null
             if (diskShare == null) {
                 println("[SMB] Failed to connect to share: $share")
                 return@withContext false

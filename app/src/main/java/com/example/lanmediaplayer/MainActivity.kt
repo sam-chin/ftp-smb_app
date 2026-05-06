@@ -119,7 +119,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                         addLog("Browsing root directory...")
                         mediaController.browseFiles("/", protocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                files = loadedFiles
+                                this@MainScreen.files = loadedFiles
                                 addLog("Loaded ${loadedFiles.size} files")
                                 if (loadedFiles.isEmpty()) {
                                     addLog("WARNING: Directory is empty!")
@@ -153,7 +153,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                     coroutineScope.launch {
                         mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                files = loadedFiles
+                                this@MainScreen.files = loadedFiles
                                 isLoading = false
                             }
                             
@@ -186,7 +186,7 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                     coroutineScope.launch {
                         mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                files = loadedFiles
+                                this@MainScreen.files = loadedFiles
                                 isLoading = false
                             }
                             
