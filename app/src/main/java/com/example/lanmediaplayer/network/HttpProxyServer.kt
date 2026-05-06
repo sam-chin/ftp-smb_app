@@ -185,8 +185,14 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             
             log("[HTTP Proxy] Sent $totalBytesRead bytes")
         } catch (e: Exception) {
-            log("[HTTP Proxy] Error in handleFullRequest: ${e.message}")
-            e.printStackTrace()
+            // Ignore connection reset and broken pipe errors - these are normal when client disconnects
+            if (e.message?.contains("Connection reset", ignoreCase = true) == true ||
+                e.message?.contains("Broken pipe", ignoreCase = true) == true) {
+                log("[HTTP Proxy] Client disconnected (normal behavior)")
+            } else {
+                log("[HTTP Proxy] Error in handleFullRequest: ${e.message}")
+                e.printStackTrace()
+            }
         } finally {
             // IMPORTANT: Close the file stream to release FTP/SMB resources
             try {
@@ -234,9 +240,23 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                 return
             }
             
-            // Skip to start position
-            val skipped = fileStream.skip(start)
-            log("[HTTP Proxy] Skipped $skipped bytes to reach start position")
+            // Skip to start position using a more reliable method
+            var remainingToSkip = start
+            val skipBuffer = ByteArray(64 * 1024) // 64KB buffer for skipping
+            while (remainingToSkip > 0) {
+                val skipped = fileStream.skip(remainingToSkip)
+                if (skipped <= 0) {
+                    // If skip returns 0 or negative, try reading and discarding
+                    val bytesToRead = minOf(remainingToSkip, skipBuffer.size.toLong()).toInt()
+                    val bytesRead = fileStream.read(skipBuffer, 0, bytesToRead)
+                    if (bytesRead <= 0) break // EOF or error
+                    remainingToSkip -= bytesRead
+                } else {
+                    remainingToSkip -= skipped
+                }
+            }
+            val actualSkipped = start - remainingToSkip
+            log("[HTTP Proxy] Skipped $actualSkipped bytes to reach start position")
             
             val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
                     "Content-Type: $contentType\r\n" +
@@ -266,8 +286,14 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             
             log("[HTTP Proxy] Range request completed, sent $totalSent bytes")
         } catch (e: Exception) {
-            log("[HTTP Proxy] Error in handleRangeRequest: ${e.message}")
-            e.printStackTrace()
+            // Ignore connection reset and broken pipe errors - these are normal when client disconnects
+            if (e.message?.contains("Connection reset", ignoreCase = true) == true ||
+                e.message?.contains("Broken pipe", ignoreCase = true) == true) {
+                log("[HTTP Proxy] Client disconnected during range request (normal behavior)")
+            } else {
+                log("[HTTP Proxy] Error in handleRangeRequest: ${e.message}")
+                e.printStackTrace()
+            }
         } finally {
             // IMPORTANT: Close the file stream to release FTP/SMB resources
             try {

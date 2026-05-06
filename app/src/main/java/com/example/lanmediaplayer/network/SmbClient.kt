@@ -49,86 +49,129 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     
     suspend fun connect(
         host: String,
-        share: String,
+        share: String = "",  // Empty means auto-detect
         username: String,
         password: String,
-        domain: String = ""
+        domain: String = ""  // Empty means try common domains
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             log("[SMB-JCIFS] === Starting connection ===")
             log("[SMB-JCIFS] Host: $host")
-            log("[SMB-JCIFS] Share: '$share'")
+            log("[SMB-JCIFS] Share: '$share' (empty means auto-detect)")
             log("[SMB-JCIFS] Username: '$username'")
-            log("[SMB-JCIFS] Domain: '$domain'")
+            log("[SMB-JCIFS] Domain: '$domain' (empty means auto-detect)")
             
             this@SmbClient.host = host
-            this@SmbClient.share = share
             this@SmbClient.username = username
             this@SmbClient.password = password
-            this@SmbClient.domain = domain
             
-            // Configure JCIFS to use SMB2/SMB3 only (disable SMB1)
-            val properties = Properties()
-            properties.setProperty("jcifs.smb.client.minVersion", "SMB202")
-            properties.setProperty("jcifs.smb.client.maxVersion", "SMB311")
-            properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
-            properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
-            properties.setProperty("jcifs.smb.client.soTimeout", "30000")
-            
-            // Set authentication in properties
-            if (domain.isNotEmpty()) {
-                properties.setProperty("jcifs.smb.client.domain", domain)
-            log("[SMB-JCIFS] Domain set: '$domain'")
-            }
-            properties.setProperty("jcifs.smb.client.username", username)
-            properties.setProperty("jcifs.smb.client.password", password)
-            log("[SMB-JCIFS] Username set: '$username' (length: ${username.length})")
-            log("[SMB-JCIFS] Password length: ${password.length}")
-            
-            // Debug: Print all properties for verification
-            log("[SMB-JCIFS] === Configuration Properties ===")
-            properties.stringPropertyNames().forEach { key ->
-                val value = if (key.contains("password")) "***" else properties.getProperty(key)
-            log("[SMB-JCIFS]   $key = $value")
-            }
-            log("[SMB-JCIFS] ===============================")
-            
-            log("[SMB-JCIFS] Creating configuration...")
-            val config = PropertyConfiguration(properties)
-            context = BaseContext(config)
-            
-            log("[SMB-JCIFS] Configuration created with domain: '$domain', user: '$username'")
-            
-            // Build base URL
-            baseUrl = if (share.isEmpty()) {
-                "smb://$host/"
+            // Try multiple domain values if not specified
+            val domainsToTry = if (domain.isNotEmpty()) {
+                listOf(domain)
             } else {
-                "smb://$host/$share/"
+                // Try common domain values
+                listOf("", ".", "WORKGROUP", "workgroup")
             }
             
-            log("[SMB-JCIFS] Base URL: $baseUrl")
+            var connected = false
+            var detectedShare = share
+            var detectedDomain = domain
             
-            // If no share specified, just test basic connectivity
-            if (share.isEmpty()) {
-            log("[SMB-JCIFS] No share specified, connection setup successful")
-            log("[SMB-JCIFS] === Connection established ===")
-                return@withContext true
+            for (testDomain in domainsToTry) {
+                if (connected) break
+                
+                this@SmbClient.domain = testDomain
+                log("[SMB-JCIFS] Trying domain: '${if (testDomain.isEmpty()) "(empty)" else testDomain}'")
+                
+                // Configure JCIFS to use SMB2/SMB3 only (disable SMB1)
+                val properties = Properties()
+                properties.setProperty("jcifs.smb.client.minVersion", "SMB202")
+                properties.setProperty("jcifs.smb.client.maxVersion", "SMB311")
+                properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
+                properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
+                properties.setProperty("jcifs.smb.client.soTimeout", "30000")
+                
+                // Set authentication in properties
+                if (testDomain.isNotEmpty()) {
+                    properties.setProperty("jcifs.smb.client.domain", testDomain)
+                }
+                properties.setProperty("jcifs.smb.client.username", username)
+                properties.setProperty("jcifs.smb.client.password", password)
+                
+                log("[SMB-JCIFS] Creating configuration...")
+                val config = PropertyConfiguration(properties)
+                context = BaseContext(config)
+                
+                if (share.isNotEmpty()) {
+                    // Test specified share
+                    baseUrl = "smb://$host/$share/"
+                    log("[SMB-JCIFS] Testing specified share: $baseUrl")
+                    
+                    try {
+                        val testFile = SmbFile(baseUrl, context)
+                        if (testFile.exists()) {
+                            log("[SMB-JCIFS] Share exists and is accessible")
+                            detectedShare = share
+                            detectedDomain = testDomain
+                            connected = true
+                        } else {
+                            log("[SMB-JCIFS] Share does not exist or access denied")
+                        }
+                    } catch (e: Exception) {
+                        log("[SMB-JCIFS] Error testing share: ${e.message}")
+                    }
+                } else {
+                    // Auto-detect shares
+                    log("[SMB-JCIFS] Auto-detecting available shares...")
+                    try {
+                        val serverUrl = "smb://$host/"
+                        val serverFile = SmbFile(serverUrl, context)
+                        
+                        if (serverFile.exists() && serverFile.isDirectory) {
+                            val shares = serverFile.listFiles()
+                            log("[SMB-JCIFS] Found ${shares.size} shares")
+                            
+                            // Filter out system shares and find the first usable share
+                            for (smbShare in shares) {
+                                val shareName = smbShare.name.trimEnd('/')
+                                // Skip hidden/system shares
+                                if (shareName.startsWith("$") || shareName.equals("IPC$", ignoreCase = true)) {
+                                    log("[SMB-JCIFS] Skipping system share: $shareName")
+                                    continue
+                                }
+                                
+                                log("[SMB-JCIFS] Testing share: $shareName")
+                                val shareUrl = "smb://$host/$shareName/"
+                                val shareFile = SmbFile(shareUrl, context)
+                                
+                                if (shareFile.exists() && shareFile.isDirectory) {
+                                    log("[SMB-JCIFS] Found accessible share: $shareName")
+                                    detectedShare = shareName
+                                    detectedDomain = testDomain
+                                    baseUrl = shareUrl
+                                    connected = true
+                                    break
+                                }
+                            }
+                        } else {
+                            log("[SMB-JCIFS] Server path not accessible")
+                        }
+                    } catch (e: Exception) {
+                        log("[SMB-JCIFS] Error listing shares: ${e.message}")
+                    }
+                }
             }
             
-            // Test connection by checking if share exists
-            val testUrl = "smb://$host/$share/"
-            log("[SMB-JCIFS] Testing connection to: $testUrl")
-            val testFile = SmbFile(testUrl, context)
-            
-            log("[SMB-JCIFS] Checking if share exists...")
-            val exists = testFile.exists()
-            
-            if (exists) {
-            log("[SMB-JCIFS] Share exists and is accessible")
-            log("[SMB-JCIFS] === Connection successful ===")
+            if (connected) {
+                this@SmbClient.share = detectedShare
+                this@SmbClient.domain = detectedDomain
+                log("[SMB-JCIFS] === Connection successful ===")
+                log("[SMB-JCIFS] Connected to share: $detectedShare")
+                log("[SMB-JCIFS] Domain: ${if (detectedDomain.isEmpty()) "(empty)" else detectedDomain}")
+                log("[SMB-JCIFS] Base URL: $baseUrl")
                 true
             } else {
-            log("[SMB-JCIFS] === ERROR: Share does not exist or access denied ===")
+                log("[SMB-JCIFS] === Connection failed ===")
                 false
             }
         } catch (e: Exception) {
@@ -136,10 +179,6 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Error type: ${e.javaClass.simpleName}")
             log("[SMB-JCIFS] Error message: ${e.message}")
             e.printStackTrace()
-            // Print full stack trace for debugging
-            val writer = java.io.PrintWriter(java.io.StringWriter())
-            e.printStackTrace(writer)
-            log("[SMB-JCIFS] Full stack trace:\n${writer.toString()}")
             false
         }
     }
@@ -362,15 +401,43 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 val fullPath = "$baseUrl$normalizedPath"
                 log("[SMB-JCIFS] Full path: $fullPath")
+                log("[SMB-JCIFS] Base URL: $baseUrl")
+                log("[SMB-JCIFS] Normalized path: $normalizedPath")
+                log("[SMB-JCIFS] Original remotePath: $remotePath")
                 
                 val smbFile = SmbFile(fullPath, context)
                 
-                if (smbFile.exists() && !smbFile.isDirectory) {
+                log("[SMB-JCIFS] Checking file existence...")
+                val exists = smbFile.exists()
+                val isDir = smbFile.isDirectory
+                log("[SMB-JCIFS] File exists: $exists, isDirectory: $isDir")
+                
+                if (exists && !isDir) {
                     val size = smbFile.length()
                     log("[SMB-JCIFS] File size: $size")
                     size
                 } else {
-                    log("[SMB-JCIFS] File does not exist or is directory")
+                    if (!exists) {
+                        log("[SMB-JCIFS] ERROR: File does not exist at path: $fullPath")
+                        // Try to list parent directory to see what's there
+                        try {
+                            val parentPath = fullPath.substringBeforeLast("/")
+                            log("[SMB-JCIFS] Trying to list parent directory: $parentPath")
+                            val parentFile = SmbFile(parentPath, context)
+                            if (parentFile.exists() && parentFile.isDirectory) {
+                                val files = parentFile.listFiles()
+                                log("[SMB-JCIFS] Parent directory contains ${files.size} items:")
+                                files.take(10).forEach { f ->
+                                    log("[SMB-JCIFS]   - ${f.name} (${if (f.isDirectory) "DIR" else "FILE"})")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
+                        }
+                    }
+                    if (isDir) {
+                        log("[SMB-JCIFS] ERROR: Path is a directory, not a file")
+                    }
                     0L
                 }
             } catch (e: Exception) {

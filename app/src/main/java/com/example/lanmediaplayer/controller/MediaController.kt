@@ -288,6 +288,15 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${mediaFile.protocol::class.simpleName}")
         log("[Controller] Size: ${mediaFile.size}")
         
+        // Check if file is an image (ExoPlayer doesn't support images)
+        val extension = mediaFile.name.substringAfterLast('.', "").lowercase()
+        val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+        
+        if (isImage) {
+            log("[Controller] WARNING: ExoPlayer does not support image files. Use ImageView instead.")
+            log("[Controller] For images, consider downloading and displaying with Image composable.")
+        }
+        
         browseScope.launch {
             try {
                 log("[Controller] HTTP Proxy port: ${httpProxy?.getPort()}")
