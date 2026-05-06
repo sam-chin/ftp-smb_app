@@ -174,11 +174,16 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Listing files in: '$remotePath'")
             val files = mutableListOf<SmbFileInfo>()
             
-            val fullPath = if (remotePath.startsWith("/")) {
-                "$baseUrl${remotePath.substring(1)}"
+            // Normalize path: remove leading slash for JCIFS-NG
+            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+                remotePath.substring(1)
+            } else if (remotePath == "/") {
+                ""
             } else {
-                "$baseUrl$remotePath"
+                remotePath
             }
+            
+            val fullPath = "$baseUrl$normalizedPath"
             
             log("[SMB-JCIFS] Full path: $fullPath")
             
@@ -210,12 +215,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     name = fileName,
                     size = fileSize,
                     isDirectory = isDirectory,
-                    path = if (remotePath == "/") {
+                    path = if (normalizedPath == "") {
                         "/$fileName"
-                    } else if (remotePath.endsWith("/")) {
-                        "$remotePath$fileName"
+                    } else if (normalizedPath.endsWith("/")) {
+                        "/$normalizedPath$fileName"
                     } else {
-                        "$remotePath/$fileName"
+                        "/$normalizedPath/$fileName"
                     }
                 ))
             }
