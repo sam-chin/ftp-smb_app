@@ -200,7 +200,7 @@ class SmbClient {
                 return@withContext false
             }
             
-            smbFile.inputStream().use { input ->
+            smbFile.getInputStream().use { input ->
                 FileOutputStream(localFile).use { output ->
                     val buffer = ByteArray(8192)
                     var bytesRead: Int
