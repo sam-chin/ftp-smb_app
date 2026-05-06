@@ -306,9 +306,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     size = fileSize,
                     isDirectory = isDirectory,
                     path = if (normalizedPath == "") {
-                        "/$fileName"  // Root path
+                        val constructedPath = "/$fileName"
+                        log("[SMB-PATH-DEBUG] Building root path: '$constructedPath' (fileName='$fileName')")
+                        constructedPath
                     } else {
-                        "/$normalizedPath/$fileName"  // Full path from root
+                        val constructedPath = "/$normalizedPath/$fileName"
+                        log("[SMB-PATH-DEBUG] Building path: '$constructedPath' (dir='$normalizedPath', file='$fileName')")
+                        constructedPath
                     }
                 ))
             }
