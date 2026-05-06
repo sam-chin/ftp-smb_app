@@ -71,24 +71,32 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
     
     val coroutineScope = rememberCoroutineScope()
     
-    // Load saved connection info
-    val savedProtocol = remember { connectionPrefs.getProtocol() }
-    val savedHost = remember { connectionPrefs.getHost() }
-    val savedPort = remember { connectionPrefs.getPort() }
-    val savedUsername = remember { connectionPrefs.getUsername() }
-    val savedPassword = remember { connectionPrefs.getPassword() }
-    val savedShare = remember { connectionPrefs.getShare() }
-    val savedDomain = remember { connectionPrefs.getDomain() }
+    // Load saved connection info separately for FTP and SMB
+    val savedFtpHost = remember { connectionPrefs.getFtpHost() }
+    val savedFtpPort = remember { connectionPrefs.getFtpPort() }
+    val savedFtpUsername = remember { connectionPrefs.getFtpUsername() }
+    val savedFtpPassword = remember { connectionPrefs.getFtpPassword() }
+    
+    val savedSmbHost = remember { connectionPrefs.getSmbHost() }
+    val savedSmbPort = remember { connectionPrefs.getSmbPort() }
+    val savedSmbUsername = remember { connectionPrefs.getSmbUsername() }
+    val savedSmbPassword = remember { connectionPrefs.getSmbPassword() }
+    val savedSmbShare = remember { connectionPrefs.getSmbShare() }
+    val savedSmbDomain = remember { connectionPrefs.getSmbDomain() }
     
     when (currentScreen) {
         Screen.Connection -> ConnectionScreen(
-            savedProtocol = savedProtocol,
-            savedHost = savedHost,
-            savedPort = savedPort,
-            savedUsername = savedUsername,
-            savedPassword = savedPassword,
-            savedShare = savedShare,
-            savedDomain = savedDomain,
+            selectedProtocol = selectedProtocol,
+            savedFtpHost = savedFtpHost,
+            savedFtpPort = savedFtpPort,
+            savedFtpUsername = savedFtpUsername,
+            savedFtpPassword = savedFtpPassword,
+            savedSmbHost = savedSmbHost,
+            savedSmbPort = savedSmbPort,
+            savedSmbUsername = savedSmbUsername,
+            savedSmbPassword = savedSmbPassword,
+            savedSmbShare = savedSmbShare,
+            savedSmbDomain = savedSmbDomain,
             onConnect = { protocol, host, port, username, password, share, domain ->
                 selectedProtocol = protocol
                 isLoading = true
@@ -96,9 +104,15 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                 debugLogs = emptyList()
                 addLog("Connecting to ${protocol::class.simpleName}://$host:$port...")
                 
-                // Save connection info
-                val protocolStr = if (protocol is NetworkProtocol.FTP) "FTP" else "SMB"
-                connectionPrefs.saveConnection(protocolStr, host, port, username, password, share, domain)
+                // Save connection info separately
+                when (protocol) {
+                    is NetworkProtocol.FTP -> {
+                        connectionPrefs.saveFtpConnection(host, port, username, password)
+                    }
+                    is NetworkProtocol.SMB -> {
+                        connectionPrefs.saveSmbConnection(host, port, username, password, share, domain)
+                    }
+                }
                 
                 coroutineScope.launch {
                     val success = when (protocol) {
@@ -200,6 +214,12 @@ fun MainScreen(mediaController: MediaController, connectionPrefs: ConnectionPref
                     }
                 }
             },
+            onDisconnect = {
+                mediaController.release()
+                mediaController.initializePlayer()
+                currentScreen = Screen.Connection
+                addLog("Disconnected from server")
+            },
             isLoading = isLoading
         )
         
@@ -233,25 +253,50 @@ enum class Screen {
 
 @Composable
 fun ConnectionScreen(
-    savedProtocol: String,
-    savedHost: String,
-    savedPort: Int,
-    savedUsername: String,
-    savedPassword: String,
-    savedShare: String,
-    savedDomain: String,
+    selectedProtocol: NetworkProtocol,
+    savedFtpHost: String,
+    savedFtpPort: Int,
+    savedFtpUsername: String,
+    savedFtpPassword: String,
+    savedSmbHost: String,
+    savedSmbPort: Int,
+    savedSmbUsername: String,
+    savedSmbPassword: String,
+    savedSmbShare: String,
+    savedSmbDomain: String,
     onConnect: (NetworkProtocol, String, Int, String, String, String, String) -> Unit,
     isLoading: Boolean
 ) {
-    var selectedProtocol by remember { 
-        mutableStateOf(if (savedProtocol == "SMB") NetworkProtocol.SMB else NetworkProtocol.FTP)
+    var protocol by remember { mutableStateOf(selectedProtocol) }
+    var host by remember { 
+        mutableStateOf(if (protocol is NetworkProtocol.FTP) savedFtpHost else savedSmbHost)
     }
-    var host by remember { mutableStateOf(savedHost) }
-    var port by remember { mutableStateOf(savedPort.toString()) }
-    var username by remember { mutableStateOf(savedUsername) }
-    var password by remember { mutableStateOf(savedPassword) }
-    var share by remember { mutableStateOf(savedShare) }
-    var domain by remember { mutableStateOf(savedDomain) }
+    var port by remember { 
+        mutableStateOf((if (protocol is NetworkProtocol.FTP) savedFtpPort else savedSmbPort).toString())
+    }
+    var username by remember { 
+        mutableStateOf(if (protocol is NetworkProtocol.FTP) savedFtpUsername else savedSmbUsername)
+    }
+    var password by remember { 
+        mutableStateOf(if (protocol is NetworkProtocol.FTP) savedFtpPassword else savedSmbPassword)
+    }
+    var share by remember { mutableStateOf(savedSmbShare) }
+    var domain by remember { mutableStateOf(savedSmbDomain) }
+    
+    // Update fields when protocol changes
+    LaunchedEffect(protocol) {
+        if (protocol is NetworkProtocol.FTP) {
+            host = savedFtpHost
+            port = savedFtpPort.toString()
+            username = savedFtpUsername
+            password = savedFtpPassword
+        } else {
+            host = savedSmbHost
+            port = savedSmbPort.toString()
+            username = savedSmbUsername
+            password = savedSmbPassword
+        }
+    }
     
     Column(
         modifier = Modifier
@@ -272,13 +317,13 @@ fun ConnectionScreen(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             FilterChip(
-                selected = selectedProtocol is NetworkProtocol.FTP,
-                onClick = { selectedProtocol = NetworkProtocol.FTP },
+                selected = protocol is NetworkProtocol.FTP,
+                onClick = { protocol = NetworkProtocol.FTP },
                 label = { Text("FTP") }
             )
             FilterChip(
-                selected = selectedProtocol is NetworkProtocol.SMB,
-                onClick = { selectedProtocol = NetworkProtocol.SMB },
+                selected = protocol is NetworkProtocol.SMB,
+                onClick = { protocol = NetworkProtocol.SMB },
                 label = { Text("SMB") }
             )
         }
@@ -343,8 +388,8 @@ fun ConnectionScreen(
         
         Button(
             onClick = {
-                val portInt = port.toIntOrNull() ?: 21
-                onConnect(selectedProtocol, host, portInt, username, password, share, domain)
+                val portInt = port.toIntOrNull() ?: (if (protocol is NetworkProtocol.FTP) 21 else 445)
+                onConnect(protocol, host, portInt, username, password, share, domain)
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading && host.isNotEmpty()
@@ -368,6 +413,7 @@ fun FileBrowserScreen(
     debugLogs: List<String>,
     onFileClick: (MediaFile) -> Unit,
     onBackClick: () -> Unit,
+    onDisconnect: () -> Unit,
     isLoading: Boolean
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -378,6 +424,15 @@ fun FileBrowserScreen(
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
+                }
+            },
+            actions = {
+                IconButton(onClick = onDisconnect) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Disconnect",
+                        modifier = androidx.compose.ui.Modifier.rotate(180f)
+                    )
                 }
             }
         )

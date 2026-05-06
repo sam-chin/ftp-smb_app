@@ -96,20 +96,39 @@ class FtpClient {
             val files = mutableListOf<FtpFileInfo>()
             dataSocket?.let { socket ->
                 val inputStream = socket.getInputStream()
-                // Use UTF-8 encoding to handle Chinese filenames
-                val reader = BufferedReader(InputStreamReader(inputStream, "UTF-8"))
+                // Try multiple encodings for Chinese filenames
+                var reader: BufferedReader? = null
+                var lines = listOf<String>()
                 
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    println("[FTP] Raw line: $line")
-                    line?.let {
-                        parseFtpLine(it)?.let { fileInfo ->
-                            println("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
-                            files.add(fileInfo)
+                // Try UTF-8 first, then GBK, then default
+                val encodings = listOf("UTF-8", "GBK", "GB2312", "ISO-8859-1")
+                
+                for (encoding in encodings) {
+                    try {
+                        reader = BufferedReader(InputStreamReader(inputStream, encoding))
+                        val tempLines = mutableListOf<String>()
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            line?.let { tempLines.add(it) }
                         }
+                        reader.close()
+                        lines = tempLines
+                        println("[FTP] Successfully read with encoding: $encoding")
+                        break
+                    } catch (e: Exception) {
+                        println("[FTP] Failed with encoding $encoding: ${e.message}")
+                        reader?.close()
                     }
                 }
-                reader.close()
+                
+                // Parse all collected lines
+                for (line in lines) {
+                    println("[FTP] Raw line: $line")
+                    parseFtpLine(line)?.let { fileInfo ->
+                        println("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
+                        files.add(fileInfo)
+                    }
+                }
             }
             
             println("[FTP] Total files found: ${files.size}")
