@@ -153,6 +153,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     suspend fun browseFiles(path: String = "/", protocol: NetworkProtocol, callback: MediaCallback) {
+        log("[Controller] === BrowseFiles START ===")
+        log("[Controller] Path: $path")
+        log("[Controller] Protocol: ${protocol::class.simpleName}")
+        
         scope.launch {
             try {
                 val files = when (protocol) {
@@ -180,9 +184,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                 }
                 
+                log("[Controller] Loaded ${files.size} files")
                 withContext(Dispatchers.Main) {
                     callback.onFilesLoaded(files)
                 }
+                log("[Controller] === BrowseFiles END ===")
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     callback.onError(e.message ?: "Unknown error")
