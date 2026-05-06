@@ -257,11 +257,13 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     /**
      * Get an InputStream for streaming file content without downloading to disk
      * This enables progressive playback and seeking
+     * @param remotePath The path to the remote file
+     * @param startOffset The byte offset to start reading from (for Range requests)
      */
-    suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
+    suspend fun getFileStream(remotePath: String, startOffset: Long = 0): InputStream? = withContext(Dispatchers.IO) {
         commandMutex.withLock {
             try {
-                log("[FTP] Opening stream for: $remotePath")
+                log("[FTP] Opening stream for: $remotePath (offset: $startOffset)")
                 
                 // Clear any pending responses before sending new commands
                 clearPendingResponses()
@@ -300,6 +302,18 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 log("[FTP] Connecting to data socket: $dataHost:$dataPort")
                 dataSocket = Socket(dataHost, dataPort)
+                
+                // If startOffset > 0, use REST command to resume from that position
+                if (startOffset > 0) {
+                    sendCommand("REST $startOffset")
+                    val restResponse = readResponse()
+                    if (restResponse.code !in 300..399) {
+                        log("[FTP] REST failed: ${restResponse.code} ${restResponse.message}")
+                        closeDataConnection()
+                        return@withContext null
+                    }
+                    log("[FTP] REST successful, will start from byte $startOffset")
+                }
                 
                 sendCommand("RETR $remotePath")
                 // Read response and verify it's for RETR command (code 1xx)

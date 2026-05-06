@@ -16,7 +16,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     interface FileProvider {
-        suspend fun getFileStream(path: String): InputStream?
+        suspend fun getFileStream(path: String, startOffset: Long = 0): InputStream?
         suspend fun getFileSize(path: String): Long
     }
     
@@ -234,29 +234,14 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             val contentLength = end - start + 1
             log("[HTTP Proxy] Range request: bytes $start-$end/$fileSize (content length: $contentLength)")
             
-            fileStream = fileProvider.getFileStream(filePath)
+            // Use startOffset parameter for efficient seeking (FTP REST command)
+            fileStream = fileProvider.getFileStream(filePath, startOffset = start)
             if (fileStream == null) {
                 sendErrorResponse(outputStream, 404, "File Not Found")
                 return
             }
             
-            // Skip to start position using a more reliable method
-            var remainingToSkip = start
-            val skipBuffer = ByteArray(64 * 1024) // 64KB buffer for skipping
-            while (remainingToSkip > 0) {
-                val skipped = fileStream.skip(remainingToSkip)
-                if (skipped <= 0) {
-                    // If skip returns 0 or negative, try reading and discarding
-                    val bytesToRead = minOf(remainingToSkip, skipBuffer.size.toLong()).toInt()
-                    val bytesRead = fileStream.read(skipBuffer, 0, bytesToRead)
-                    if (bytesRead <= 0) break // EOF or error
-                    remainingToSkip -= bytesRead
-                } else {
-                    remainingToSkip -= skipped
-                }
-            }
-            val actualSkipped = start - remainingToSkip
-            log("[HTTP Proxy] Skipped $actualSkipped bytes to reach start position")
+            log("[HTTP Proxy] File stream opened at offset $start")
             
             val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
                     "Content-Type: $contentType\r\n" +

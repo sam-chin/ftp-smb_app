@@ -304,15 +304,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 if (httpProxy?.getPort() == 0) {
                     log("[Controller] Starting HTTP proxy...")
                     val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
-                        override suspend fun getFileStream(path: String): InputStream? {
-                            log("[Controller] getFileStream called for: $path")
+                        override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
+                            log("[Controller] getFileStream called for: $path (offset: $startOffset)")
                             return when (mediaFile.protocol) {
                                 is NetworkProtocol.FTP -> {
                                     log("[Controller] Streaming via FTP...")
-                                    ftpClient?.getFileStream(path)
+                                    ftpClient?.getFileStream(path, startOffset)
                                 }
                                 is NetworkProtocol.SMB -> {
                                     log("[Controller] Streaming via SMB...")
+                                    // SMB doesn't support offset in current implementation
+                                    // Would need to implement skip or use different approach
                                     smbClient?.getFileStream(path)
                                 }
                             }
