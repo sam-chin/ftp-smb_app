@@ -51,14 +51,26 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
         return try {
+            log("[Controller] === Protocol Switch: Connecting to FTP ===")
+            log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
+            
             // Cancel any ongoing operations
             scope.coroutineContext.cancelChildren()
+            log("[Controller] Cancelled ongoing coroutines")
             
             // Disconnect any existing connections
-            smbClient?.disconnect()
-            smbClient = null
-            ftpClient?.disconnect()
-            ftpClient = null
+            if (smbClient != null) {
+                log("[Controller] Disconnecting SMB client...")
+                smbClient?.disconnect()
+                smbClient = null
+                log("[Controller] SMB client disconnected and set to null")
+            }
+            if (ftpClient != null) {
+                log("[Controller] Disconnecting old FTP client...")
+                ftpClient?.disconnect()
+                ftpClient = null
+                log("[Controller] Old FTP client disconnected and set to null")
+            }
             
             log("[Controller] === FTP Connection Start ===")
             log("[Controller] Received parameters:")
@@ -105,14 +117,26 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
+            log("[Controller] === Protocol Switch: Connecting to SMB ===")
+            log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
+            
             // Cancel any ongoing operations
             scope.coroutineContext.cancelChildren()
+            log("[Controller] Cancelled ongoing coroutines")
             
             // Disconnect any existing connections
-            ftpClient?.disconnect()
-            ftpClient = null
-            smbClient?.disconnect()
-            smbClient = null
+            if (ftpClient != null) {
+                log("[Controller] Disconnecting FTP client...")
+                ftpClient?.disconnect()
+                ftpClient = null
+                log("[Controller] FTP client disconnected and set to null")
+            }
+            if (smbClient != null) {
+                log("[Controller] Disconnecting old SMB client...")
+                smbClient?.disconnect()
+                smbClient = null
+                log("[Controller] Old SMB client disconnected and set to null")
+            }
             
             log("[Controller] === SMB Connection Start ===")
             log("[Controller] Received parameters:")
@@ -174,11 +198,20 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] === BrowseFiles START ===")
         log("[Controller] Path: $path")
         log("[Controller] Protocol: ${protocol::class.simpleName}")
+        log("[Controller] ftpClient is null: ${ftpClient == null}")
+        log("[Controller] smbClient is null: ${smbClient == null}")
         
         scope.launch {
             try {
                 val files = when (protocol) {
                     is NetworkProtocol.FTP -> {
+                        if (ftpClient == null) {
+                            log("[Controller] ERROR: ftpClient is null!")
+                            withContext(Dispatchers.Main) {
+                                callback.onError("FTP client not initialized")
+                            }
+                            return@launch
+                        }
                         log("[Controller] Calling ftpClient.listFiles($path)")
                         ftpClient?.listFiles(path)?.map { ftpFile ->
                             // Build proper path: ensure no double slashes
@@ -200,6 +233,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         } ?: emptyList()
                     }
                     is NetworkProtocol.SMB -> {
+                        if (smbClient == null) {
+                            log("[Controller] ERROR: smbClient is null!")
+                            withContext(Dispatchers.Main) {
+                                callback.onError("SMB client not initialized")
+                            }
+                            return@launch
+                        }
                         log("[Controller] Calling smbClient.listFiles($path)")
                         smbClient?.listFiles(path)?.map { smbFile ->
                             log("[Controller] SMB file: ${smbFile.name}, path: ${smbFile.path}")
