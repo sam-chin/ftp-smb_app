@@ -52,8 +52,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
-            // Use UTF-8 encoding for reading server responses to support Chinese filenames
-            controlReader = BufferedReader(InputStreamReader(controlInputStream, Charsets.UTF_8))
+            // Use ISO-8859-1 as default for control connection (FTP standard)
+            // Response messages will be handled separately if they contain Chinese
+            controlReader = BufferedReader(InputStreamReader(controlInputStream, Charsets.ISO_8859_1))
             
             log("[FTP] Streams initialized, waiting for server greeting...")
             val response = readResponse()
@@ -166,27 +167,16 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 val bytes = inputStream.readBytes()
             log("[FTP] Read ${bytes.size} bytes from data connection")
                 
-                // Try multiple encodings for Chinese filenames
-                var lines = listOf<String>()
-                // For Chinese FTP servers, try GBK first, then UTF-8
-                val encodings = listOf("GBK", "GB2312", "UTF-8", "ISO-8859-1")
+                // Auto-detect encoding and decode to UTF-8
+                val (text, detectedEncoding) = EncodingUtils.decodeWithFallback(bytes)
+                log("[FTP] Detected encoding: $detectedEncoding")
                 
-                for (encoding in encodings) {
-                    try {
-                        val text = String(bytes, charset(encoding))
-                        val tempLines = text.lines().filter { it.isNotBlank() }
-                        if (tempLines.isNotEmpty()) {
-                            lines = tempLines
-                            log("[FTP] Successfully decoded with encoding: $encoding (${lines.size} lines)")
-                            // Log first line to verify encoding is correct
-                            if (lines.isNotEmpty()) {
-                                log("[FTP] First line sample: ${lines[0].take(100)}")
-                            }
-                            break
-                        }
-                    } catch (e: Exception) {
-                        log("[FTP] Failed with encoding $encoding: ${e.message}")
-                    }
+                val lines = text.lines().filter { it.isNotBlank() }
+                log("[FTP] Decoded ${lines.size} lines")
+                
+                // Log first line to verify encoding
+                if (lines.isNotEmpty()) {
+                    log("[FTP] First line sample: ${lines[0].take(100)}")
                 }
                 
                 // Parse all collected lines
@@ -282,22 +272,12 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun sendCommand(command: String) {
-        // FTP protocol commands should be ASCII, but paths may contain UTF-8 characters
-        // Try to detect if command contains non-ASCII characters (like Chinese filenames)
-        val hasNonAscii = command.any { it.code > 127 }
-        
-        val bytes = if (hasNonAscii) {
-            // Use UTF-8 for commands with non-ASCII characters (Chinese, Japanese, etc.)
-            log("[FTP] Command contains non-ASCII characters, using UTF-8 encoding")
-            "${command}\r\n".toByteArray(Charsets.UTF_8)
-        } else {
-            // Use ASCII for standard commands
-            "${command}\r\n".toByteArray(Charsets.US_ASCII)
-        }
+        // Use intelligent encoding detection for commands
+        val bytes = EncodingUtils.stringToBytes("${command}\r\n")
         
         controlOutputStream?.write(bytes)
         controlOutputStream?.flush()
-        log("[FTP] Sent: $command")
+        log("[FTP] Sent: $command (encoding: ${if (command.any { it.code > 127 }) "UTF-8" else "ASCII"})")
     }
     
     private fun readResponse(): FtpResponse {
