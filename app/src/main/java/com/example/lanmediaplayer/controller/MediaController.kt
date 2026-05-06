@@ -200,8 +200,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${protocol::class.simpleName}")
         log("[Controller] ftpClient is null: ${ftpClient == null}")
         log("[Controller] smbClient is null: ${smbClient == null}")
+        log("[Controller] Scope isActive: ${scope.isActive}")
+        log("[Controller] Scope job isCancelled: ${scope.coroutineContext[Job]?.isCancelled}")
         
         scope.launch {
+            log("[Controller] browseFiles coroutine started")
             try {
                 val files = when (protocol) {
                     is NetworkProtocol.FTP -> {

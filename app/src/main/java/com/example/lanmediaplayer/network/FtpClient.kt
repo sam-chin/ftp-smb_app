@@ -276,11 +276,22 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun sendCommand(command: String) {
-        // FTP protocol requires ASCII encoding for commands
-        val bytes = "${command}\r\n".toByteArray(Charsets.US_ASCII)
+        // FTP protocol commands should be ASCII, but paths may contain UTF-8 characters
+        // Try to detect if command contains non-ASCII characters (like Chinese filenames)
+        val hasNonAscii = command.any { it.code > 127 }
+        
+        val bytes = if (hasNonAscii) {
+            // Use UTF-8 for commands with non-ASCII characters (Chinese, Japanese, etc.)
+            log("[FTP] Command contains non-ASCII characters, using UTF-8 encoding")
+            "${command}\r\n".toByteArray(Charsets.UTF_8)
+        } else {
+            // Use ASCII for standard commands
+            "${command}\r\n".toByteArray(Charsets.US_ASCII)
+        }
+        
         controlOutputStream?.write(bytes)
         controlOutputStream?.flush()
-            log("[FTP] Sent: $command")
+        log("[FTP] Sent: $command")
     }
     
     private fun readResponse(): FtpResponse {
