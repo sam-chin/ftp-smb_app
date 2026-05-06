@@ -65,7 +65,13 @@ class HttpProxyServer {
                 return
             }
             
-            val filePath = parts[1].substring(1)
+            // Extract and decode URL-encoded path
+            val encodedPath = parts[1].substring(1) // Remove leading /
+            val filePath = try {
+                java.net.URLDecoder.decode(encodedPath, "UTF-8")
+            } catch (e: Exception) {
+                encodedPath // Fallback to original if decoding fails
+            }
             
             var line: String?
             do {
