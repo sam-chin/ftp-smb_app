@@ -123,7 +123,10 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     
     suspend fun listFiles(remotePath: String = "/"): List<FtpFileInfo> = withContext(Dispatchers.IO) {
         try {
+            log("[FTP] === Listing files START ===")
             log("[FTP] Listing files in: $remotePath")
+            log("[FTP] Control socket connected: ${controlSocket?.isConnected}")
+            log("[FTP] Data socket status: ${if (dataSocket == null) "null" else "exists"}")
             
             sendCommand("TYPE I")
             readResponse()
@@ -190,7 +193,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             }
             
             log("[FTP] Total files found: ${files.size}")
-            readResponse()
+            val finalResponse = readResponse()
+            log("[FTP] Final response: ${finalResponse.code} ${finalResponse.message}")
+            log("[FTP] === Listing files END ===")
             files
         } catch (e: Exception) {
             log("[FTP] Error listing files: ${e.message}")
