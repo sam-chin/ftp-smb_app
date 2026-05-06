@@ -121,43 +121,43 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                         log("[SMB-JCIFS] Error testing share: ${e.message}")
                     }
                 } else {
-                    // Auto-detect shares
-                    log("[SMB-JCIFS] Auto-detecting available shares...")
+                    // Auto-detect shares using listShares method
+                    log("[SMB-JCIFS] Auto-detecting available shares using listShares()...")
                     try {
-                        val serverUrl = "smb://$host/"
-                        val serverFile = SmbFile(serverUrl, context)
+                        val availableShares = listShares()
+                        log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
                         
-                        if (serverFile.exists() && serverFile.isDirectory) {
-                            val shares = serverFile.listFiles()
-                            log("[SMB-JCIFS] Found ${shares.size} shares")
-                            
-                            // Filter out system shares and find the first usable share
-                            for (smbShare in shares) {
-                                val shareName = smbShare.name.trimEnd('/')
-                                // Skip hidden/system shares
-                                if (shareName.startsWith("$") || shareName.equals("IPC$", ignoreCase = true)) {
-                                    log("[SMB-JCIFS] Skipping system share: $shareName")
-                                    continue
-                                }
-                                
+                        if (availableShares.isNotEmpty()) {
+                            // Try each share until we find one that's accessible
+                            for (shareName in availableShares) {
                                 log("[SMB-JCIFS] Testing share: $shareName")
                                 val shareUrl = "smb://$host/$shareName/"
-                                val shareFile = SmbFile(shareUrl, context)
                                 
-                                if (shareFile.exists() && shareFile.isDirectory) {
-                                    log("[SMB-JCIFS] Found accessible share: $shareName")
-                                    detectedShare = shareName
-                                    detectedDomain = testDomain
-                                    baseUrl = shareUrl
-                                    connected = true
-                                    break
+                                try {
+                                    val shareFile = SmbFile(shareUrl, context)
+                                    if (shareFile.exists() && shareFile.isDirectory) {
+                                        log("[SMB-JCIFS] Found accessible share: $shareName")
+                                        detectedShare = shareName
+                                        detectedDomain = testDomain
+                                        baseUrl = shareUrl
+                                        connected = true
+                                        break
+                                    } else {
+                                        log("[SMB-JCIFS] Share $shareName exists but is not accessible or not a directory")
+                                    }
+                                } catch (e: Exception) {
+                                    log("[SMB-JCIFS] Error testing share $shareName: ${e.message}")
                                 }
                             }
                         } else {
-                            log("[SMB-JCIFS] Server path not accessible")
+                            log("[SMB-JCIFS] No shares found on server")
+                            log("[SMB-JCIFS] TIP: Please specify share name manually (e.g., 'gx', 'shared', etc.)")
                         }
                     } catch (e: Exception) {
                         log("[SMB-JCIFS] Error listing shares: ${e.message}")
+                        log("[SMB-JCIFS] Exception type: ${e.javaClass.simpleName}")
+                        log("[SMB-JCIFS] TIP: Auto-detection failed. Please specify share name manually.")
+                        e.printStackTrace()
                     }
                 }
             }
@@ -342,8 +342,6 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             try {
-                log("[SMB-JCIFS] Opening stream for: $remotePath")
-                
                 // Normalize path: remove leading slash for JCIFS-NG
                 val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
                     remotePath.substring(1)
@@ -354,29 +352,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 }
                 
                 val fullPath = "$baseUrl$normalizedPath"
-                log("[SMB-JCIFS] Full path: $fullPath")
-                
                 val smbFile = SmbFile(fullPath, context)
                 
-                if (!smbFile.exists()) {
-                    log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
+                if (!smbFile.exists() || smbFile.isDirectory) {
                     return@withContext null
                 }
                 
-                if (smbFile.isDirectory) {
-                    log("[SMB-JCIFS] ERROR: Path is a directory: $fullPath")
-                    return@withContext null
-                }
-                
-                val fileSize = smbFile.length()
-                log("[SMB-JCIFS] File exists, size: $fileSize, opening stream...")
-                
-                val inputStream = smbFile.getInputStream()
-                log("[SMB-JCIFS] Stream opened successfully")
-                inputStream
+                smbFile.getInputStream()
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error opening stream: ${e.message}")
-                e.printStackTrace()
                 null
             }
         }
@@ -388,7 +372,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             try {
-                log("[SMB-JCIFS] Getting file size for: $remotePath")
+                log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
                 
                 // Normalize path
                 val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
@@ -400,49 +384,21 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 }
                 
                 val fullPath = "$baseUrl$normalizedPath"
-                log("[SMB-JCIFS] Full path: $fullPath")
-                log("[SMB-JCIFS] Base URL: $baseUrl")
-                log("[SMB-JCIFS] Normalized path: $normalizedPath")
-                log("[SMB-JCIFS] Original remotePath: $remotePath")
+                log("[SMB-JCIFS] Constructed full path: '$fullPath'")
+                log("[SMB-JCIFS] Base URL: '$baseUrl'")
                 
                 val smbFile = SmbFile(fullPath, context)
                 
-                log("[SMB-JCIFS] Checking file existence...")
-                val exists = smbFile.exists()
-                val isDir = smbFile.isDirectory
-                log("[SMB-JCIFS] File exists: $exists, isDirectory: $isDir")
-                
-                if (exists && !isDir) {
+                if (smbFile.exists() && !smbFile.isDirectory) {
                     val size = smbFile.length()
-                    log("[SMB-JCIFS] File size: $size")
+                    log("[SMB-JCIFS] File exists, size: $size")
                     size
                 } else {
-                    if (!exists) {
-                        log("[SMB-JCIFS] ERROR: File does not exist at path: $fullPath")
-                        // Try to list parent directory to see what's there
-                        try {
-                            val parentPath = fullPath.substringBeforeLast("/")
-                            log("[SMB-JCIFS] Trying to list parent directory: $parentPath")
-                            val parentFile = SmbFile(parentPath, context)
-                            if (parentFile.exists() && parentFile.isDirectory) {
-                                val files = parentFile.listFiles()
-                                log("[SMB-JCIFS] Parent directory contains ${files.size} items:")
-                                files.take(10).forEach { f ->
-                                    log("[SMB-JCIFS]   - ${f.name} (${if (f.isDirectory) "DIR" else "FILE"})")
-                                }
-                            }
-                        } catch (e: Exception) {
-                            log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
-                        }
-                    }
-                    if (isDir) {
-                        log("[SMB-JCIFS] ERROR: Path is a directory, not a file")
-                    }
+                    log("[SMB-JCIFS] File does not exist or is directory")
                     0L
                 }
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error getting file size: ${e.message}")
-                e.printStackTrace()
                 0L
             }
         }
