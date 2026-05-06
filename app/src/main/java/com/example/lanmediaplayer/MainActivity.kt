@@ -271,36 +271,26 @@ fun ConnectionScreen(
 ) {
     var protocol by remember { mutableStateOf(selectedProtocol) }
     
-    // Initialize fields based on initial protocol
-    var host by remember { 
-        mutableStateOf(if (selectedProtocol is NetworkProtocol.FTP) savedFtpHost else savedSmbHost)
-    }
-    var port by remember { 
-        mutableStateOf((if (selectedProtocol is NetworkProtocol.FTP) savedFtpPort else savedSmbPort).toString())
-    }
-    var username by remember { 
-        mutableStateOf(if (selectedProtocol is NetworkProtocol.FTP) savedFtpUsername else savedSmbUsername)
-    }
-    var password by remember { 
-        mutableStateOf(if (selectedProtocol is NetworkProtocol.FTP) savedFtpPassword else savedSmbPassword)
-    }
-    var share by remember { mutableStateOf(savedSmbShare) }
-    var domain by remember { mutableStateOf(savedSmbDomain) }
+    // Use separate state variables for FTP and SMB
+    var ftpHost by remember { mutableStateOf(savedFtpHost) }
+    var ftpPort by remember { mutableStateOf(savedFtpPort.toString()) }
+    var ftpUsername by remember { mutableStateOf(savedFtpUsername) }
+    var ftpPassword by remember { mutableStateOf(savedFtpPassword) }
     
-    // Update fields when protocol changes
-    LaunchedEffect(protocol) {
-        if (protocol is NetworkProtocol.FTP) {
-            host = savedFtpHost
-            port = savedFtpPort.toString()
-            username = savedFtpUsername
-            password = savedFtpPassword
-        } else {
-            host = savedSmbHost
-            port = savedSmbPort.toString()
-            username = savedSmbUsername
-            password = savedSmbPassword
-        }
-    }
+    var smbHost by remember { mutableStateOf(savedSmbHost) }
+    var smbPort by remember { mutableStateOf(savedSmbPort.toString()) }
+    var smbUsername by remember { mutableStateOf(savedSmbUsername) }
+    var smbPassword by remember { mutableStateOf(savedSmbPassword) }
+    var smbShare by remember { mutableStateOf(savedSmbShare) }
+    var smbDomain by remember { mutableStateOf(savedSmbDomain) }
+    
+    // Current active fields based on protocol
+    val host = if (protocol is NetworkProtocol.FTP) ftpHost else smbHost
+    val port = if (protocol is NetworkProtocol.FTP) ftpPort else smbPort
+    val username = if (protocol is NetworkProtocol.FTP) ftpUsername else smbUsername
+    val password = if (protocol is NetworkProtocol.FTP) ftpPassword else smbPassword
+    val share = smbShare
+    val domain = smbDomain
     
     Column(
         modifier = Modifier
@@ -336,7 +326,9 @@ fun ConnectionScreen(
         
         OutlinedTextField(
             value = host,
-            onValueChange = { host = it },
+            onValueChange = { 
+                if (protocol is NetworkProtocol.FTP) ftpHost = it else smbHost = it
+            },
             label = { Text("Host") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -345,7 +337,9 @@ fun ConnectionScreen(
         
         OutlinedTextField(
             value = port,
-            onValueChange = { port = it },
+            onValueChange = { 
+                if (protocol is NetworkProtocol.FTP) ftpPort = it else smbPort = it
+            },
             label = { Text("Port") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -354,7 +348,9 @@ fun ConnectionScreen(
         
         OutlinedTextField(
             value = username,
-            onValueChange = { username = it },
+            onValueChange = { 
+                if (protocol is NetworkProtocol.FTP) ftpUsername = it else smbUsername = it
+            },
             label = { Text("Username") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -363,7 +359,9 @@ fun ConnectionScreen(
         
         OutlinedTextField(
             value = password,
-            onValueChange = { password = it },
+            onValueChange = { 
+                if (protocol is NetworkProtocol.FTP) ftpPassword = it else smbPassword = it
+            },
             label = { Text("Password") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -373,7 +371,7 @@ fun ConnectionScreen(
             
             OutlinedTextField(
                 value = share,
-                onValueChange = { share = it },
+                onValueChange = { smbShare = it },
                 label = { Text("Share") },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -382,7 +380,7 @@ fun ConnectionScreen(
             
             OutlinedTextField(
                 value = domain,
-                onValueChange = { domain = it },
+                onValueChange = { smbDomain = it },
                 label = { Text("Domain (optional)") },
                 modifier = Modifier.fillMaxWidth()
             )
