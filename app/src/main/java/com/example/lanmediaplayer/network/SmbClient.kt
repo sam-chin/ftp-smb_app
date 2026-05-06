@@ -266,35 +266,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     
     suspend fun downloadFile(remotePath: String, localFile: File): Boolean = withContext(Dispatchers.IO) {
         try {
-            log("[SMB-JCIFS] Downloading: $remotePath to ${localFile.absolutePath}")
+            val inputStream = getFileStream(remotePath) ?: return@withContext false
             
-            // Normalize path: remove leading slash for JCIFS-NG, same approach as listFiles
-            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
-                remotePath.substring(1)  // "/2025/file.mp4" → "2025/file.mp4"
-            } else if (remotePath == "/") {
-                ""  // Root directory
-            } else {
-                remotePath  // Already in correct format
-            }
-            
-            val fullPath = "$baseUrl$normalizedPath"
-            
-            val smbFile = SmbFile(fullPath, context)
-            
-            if (!smbFile.exists()) {
-                log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
-                return@withContext false
-            }
-            
-            smbFile.getInputStream().use { input ->
-                FileOutputStream(localFile).use { output ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                    }
-                    output.flush()
+            FileOutputStream(localFile).use { output ->
+                val buffer = ByteArray(64 * 1024) // 64KB buffer
+                var bytesRead: Int
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
                 }
+                output.flush()
             }
             
             log("[SMB-JCIFS] Download successful")
@@ -303,6 +283,74 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Download error: ${e.message}")
             e.printStackTrace()
             false
+        }
+    }
+    
+    /**
+     * Get an InputStream for streaming file content without downloading to disk
+     * This enables progressive playback and seeking
+     */
+    suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
+        try {
+            log("[SMB-JCIFS] Opening stream for: $remotePath")
+            
+            // Normalize path: remove leading slash for JCIFS-NG
+            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+                remotePath.substring(1)
+            } else if (remotePath == "/") {
+                ""
+            } else {
+                remotePath
+            }
+            
+            val fullPath = "$baseUrl$normalizedPath"
+            
+            val smbFile = SmbFile(fullPath, context)
+            
+            if (!smbFile.exists()) {
+                log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
+                return@withContext null
+            }
+            
+            if (smbFile.isDirectory) {
+                log("[SMB-JCIFS] ERROR: Path is a directory: $fullPath")
+                return@withContext null
+            }
+            
+            log("[SMB-JCIFS] Stream opened successfully")
+            smbFile.getInputStream()
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error opening stream: ${e.message}")
+            e.printStackTrace()
+            null
+        }
+    }
+    
+    /**
+     * Get file size
+     */
+    suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
+        try {
+            // Normalize path
+            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+                remotePath.substring(1)
+            } else if (remotePath == "/") {
+                ""
+            } else {
+                remotePath
+            }
+            
+            val fullPath = "$baseUrl$normalizedPath"
+            val smbFile = SmbFile(fullPath, context)
+            
+            if (smbFile.exists() && !smbFile.isDirectory) {
+                smbFile.length()
+            } else {
+                0L
+            }
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error getting file size: ${e.message}")
+            0L
         }
     }
     

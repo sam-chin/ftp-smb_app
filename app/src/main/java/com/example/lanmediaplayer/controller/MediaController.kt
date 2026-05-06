@@ -294,31 +294,26 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             log("[Controller] getFileStream called for: $path")
                             return when (mediaFile.protocol) {
                                 is NetworkProtocol.FTP -> {
-                                    log("[Controller] Downloading via FTP...")
-                                    val tempFile = File.createTempFile("media_", ".tmp", context.cacheDir)
-                                    val success = ftpClient?.downloadFile(path, tempFile) ?: false
-                                    log("[Controller] FTP download success: $success, file size: ${tempFile.length()}")
-                                    if (success) tempFile.inputStream() else null
+                                    log("[Controller] Streaming via FTP...")
+                                    ftpClient?.getFileStream(path)
                                 }
                                 is NetworkProtocol.SMB -> {
-                                    log("[Controller] Downloading via SMB...")
-                                    // Normalize SMB path: remove leading slash if present
-                                    val normalizedPath = if (path.startsWith("/") && path.length > 1) {
-                                        path.substring(1)  // "/2025/file.mp4" → "2025/file.mp4"
-                                    } else {
-                                        path
-                                    }
-                                    log("[Controller] SMB original path: $path, normalized: $normalizedPath")
-                                    val tempFile = File.createTempFile("media_", ".tmp", context.cacheDir)
-                                    val success = smbClient?.downloadFile(normalizedPath, tempFile) ?: false
-                                    log("[Controller] SMB download success: $success, file size: ${tempFile.length()}")
-                                    if (success) tempFile.inputStream() else null
+                                    log("[Controller] Streaming via SMB...")
+                                    smbClient?.getFileStream(path)
                                 }
                             }
                         }
                         
                         override suspend fun getFileSize(path: String): Long {
-                            return mediaFile.size
+                            log("[Controller] getFileSize called for: $path")
+                            return when (mediaFile.protocol) {
+                                is NetworkProtocol.FTP -> {
+                                    ftpClient?.getFileSize(path) ?: mediaFile.size
+                                }
+                                is NetworkProtocol.SMB -> {
+                                    smbClient?.getFileSize(path) ?: mediaFile.size
+                                }
+                            }
                         }
                     }) ?: -1
                     

@@ -226,6 +226,34 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     
     suspend fun downloadFile(remotePath: String, localFile: File): Boolean = withContext(Dispatchers.IO) {
         try {
+            val inputStream = getFileStream(remotePath) ?: return@withContext false
+            
+            val outputStream = FileOutputStream(localFile)
+            val buffer = ByteArray(64 * 1024) // 64KB buffer
+            var bytesRead: Int
+            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                outputStream.write(buffer, 0, bytesRead)
+            }
+            
+            outputStream.flush()
+            outputStream.close()
+            inputStream.close()
+            
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+    
+    /**
+     * Get an InputStream for streaming file content without downloading to disk
+     * This enables progressive playback and seeking
+     */
+    suspend fun getFileStream(remotePath: String): InputStream? = withContext(Dispatchers.IO) {
+        try {
+            log("[FTP] Opening stream for: $remotePath")
+            
             sendCommand("TYPE I")
             readResponse()
             
@@ -233,43 +261,51 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             val pasvResponse = readResponse()
             
             if (pasvResponse.code != 227) {
-                return@withContext false
+                log("[FTP] PASV failed: ${pasvResponse.code}")
+                return@withContext null
             }
             
             val dataPort = parsePasvPort(pasvResponse.message)
             val dataHost = pasvResponse.message.substringBefore("(").trim()
             
+            log("[FTP] Connecting to data socket: $dataHost:$dataPort")
             dataSocket = Socket(dataHost, dataPort)
             
             sendCommand("RETR $remotePath")
             val retrResponse = readResponse()
             
             if (retrResponse.code !in 100..199) {
-                return@withContext false
+                log("[FTP] RETR failed: ${retrResponse.code} ${retrResponse.message}")
+                closeDataConnection()
+                return@withContext null
             }
             
-            dataSocket?.let { socket ->
-                val inputStream = socket.getInputStream()
-                val outputStream = FileOutputStream(localFile)
-                
-                val buffer = ByteArray(8192)
-                var bytesRead: Int
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    outputStream.write(buffer, 0, bytesRead)
-                }
-                
-                outputStream.flush()
-                outputStream.close()
-                inputStream.close()
-            }
-            
-            val finalResponse = readResponse()
-            finalResponse.code in 200..299
+            log("[FTP] Stream opened successfully")
+            dataSocket?.getInputStream()
         } catch (e: Exception) {
+            log("[FTP] Error opening stream: ${e.message}")
             e.printStackTrace()
-            false
-        } finally {
             closeDataConnection()
+            null
+        }
+    }
+    
+    /**
+     * Get file size using SIZE command
+     */
+    suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
+        try {
+            sendCommand("SIZE $remotePath")
+            val response = readResponse()
+            
+            if (response.code == 213) {
+                response.message.trim().toLongOrNull() ?: 0L
+            } else {
+                0L
+            }
+        } catch (e: Exception) {
+            log("[FTP] Error getting file size: ${e.message}")
+            0L
         }
     }
     

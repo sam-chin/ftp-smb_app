@@ -56,12 +56,14 @@ class HttpProxyServer {
             
             if (!requestLine.startsWith("GET")) {
                 sendErrorResponse(outputStream, 405, "Method Not Allowed")
+                clientSocket.close()
                 return
             }
             
             val parts = requestLine.split(" ")
             if (parts.size < 2) {
                 sendErrorResponse(outputStream, 400, "Bad Request")
+                clientSocket.close()
                 return
             }
             
@@ -73,43 +75,39 @@ class HttpProxyServer {
                 encodedPath // Fallback to original if decoding fails
             }
             
+            // Read all headers
+            val headers = mutableMapOf<String, String>()
             var line: String?
             do {
                 line = reader.readLine()
+                if (line?.isNotEmpty() == true) {
+                    val headerParts = line.split(":", limit = 2)
+                    if (headerParts.size == 2) {
+                        headers[headerParts[0].trim()] = headerParts[1].trim()
+                    }
+                }
             } while (line?.isNotEmpty() == true)
             
             val fileSize = fileProvider.getFileSize(filePath)
             if (fileSize <= 0) {
                 sendErrorResponse(outputStream, 404, "File Not Found")
+                clientSocket.close()
                 return
             }
             
-            val fileStream = fileProvider.getFileStream(filePath)
-            if (fileStream == null) {
-                sendErrorResponse(outputStream, 404, "File Not Found")
-                return
+            // Detect content type based on file extension
+            val contentType = detectContentType(filePath)
+            
+            // Check for Range request (for seeking support)
+            val rangeHeader = headers["Range"]
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                // Handle range request
+                handleRangeRequest(outputStream, fileProvider, filePath, fileSize, rangeHeader, contentType)
+            } else {
+                // Handle full file request
+                handleFullRequest(outputStream, fileProvider, filePath, fileSize, contentType)
             }
             
-            val responseHeader = "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: video/mp4\r\n" +
-                    "Content-Length: $fileSize\r\n" +
-                    "Accept-Ranges: bytes\r\n" +
-                    "Connection: close\r\n" +
-                    "\r\n"
-            
-            outputStream.write(responseHeader.toByteArray())
-            outputStream.flush()
-            
-            val buffer = ByteArray(8192)
-            var bytesRead: Int
-            while (fileStream.read(buffer).also { bytesRead = it } != -1) {
-                outputStream.write(buffer, 0, bytesRead)
-                outputStream.flush()
-            }
-            
-            fileStream.close()
-            outputStream.close()
-            inputStream.close()
             clientSocket.close()
             
         } catch (e: Exception) {
@@ -118,7 +116,135 @@ class HttpProxyServer {
                 sendErrorResponse(clientSocket.getOutputStream(), 500, "Internal Server Error")
             } catch (e2: Exception) {
                 e2.printStackTrace()
+            } finally {
+                clientSocket.close()
             }
+        }
+    }
+    
+    private suspend fun handleFullRequest(
+        outputStream: OutputStream,
+        fileProvider: FileProvider,
+        filePath: String,
+        fileSize: Long,
+        contentType: String
+    ) {
+        val fileStream = fileProvider.getFileStream(filePath)
+        if (fileStream == null) {
+            sendErrorResponse(outputStream, 404, "File Not Found")
+            return
+        }
+        
+        val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: $contentType\r\n" +
+                "Content-Length: $fileSize\r\n" +
+                "Accept-Ranges: bytes\r\n" +
+                "Connection: close\r\n" +
+                "\r\n"
+        
+        outputStream.write(responseHeader.toByteArray())
+        outputStream.flush()
+        
+        // Stream the file in chunks for progressive playback
+        val buffer = ByteArray(64 * 1024) // 64KB buffer
+        var bytesRead: Int
+        var totalBytesRead = 0L
+        while (fileStream.read(buffer).also { bytesRead = it } != -1) {
+            outputStream.write(buffer, 0, bytesRead)
+            outputStream.flush()
+            totalBytesRead += bytesRead
+        }
+        
+        fileStream.close()
+    }
+    
+    private suspend fun handleRangeRequest(
+        outputStream: OutputStream,
+        fileProvider: FileProvider,
+        filePath: String,
+        fileSize: Long,
+        rangeHeader: String,
+        contentType: String
+    ) {
+        // Parse range: "bytes=start-end" or "bytes=start-"
+        val range = rangeHeader.substring(6) // Remove "bytes="
+        val rangeParts = range.split("-")
+        
+        val start = rangeParts[0].toLongOrNull() ?: 0L
+        val end = if (rangeParts[1].isNotEmpty()) {
+            rangeParts[1].toLongOrNull() ?: (fileSize - 1)
+        } else {
+            fileSize - 1
+        }
+        
+        // Validate range
+        if (start >= fileSize || start > end) {
+            sendErrorResponse(outputStream, 416, "Range Not Satisfiable")
+            return
+        }
+        
+        val contentLength = end - start + 1
+        
+        val fileStream = fileProvider.getFileStream(filePath)
+        if (fileStream == null) {
+            sendErrorResponse(outputStream, 404, "File Not Found")
+            return
+        }
+        
+        // Skip to start position
+        fileStream.skip(start)
+        
+        val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
+                "Content-Type: $contentType\r\n" +
+                "Content-Length: $contentLength\r\n" +
+                "Content-Range: bytes $start-$end/$fileSize\r\n" +
+                "Accept-Ranges: bytes\r\n" +
+                "Connection: close\r\n" +
+                "\r\n"
+        
+        outputStream.write(responseHeader.toByteArray())
+        outputStream.flush()
+        
+        // Stream the requested range
+        val buffer = ByteArray(64 * 1024) // 64KB buffer
+        var bytesRead: Int
+        var remainingBytes = contentLength
+        while (remainingBytes > 0 && fileStream.read(buffer).also { bytesRead = it } != -1) {
+            val bytesToWrite = minOf(bytesRead.toLong(), remainingBytes).toInt()
+            outputStream.write(buffer, 0, bytesToWrite)
+            outputStream.flush()
+            remainingBytes -= bytesToWrite
+        }
+        
+        fileStream.close()
+    }
+    
+    private fun detectContentType(filePath: String): String {
+        val extension = filePath.substringAfterLast('.', "").lowercase()
+        return when (extension) {
+            // Video formats
+            "mp4", "m4v" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "mov" -> "video/quicktime"
+            "wmv" -> "video/x-ms-wmv"
+            "flv" -> "video/x-flv"
+            "webm" -> "video/webm"
+            // Audio formats
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "flac" -> "audio/flac"
+            "aac" -> "audio/aac"
+            "ogg" -> "audio/ogg"
+            "wma" -> "audio/x-ms-wma"
+            "m4a" -> "audio/mp4"
+            // Image formats
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "bmp" -> "image/bmp"
+            "webp" -> "image/webp"
+            else -> "application/octet-stream"
         }
     }
     
