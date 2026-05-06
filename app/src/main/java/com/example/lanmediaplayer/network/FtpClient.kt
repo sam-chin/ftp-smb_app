@@ -13,7 +13,7 @@ data class FtpFileInfo(
     val modifiedTime: String? = null
 )
 
-class FtpClient {
+class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     private var controlSocket: Socket? = null
     private var dataSocket: Socket? = null
     private var controlOutputStream: OutputStream? = null
@@ -26,48 +26,53 @@ class FtpClient {
     private var password: String = ""
     private var passiveMode: Boolean = true
     
+    private fun log(message: String) {
+            log(message)
+        logCallback?.invoke(message)
+    }
+    
     suspend fun connect(host: String, port: Int = 21): Boolean = withContext(Dispatchers.IO) {
         this@FtpClient.host = host
         this@FtpClient.port = port
         
         return@withContext try {
-            println("[FTP] === Starting connection ===")
-            println("[FTP] Target: $host:$port")
+            log("[FTP] === Starting connection ===")
+            log("[FTP] Target: $host:$port")
             
             controlSocket = Socket()
             controlSocket?.soTimeout = 30000 // 30 seconds timeout
             controlSocket?.keepAlive = true
             
-            println("[FTP] Attempting socket connection...")
+            log("[FTP] Attempting socket connection...")
             controlSocket?.connect(java.net.InetSocketAddress(host, port), 30000)
             
-            println("[FTP] Socket connected successfully")
-            println("[FTP] Local address: ${controlSocket?.localAddress}")
-            println("[FTP] Remote address: ${controlSocket?.remoteSocketAddress}")
+            log("[FTP] Socket connected successfully")
+            log("[FTP] Local address: ${controlSocket?.localAddress}")
+            log("[FTP] Remote address: ${controlSocket?.remoteSocketAddress}")
             
             controlOutputStream = controlSocket?.getOutputStream()
             controlInputStream = controlSocket?.getInputStream()
             controlReader = BufferedReader(InputStreamReader(controlInputStream))
             
-            println("[FTP] Streams initialized, waiting for server greeting...")
+            log("[FTP] Streams initialized, waiting for server greeting...")
             val response = readResponse()
-            println("[FTP] Server greeting: ${response.code} ${response.message}")
+            log("[FTP] Server greeting: ${response.code} ${response.message}")
             
             val success = response.code in 200..299
             if (success) {
-                println("[FTP] === Connection established ===")
+            log("[FTP] === Connection established ===")
             } else {
-                println("[FTP] === Connection failed with code: ${response.code} ===")
+            log("[FTP] === Connection failed with code: ${response.code} ===")
             }
             success
         } catch (e: Exception) {
-            println("[FTP] === Connection error ===")
-            println("[FTP] Error type: ${e.javaClass.simpleName}")
-            println("[FTP] Error message: ${e.message}")
+            log("[FTP] === Connection error ===")
+            log("[FTP] Error type: ${e.javaClass.simpleName}")
+            log("[FTP] Error message: ${e.message}")
             e.printStackTrace()
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[FTP] Full stack trace:\n${writer.toString()}")
+            log("[FTP] Full stack trace:\n${writer.toString()}")
             disconnect()
             false
         }
@@ -78,73 +83,73 @@ class FtpClient {
         this@FtpClient.password = password
         
         return try {
-            println("[FTP] === Starting login ===")
-            println("[FTP] Username: $username")
-            println("[FTP] Password length: ${password.length}")
+            log("[FTP] === Starting login ===")
+            log("[FTP] Username: $username")
+            log("[FTP] Password length: ${password.length}")
             
-            println("[FTP] Sending USER command...")
+            log("[FTP] Sending USER command...")
             sendCommand("USER $username")
             val userResponse = readResponse()
-            println("[FTP] USER response: ${userResponse.code} ${userResponse.message}")
+            log("[FTP] USER response: ${userResponse.code} ${userResponse.message}")
             
             if (userResponse.code !in 200..399) {
-                println("[FTP] === USER command failed ===")
+            log("[FTP] === USER command failed ===")
                 return false
             }
             
-            println("[FTP] Sending PASS command...")
+            log("[FTP] Sending PASS command...")
             sendCommand("PASS $password")
             val passResponse = readResponse()
-            println("[FTP] PASS response: ${passResponse.code} ${passResponse.message}")
+            log("[FTP] PASS response: ${passResponse.code} ${passResponse.message}")
             
             val success = passResponse.code in 200..299
             if (success) {
-                println("[FTP] === Login successful ===")
+            log("[FTP] === Login successful ===")
             } else {
-                println("[FTP] === Login failed with code: ${passResponse.code} ===")
+            log("[FTP] === Login failed with code: ${passResponse.code} ===")
             }
             success
         } catch (e: Exception) {
-            println("[FTP] === Login error ===")
-            println("[FTP] Error type: ${e.javaClass.simpleName}")
-            println("[FTP] Error message: ${e.message}")
+            log("[FTP] === Login error ===")
+            log("[FTP] Error type: ${e.javaClass.simpleName}")
+            log("[FTP] Error message: ${e.message}")
             e.printStackTrace()
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[FTP] Full stack trace:\n${writer.toString()}")
+            log("[FTP] Full stack trace:\n${writer.toString()}")
             false
         }
     }
     
     suspend fun listFiles(remotePath: String = "/"): List<FtpFileInfo> = withContext(Dispatchers.IO) {
         try {
-            println("[FTP] Listing files in: $remotePath")
+            log("[FTP] Listing files in: $remotePath")
             
             sendCommand("TYPE I")
             readResponse()
             
             sendCommand("PASV")
             val pasvResponse = readResponse()
-            println("[FTP] PASV response: ${pasvResponse.code} ${pasvResponse.message}")
+            log("[FTP] PASV response: ${pasvResponse.code} ${pasvResponse.message}")
             
             if (pasvResponse.code != 227) {
-                println("[FTP] PASV failed with code: ${pasvResponse.code}")
+            log("[FTP] PASV failed with code: ${pasvResponse.code}")
                 return@withContext emptyList()
             }
             
             val dataPort = parsePasvPort(pasvResponse.message)
             // Use the same host as control connection
             val dataHost = host
-            println("[FTP] Connecting to data socket: $dataHost:$dataPort")
+            log("[FTP] Connecting to data socket: $dataHost:$dataPort")
             
             dataSocket = Socket(dataHost, dataPort)
             
             sendCommand("LIST $remotePath")
             val listResponse = readResponse()
-            println("[FTP] LIST response: ${listResponse.code} ${listResponse.message}")
+            log("[FTP] LIST response: ${listResponse.code} ${listResponse.message}")
             
             if (listResponse.code !in 100..199) {
-                println("[FTP] LIST command failed with code: ${listResponse.code}")
+            log("[FTP] LIST command failed with code: ${listResponse.code}")
                 return@withContext emptyList()
             }
             
@@ -154,7 +159,7 @@ class FtpClient {
                 
                 // Read all bytes first
                 val bytes = inputStream.readBytes()
-                println("[FTP] Read ${bytes.size} bytes from data connection")
+            log("[FTP] Read ${bytes.size} bytes from data connection")
                 
                 // Try multiple encodings for Chinese filenames
                 var lines = listOf<String>()
@@ -166,29 +171,29 @@ class FtpClient {
                         val tempLines = text.lines().filter { it.isNotBlank() }
                         if (tempLines.isNotEmpty()) {
                             lines = tempLines
-                            println("[FTP] Successfully decoded with encoding: $encoding (${lines.size} lines)")
+            log("[FTP] Successfully decoded with encoding: $encoding (${lines.size} lines)")
                             break
                         }
                     } catch (e: Exception) {
-                        println("[FTP] Failed with encoding $encoding: ${e.message}")
+            log("[FTP] Failed with encoding $encoding: ${e.message}")
                     }
                 }
                 
                 // Parse all collected lines
                 for (line in lines) {
-                    println("[FTP] Raw line: $line")
+            log("[FTP] Raw line: $line")
                     parseFtpLine(line)?.let { fileInfo ->
-                        println("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
+            log("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
                         files.add(fileInfo)
                     }
                 }
             }
             
-            println("[FTP] Total files found: ${files.size}")
+            log("[FTP] Total files found: ${files.size}")
             readResponse()
             files
         } catch (e: Exception) {
-            println("[FTP] Error listing files: ${e.message}")
+            log("[FTP] Error listing files: ${e.message}")
             e.printStackTrace()
             emptyList()
         } finally {
@@ -269,7 +274,7 @@ class FtpClient {
         val bytes = "${command}\r\n".toByteArray(Charsets.US_ASCII)
         controlOutputStream?.write(bytes)
         controlOutputStream?.flush()
-        println("[FTP] Sent: $command")
+            log("[FTP] Sent: $command")
     }
     
     private fun readResponse(): FtpResponse {
@@ -278,7 +283,7 @@ class FtpClient {
         val code = firstLine.substring(0, 3).toInt()
         val message = if (firstLine.length > 4) firstLine.substring(4) else ""
         
-        println("[FTP] Received: $firstLine")
+            log("[FTP] Received: $firstLine")
         return FtpResponse(code, message)
     }
     

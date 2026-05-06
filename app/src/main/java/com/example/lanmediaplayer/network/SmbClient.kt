@@ -18,7 +18,7 @@ data class SmbFileInfo(
     val path: String
 )
 
-class SmbClient {
+class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     private var auth: NtlmPasswordAuthenticator? = null
     private var context: CIFSContext? = null
     private var baseUrl: String = ""
@@ -29,6 +29,11 @@ class SmbClient {
     private var password: String = ""
     private var domain: String = ""
     
+    private fun log(message: String) {
+            log(message)
+        logCallback?.invoke(message)
+    }
+    
     suspend fun connect(
         host: String,
         share: String,
@@ -37,11 +42,11 @@ class SmbClient {
         domain: String = ""
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            println("[SMB-JCIFS] === Starting connection ===")
-            println("[SMB-JCIFS] Host: $host")
-            println("[SMB-JCIFS] Share: '$share'")
-            println("[SMB-JCIFS] Username: '$username'")
-            println("[SMB-JCIFS] Domain: '$domain'")
+            log("[SMB-JCIFS] === Starting connection ===")
+            log("[SMB-JCIFS] Host: $host")
+            log("[SMB-JCIFS] Share: '$share'")
+            log("[SMB-JCIFS] Username: '$username'")
+            log("[SMB-JCIFS] Domain: '$domain'")
             
             this@SmbClient.host = host
             this@SmbClient.share = share
@@ -60,26 +65,26 @@ class SmbClient {
             // Set authentication in properties
             if (domain.isNotEmpty()) {
                 properties.setProperty("jcifs.smb.client.domain", domain)
-                println("[SMB-JCIFS] Domain set: '$domain'")
+            log("[SMB-JCIFS] Domain set: '$domain'")
             }
             properties.setProperty("jcifs.smb.client.username", username)
             properties.setProperty("jcifs.smb.client.password", password)
-            println("[SMB-JCIFS] Username set: '$username' (length: ${username.length})")
-            println("[SMB-JCIFS] Password length: ${password.length}")
+            log("[SMB-JCIFS] Username set: '$username' (length: ${username.length})")
+            log("[SMB-JCIFS] Password length: ${password.length}")
             
             // Debug: Print all properties for verification
-            println("[SMB-JCIFS] === Configuration Properties ===")
+            log("[SMB-JCIFS] === Configuration Properties ===")
             properties.stringPropertyNames().forEach { key ->
                 val value = if (key.contains("password")) "***" else properties.getProperty(key)
-                println("[SMB-JCIFS]   $key = $value")
+            log("[SMB-JCIFS]   $key = $value")
             }
-            println("[SMB-JCIFS] ===============================")
+            log("[SMB-JCIFS] ===============================")
             
-            println("[SMB-JCIFS] Creating configuration...")
+            log("[SMB-JCIFS] Creating configuration...")
             val config = PropertyConfiguration(properties)
             context = BaseContext(config)
             
-            println("[SMB-JCIFS] Configuration created with domain: '$domain', user: '$username'")
+            log("[SMB-JCIFS] Configuration created with domain: '$domain', user: '$username'")
             
             // Build base URL
             baseUrl = if (share.isEmpty()) {
@@ -88,40 +93,40 @@ class SmbClient {
                 "smb://$host/$share/"
             }
             
-            println("[SMB-JCIFS] Base URL: $baseUrl")
+            log("[SMB-JCIFS] Base URL: $baseUrl")
             
             // If no share specified, just test basic connectivity
             if (share.isEmpty()) {
-                println("[SMB-JCIFS] No share specified, connection setup successful")
-                println("[SMB-JCIFS] === Connection established ===")
+            log("[SMB-JCIFS] No share specified, connection setup successful")
+            log("[SMB-JCIFS] === Connection established ===")
                 return@withContext true
             }
             
             // Test connection by checking if share exists
             val testUrl = "smb://$host/$share/"
-            println("[SMB-JCIFS] Testing connection to: $testUrl")
+            log("[SMB-JCIFS] Testing connection to: $testUrl")
             val testFile = SmbFile(testUrl, context)
             
-            println("[SMB-JCIFS] Checking if share exists...")
+            log("[SMB-JCIFS] Checking if share exists...")
             val exists = testFile.exists()
             
             if (exists) {
-                println("[SMB-JCIFS] Share exists and is accessible")
-                println("[SMB-JCIFS] === Connection successful ===")
+            log("[SMB-JCIFS] Share exists and is accessible")
+            log("[SMB-JCIFS] === Connection successful ===")
                 true
             } else {
-                println("[SMB-JCIFS] === ERROR: Share does not exist or access denied ===")
+            log("[SMB-JCIFS] === ERROR: Share does not exist or access denied ===")
                 false
             }
         } catch (e: Exception) {
-            println("[SMB-JCIFS] === Connection error ===")
-            println("[SMB-JCIFS] Error type: ${e.javaClass.simpleName}")
-            println("[SMB-JCIFS] Error message: ${e.message}")
+            log("[SMB-JCIFS] === Connection error ===")
+            log("[SMB-JCIFS] Error type: ${e.javaClass.simpleName}")
+            log("[SMB-JCIFS] Error message: ${e.message}")
             e.printStackTrace()
             // Print full stack trace for debugging
             val writer = java.io.PrintWriter(java.io.StringWriter())
             e.printStackTrace(writer)
-            println("[SMB-JCIFS] Full stack trace:\n${writer.toString()}")
+            log("[SMB-JCIFS] Full stack trace:\n${writer.toString()}")
             false
         }
     }
@@ -131,11 +136,11 @@ class SmbClient {
             val shares = mutableListOf<String>()
             
             if (host.isEmpty()) {
-                println("[SMB-JCIFS] ERROR: Host not set, cannot list shares")
+            log("[SMB-JCIFS] ERROR: Host not set, cannot list shares")
                 return@withContext emptyList()
             }
             
-            println("[SMB-JCIFS] Listing available shares on: $host")
+            log("[SMB-JCIFS] Listing available shares on: $host")
             
             // Connect to server root to enumerate shares
             val serverUrl = "smb://$host/"
@@ -148,17 +153,17 @@ class SmbClient {
                     // Skip hidden shares and administrative shares
                     if (!shareName.endsWith("$") && shareName.isNotBlank()) {
                         shares.add(shareName)
-                        println("[SMB-JCIFS] Found share: $shareName")
+            log("[SMB-JCIFS] Found share: $shareName")
                     }
                 }
             } catch (e: Exception) {
-                println("[SMB-JCIFS] Error listing shares: ${e.message}")
+            log("[SMB-JCIFS] Error listing shares: ${e.message}")
                 e.printStackTrace()
             }
             
             shares
         } catch (e: Exception) {
-            println("[SMB-JCIFS] Exception while listing shares: ${e.message}")
+            log("[SMB-JCIFS] Exception while listing shares: ${e.message}")
             e.printStackTrace()
             emptyList()
         }
@@ -166,7 +171,7 @@ class SmbClient {
     
     suspend fun listFiles(remotePath: String = ""): List<SmbFileInfo> = withContext(Dispatchers.IO) {
         try {
-            println("[SMB-JCIFS] Listing files in: '$remotePath'")
+            log("[SMB-JCIFS] Listing files in: '$remotePath'")
             val files = mutableListOf<SmbFileInfo>()
             
             val fullPath = if (remotePath.startsWith("/")) {
@@ -175,22 +180,22 @@ class SmbClient {
                 "$baseUrl$remotePath"
             }
             
-            println("[SMB-JCIFS] Full path: $fullPath")
+            log("[SMB-JCIFS] Full path: $fullPath")
             
             val smbFile = SmbFile(fullPath, context)
             
             if (!smbFile.exists()) {
-                println("[SMB-JCIFS] ERROR: Path does not exist: $fullPath")
+            log("[SMB-JCIFS] ERROR: Path does not exist: $fullPath")
                 return@withContext emptyList()
             }
             
             if (!smbFile.isDirectory) {
-                println("[SMB-JCIFS] ERROR: Path is not a directory: $fullPath")
+            log("[SMB-JCIFS] ERROR: Path is not a directory: $fullPath")
                 return@withContext emptyList()
             }
             
             val fileList = smbFile.listFiles()
-            println("[SMB-JCIFS] Found ${fileList.size} items")
+            log("[SMB-JCIFS] Found ${fileList.size} items")
             
             for (file in fileList) {
                 val fileName = file.name.trimEnd('/')
@@ -199,7 +204,7 @@ class SmbClient {
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                println("[SMB-JCIFS] File: $fileName, isDir: $isDirectory, size: $fileSize")
+            log("[SMB-JCIFS] File: $fileName, isDir: $isDirectory, size: $fileSize")
                 
                 files.add(SmbFileInfo(
                     name = fileName,
@@ -209,10 +214,10 @@ class SmbClient {
                 ))
             }
             
-            println("[SMB-JCIFS] Total files found: ${files.size}")
+            log("[SMB-JCIFS] Total files found: ${files.size}")
             files
         } catch (e: Exception) {
-            println("[SMB-JCIFS] Error listing files: ${e.message}")
+            log("[SMB-JCIFS] Error listing files: ${e.message}")
             e.printStackTrace()
             emptyList()
         }
@@ -220,7 +225,7 @@ class SmbClient {
     
     suspend fun downloadFile(remotePath: String, localFile: File): Boolean = withContext(Dispatchers.IO) {
         try {
-            println("[SMB-JCIFS] Downloading: $remotePath to ${localFile.absolutePath}")
+            log("[SMB-JCIFS] Downloading: $remotePath to ${localFile.absolutePath}")
             
             val fullPath = if (remotePath.startsWith("/")) {
                 "$baseUrl${remotePath.substring(1)}"
@@ -231,7 +236,7 @@ class SmbClient {
             val smbFile = SmbFile(fullPath, context)
             
             if (!smbFile.exists()) {
-                println("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
+            log("[SMB-JCIFS] ERROR: Remote file does not exist: $fullPath")
                 return@withContext false
             }
             
@@ -246,17 +251,17 @@ class SmbClient {
                 }
             }
             
-            println("[SMB-JCIFS] Download successful")
+            log("[SMB-JCIFS] Download successful")
             true
         } catch (e: Exception) {
-            println("[SMB-JCIFS] Download error: ${e.message}")
+            log("[SMB-JCIFS] Download error: ${e.message}")
             e.printStackTrace()
             false
         }
     }
     
     fun disconnect() {
-        println("[SMB-JCIFS] Disconnecting")
+            log("[SMB-JCIFS] Disconnecting")
         auth = null
         context = null
         baseUrl = ""

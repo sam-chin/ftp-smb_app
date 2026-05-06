@@ -65,7 +65,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 log("[Controller] WARNING: Password is empty!")
             }
             
-            ftpClient = FtpClient()
+            ftpClient = FtpClient(logCallback)
             
             val connected = ftpClient?.connect(host, port) ?: false
             if (!connected) {
@@ -111,7 +111,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 log("[Controller] WARNING: Password is empty!")
             }
             
-            smbClient = SmbClient()
+            smbClient = SmbClient(logCallback)
             
             // Connect without share first if share is empty
             val connectShare = if (share.isEmpty()) "" else share
