@@ -207,9 +207,11 @@ class HttpProxyServer {
         
         // Stream the requested range
         val buffer = ByteArray(64 * 1024) // 64KB buffer
-        var bytesRead: Int
         var remainingBytes = contentLength
-        while (remainingBytes > 0 && fileStream.read(buffer).also { bytesRead = it } != -1) {
+        while (remainingBytes > 0) {
+            val bytesRead = fileStream.read(buffer)
+            if (bytesRead == -1) break
+            
             val bytesToWrite = minOf(bytesRead.toLong(), remainingBytes).toInt()
             outputStream.write(buffer, 0, bytesToWrite)
             outputStream.flush()

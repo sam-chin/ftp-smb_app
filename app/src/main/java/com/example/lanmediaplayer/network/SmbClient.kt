@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.nio.charset.Charset
 import java.util.Properties
 
@@ -270,8 +271,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             
             FileOutputStream(localFile).use { output ->
                 val buffer = ByteArray(64 * 1024) // 64KB buffer
-                var bytesRead: Int
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                while (true) {
+                    val bytesRead = inputStream.read(buffer)
+                    if (bytesRead == -1) break
                     output.write(buffer, 0, bytesRead)
                 }
                 output.flush()
