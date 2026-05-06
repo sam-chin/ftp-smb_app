@@ -431,7 +431,7 @@ fun FileBrowserScreen(
                     Icon(
                         imageVector = Icons.Default.ArrowBack,
                         contentDescription = "Disconnect",
-                        modifier = Modifier.rotate(180f)
+                        modifier = Modifier.graphicsLayer(rotationZ = 180f)
                     )
                 }
             }
