@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.*
 import java.net.Socket
+import java.nio.charset.Charset
+import java.nio.charset.StandardCharsets
 import java.util.regex.Pattern
 
 data class FtpFileInfo(
@@ -25,6 +27,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     private var username: String = ""
     private var password: String = ""
     private var passiveMode: Boolean = true
+    
+    // Track server's detected encoding from responses
+    private var serverEncoding: Charset? = null
     
     private fun log(message: String) {
         println(message)
@@ -272,12 +277,20 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun sendCommand(command: String) {
-        // Use intelligent encoding detection for commands
-        val bytes = EncodingUtils.stringToBytes("${command}\r\n")
+        // Use server's detected encoding if available, otherwise use UTF-8 for non-ASCII commands
+        val commandBytes = if (command.any { it.code > 127 }) {
+            // Command contains non-ASCII characters (e.g., Chinese paths)
+            val encoding = serverEncoding ?: StandardCharsets.UTF_8
+            log("[FTP] Sending command with non-ASCII chars, using encoding: ${encoding.name()}")
+            "${command}\r\n".toByteArray(encoding)
+        } else {
+            // Pure ASCII command
+            "${command}\r\n".toByteArray(StandardCharsets.US_ASCII)
+        }
         
-        controlOutputStream?.write(bytes)
+        controlOutputStream?.write(commandBytes)
         controlOutputStream?.flush()
-        log("[FTP] Sent: $command (encoding: ${if (command.any { it.code > 127 }) "UTF-8" else "ASCII"})")
+        log("[FTP] Sent: $command")
     }
     
     private fun readResponse(): FtpResponse {
@@ -286,7 +299,26 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         val code = firstLine.substring(0, 3).toInt()
         val message = if (firstLine.length > 4) firstLine.substring(4) else ""
         
-            log("[FTP] Received: $firstLine")
+        // Learn server encoding from response content
+        if (serverEncoding == null && message.any { it.code > 127 }) {
+            // Server sent non-ASCII characters in response
+            // This gives us a clue about the server's preferred encoding
+            
+            // Check for Chinese characters
+            val hasChinese = message.any { it in '\u4e00'..'\u9fff' }
+            
+            if (hasChinese) {
+                // For Chinese FTP servers, UTF-8 is more universal
+                serverEncoding = StandardCharsets.UTF_8
+                log("[FTP] Detected Chinese characters in server response, using UTF-8 encoding")
+            } else {
+                // Other non-ASCII characters, default to UTF-8
+                serverEncoding = StandardCharsets.UTF_8
+                log("[FTP] Detected non-ASCII characters in server response, using UTF-8 encoding")
+            }
+        }
+        
+        log("[FTP] Received: $firstLine")
         return FtpResponse(code, message)
     }
     
