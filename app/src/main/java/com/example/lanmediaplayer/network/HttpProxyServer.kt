@@ -5,10 +5,15 @@ import java.io.*
 import java.net.ServerSocket
 import java.net.Socket
 
-class HttpProxyServer {
+class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     private var serverSocket: ServerSocket? = null
     private var serverScope: CoroutineScope? = null
     private var currentPort: Int = 0
+    
+    private fun log(message: String) {
+        println(message)
+        logCallback?.invoke(message)
+    }
     
     interface FileProvider {
         suspend fun getFileStream(path: String): InputStream?
@@ -30,11 +35,16 @@ class HttpProxyServer {
                 while (isActive) {
                     try {
                         val clientSocket = serverSocket?.accept() ?: break
+                        val remoteAddress = clientSocket.remoteSocketAddress
+                        log("[HTTP Proxy] New connection from: $remoteAddress")
                         launch {
                             handleClient(clientSocket, fileProvider)
                         }
                     } catch (e: Exception) {
-                        if (isActive) e.printStackTrace()
+                        if (isActive) {
+                            log("[HTTP Proxy] Error accepting connection: ${e.message}")
+                            e.printStackTrace()
+                        }
                     }
                 }
             }
@@ -54,10 +64,10 @@ class HttpProxyServer {
             val reader = BufferedReader(InputStreamReader(inputStream))
             val requestLine = reader.readLine() ?: return
             
-            println("[HTTP Proxy] Received request: $requestLine")
+            log("[HTTP Proxy] Received request: $requestLine")
             
             if (!requestLine.startsWith("GET")) {
-                println("[HTTP Proxy] Method not allowed: $requestLine")
+                log("[HTTP Proxy] Method not allowed: $requestLine")
                 sendErrorResponse(outputStream, 405, "Method Not Allowed")
                 clientSocket.close()
                 return
@@ -72,16 +82,16 @@ class HttpProxyServer {
             
             // Extract and decode URL-encoded path
             val encodedPath = parts[1].substring(1) // Remove leading /
-            println("[HTTP Proxy] Encoded path: $encodedPath")
+            log("[HTTP Proxy] Encoded path: $encodedPath")
             
             val filePath = try {
                 java.net.URLDecoder.decode(encodedPath, "UTF-8")
             } catch (e: Exception) {
-                println("[HTTP Proxy] URL decode failed: ${e.message}")
+                log("[HTTP Proxy] URL decode failed: ${e.message}")
                 encodedPath // Fallback to original if decoding fails
             }
             
-            println("[HTTP Proxy] Decoded file path: $filePath")
+            log("[HTTP Proxy] Decoded file path: $filePath")
             
             // Read all headers
             val headers = mutableMapOf<String, String>()
@@ -97,10 +107,10 @@ class HttpProxyServer {
             } while (line?.isNotEmpty() == true)
             
             val fileSize = fileProvider.getFileSize(filePath)
-            println("[HTTP Proxy] File size: $fileSize")
+            log("[HTTP Proxy] File size: $fileSize")
             
             if (fileSize <= 0) {
-                println("[HTTP Proxy] File not found or size is 0")
+                log("[HTTP Proxy] File not found or size is 0")
                 sendErrorResponse(outputStream, 404, "File Not Found")
                 clientSocket.close()
                 return
@@ -108,7 +118,7 @@ class HttpProxyServer {
             
             // Detect content type based on file extension
             val contentType = detectContentType(filePath)
-            println("[HTTP Proxy] Content type: $contentType")
+            log("[HTTP Proxy] Content type: $contentType")
             
             // Check for Range request (for seeking support)
             val rangeHeader = headers["Range"]
@@ -141,17 +151,17 @@ class HttpProxyServer {
         fileSize: Long,
         contentType: String
     ) {
-        println("[HTTP Proxy] Handling full request for: $filePath")
+        log("[HTTP Proxy] Handling full request for: $filePath")
         var fileStream: InputStream? = null
         try {
             fileStream = fileProvider.getFileStream(filePath)
             if (fileStream == null) {
-                println("[HTTP Proxy] Failed to get file stream")
+                log("[HTTP Proxy] Failed to get file stream")
                 sendErrorResponse(outputStream, 404, "File Not Found")
                 return
             }
             
-            println("[HTTP Proxy] File stream opened, size: $fileSize, starting to send data...")
+            log("[HTTP Proxy] File stream opened, size: $fileSize, starting to send data...")
             
             val responseHeader = "HTTP/1.1 200 OK\r\n" +
                     "Content-Type: $contentType\r\n" +
@@ -173,17 +183,17 @@ class HttpProxyServer {
                 totalBytesRead += bytesRead
             }
             
-            println("[HTTP Proxy] Sent $totalBytesRead bytes")
+            log("[HTTP Proxy] Sent $totalBytesRead bytes")
         } catch (e: Exception) {
-            println("[HTTP Proxy] Error in handleFullRequest: ${e.message}")
+            log("[HTTP Proxy] Error in handleFullRequest: ${e.message}")
             e.printStackTrace()
         } finally {
             // IMPORTANT: Close the file stream to release FTP/SMB resources
             try {
                 fileStream?.close()
-                println("[HTTP Proxy] File stream closed")
+                log("[HTTP Proxy] File stream closed")
             } catch (e: Exception) {
-                println("[HTTP Proxy] Error closing stream: ${e.message}")
+                log("[HTTP Proxy] Error closing stream: ${e.message}")
             }
         }
     }
@@ -216,7 +226,7 @@ class HttpProxyServer {
             }
             
             val contentLength = end - start + 1
-            println("[HTTP Proxy] Range request: bytes $start-$end/$fileSize (content length: $contentLength)")
+            log("[HTTP Proxy] Range request: bytes $start-$end/$fileSize (content length: $contentLength)")
             
             fileStream = fileProvider.getFileStream(filePath)
             if (fileStream == null) {
@@ -226,7 +236,7 @@ class HttpProxyServer {
             
             // Skip to start position
             val skipped = fileStream.skip(start)
-            println("[HTTP Proxy] Skipped $skipped bytes to reach start position")
+            log("[HTTP Proxy] Skipped $skipped bytes to reach start position")
             
             val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
                     "Content-Type: $contentType\r\n" +
@@ -254,17 +264,17 @@ class HttpProxyServer {
                 totalSent += bytesToWrite
             }
             
-            println("[HTTP Proxy] Range request completed, sent $totalSent bytes")
+            log("[HTTP Proxy] Range request completed, sent $totalSent bytes")
         } catch (e: Exception) {
-            println("[HTTP Proxy] Error in handleRangeRequest: ${e.message}")
+            log("[HTTP Proxy] Error in handleRangeRequest: ${e.message}")
             e.printStackTrace()
         } finally {
             // IMPORTANT: Close the file stream to release FTP/SMB resources
             try {
                 fileStream?.close()
-                println("[HTTP Proxy] Range request file stream closed")
+                log("[HTTP Proxy] Range request file stream closed")
             } catch (e: Exception) {
-                println("[HTTP Proxy] Error closing stream: ${e.message}")
+                log("[HTTP Proxy] Error closing stream: ${e.message}")
             }
         }
     }
@@ -330,6 +340,17 @@ class HttpProxyServer {
     fun getUrl(path: String): String {
         // Remove leading slash from path to avoid double slashes
         val cleanPath = if (path.startsWith("/")) path.substring(1) else path
-        return "http://127.0.0.1:$currentPort/$cleanPath"
+        
+        // URL encode the path to handle special characters
+        val encodedPath = try {
+            java.net.URLEncoder.encode(cleanPath, "UTF-8")
+                .replace("+", "%20") // URLEncoder encodes spaces as +, but we need %20
+        } catch (e: Exception) {
+            cleanPath // Fallback to original if encoding fails
+        }
+        
+        val url = "http://127.0.0.1:$currentPort/$encodedPath"
+        log("[HTTP Proxy] Generated URL: $url")
+        return url
     }
 }

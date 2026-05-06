@@ -51,7 +51,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     fun initializePlayer() {
         exoPlayer = ExoPlayer.Builder(context).build()
-        httpProxy = HttpProxyServer()
+        httpProxy = HttpProxyServer(logCallback)
     }
     
     fun getPlayer(): ExoPlayer? = exoPlayer
@@ -335,6 +335,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 
                 val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: ""
                 log("[Controller] Proxy URL: $proxyUrl")
+                log("[Controller] Media file path: ${mediaFile.path}")
+                log("[Controller] Media file name: ${mediaFile.name}")
+                log("[Controller] HTTP Proxy port: ${httpProxy?.getPort()}")
                 
                 withContext(Dispatchers.Main) {
                     // Create a DefaultHttpDataSource.Factory for HTTP streaming
