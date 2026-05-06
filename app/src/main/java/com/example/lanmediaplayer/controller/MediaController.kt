@@ -31,7 +31,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     // Separate scopes for different operations
     private val connectionScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var browseScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
     private fun log(message: String) {
         println(message)
@@ -56,9 +56,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] === Protocol Switch: Connecting to FTP ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
             
-            // Cancel any ongoing browse operations
-            browseScope.coroutineContext.cancelChildren()
-            log("[Controller] Cancelled ongoing browse operations")
+            // Cancel and recreate browse scope to ensure clean state
+            log("[Controller] Cancelling old browseScope...")
+            browseScope.cancel()
+            browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+            log("[Controller] New browseScope created, isActive: ${browseScope.isActive}")
             
             // Disconnect any existing connections
             if (smbClient != null) {
@@ -122,9 +124,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] === Protocol Switch: Connecting to SMB ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
             
-            // Cancel any ongoing browse operations
-            browseScope.coroutineContext.cancelChildren()
-            log("[Controller] Cancelled ongoing browse operations")
+            // Cancel and recreate browse scope to ensure clean state
+            log("[Controller] Cancelling old browseScope...")
+            browseScope.cancel()
+            browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+            log("[Controller] New browseScope created, isActive: ${browseScope.isActive}")
             
             // Disconnect any existing connections
             if (ftpClient != null) {
