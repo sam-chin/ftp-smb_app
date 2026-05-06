@@ -106,6 +106,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                 }
             } while (line?.isNotEmpty() == true)
             
+            log("[HTTP Proxy] Calling getFileSize for path: $filePath")
             val fileSize = fileProvider.getFileSize(filePath)
             log("[HTTP Proxy] File size: $fileSize")
             
