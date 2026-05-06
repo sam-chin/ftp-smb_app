@@ -46,10 +46,21 @@ class MediaController(private val context: Context) {
     
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
         return try {
-            ftpClient = FtpClient()
             println("[Controller] === FTP Connection Start ===")
-            println("[Controller] Target: $host:$port")
-            println("[Controller] User: $username")
+            println("[Controller] Received parameters:")
+            println("[Controller]   Host: '$host' (length: ${host.length})")
+            println("[Controller]   Port: $port")
+            println("[Controller]   Username: '$username' (length: ${username.length})")
+            println("[Controller]   Password length: ${password.length}")
+            
+            if (username.isEmpty()) {
+                println("[Controller] WARNING: Username is empty!")
+            }
+            if (password.isEmpty()) {
+                println("[Controller] WARNING: Password is empty!")
+            }
+            
+            ftpClient = FtpClient()
             
             val connected = ftpClient?.connect(host, port) ?: false
             if (!connected) {
@@ -80,12 +91,22 @@ class MediaController(private val context: Context) {
     
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
-            smbClient = SmbClient()
             println("[Controller] === SMB Connection Start ===")
-            println("[Controller] Host: $host")
-            println("[Controller] Share: '$share'")
-            println("[Controller] User: '$username'")
-            println("[Controller] Domain: '$domain'")
+            println("[Controller] Received parameters:")
+            println("[Controller]   Host: '$host' (length: ${host.length})")
+            println("[Controller]   Share: '$share'")
+            println("[Controller]   Username: '$username' (length: ${username.length})")
+            println("[Controller]   Password length: ${password.length}")
+            println("[Controller]   Domain: '$domain'")
+            
+            if (username.isEmpty()) {
+                println("[Controller] WARNING: Username is empty!")
+            }
+            if (password.isEmpty()) {
+                println("[Controller] WARNING: Password is empty!")
+            }
+            
+            smbClient = SmbClient()
             
             // Connect without share first if share is empty
             val connectShare = if (share.isEmpty()) "" else share

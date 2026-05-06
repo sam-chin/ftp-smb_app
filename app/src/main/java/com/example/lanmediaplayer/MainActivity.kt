@@ -410,6 +410,18 @@ fun ConnectionScreen(
         Button(
             onClick = {
                 val portInt = port.toIntOrNull() ?: (if (protocol is NetworkProtocol.FTP) 21 else 445)
+                
+                // Debug: Log actual values being passed
+                println("[UI DEBUG] Protocol: ${protocol::class.simpleName}")
+                println("[UI DEBUG] Host: '$host' (length: ${host.length})")
+                println("[UI DEBUG] Port: $portInt")
+                println("[UI DEBUG] Username: '$username' (length: ${username.length})")
+                println("[UI DEBUG] Password length: ${password.length}")
+                if (protocol is NetworkProtocol.SMB) {
+                    println("[UI DEBUG] Share: '$share'")
+                    println("[UI DEBUG] Domain: '$domain'")
+                }
+                
                 onConnect(protocol, host, portInt, username, password, share, domain)
             },
             modifier = Modifier.fillMaxWidth(),
