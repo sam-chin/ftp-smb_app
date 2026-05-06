@@ -268,17 +268,19 @@ fun ConnectionScreen(
     isLoading: Boolean
 ) {
     var protocol by remember { mutableStateOf(selectedProtocol) }
+    
+    // Initialize fields based on initial protocol
     var host by remember { 
-        mutableStateOf(if (protocol is NetworkProtocol.FTP) savedFtpHost else savedSmbHost)
+        mutableStateOf(if (selectedProtocol is NetworkProtocol.FTP) savedFtpHost else savedSmbHost)
     }
     var port by remember { 
-        mutableStateOf((if (protocol is NetworkProtocol.FTP) savedFtpPort else savedSmbPort).toString())
+        mutableStateOf((if (selectedProtocol is NetworkProtocol.FTP) savedFtpPort else savedSmbPort).toString())
     }
     var username by remember { 
-        mutableStateOf(if (protocol is NetworkProtocol.FTP) savedFtpUsername else savedSmbUsername)
+        mutableStateOf(if (selectedProtocol is NetworkProtocol.FTP) savedFtpUsername else savedSmbUsername)
     }
     var password by remember { 
-        mutableStateOf(if (protocol is NetworkProtocol.FTP) savedFtpPassword else savedSmbPassword)
+        mutableStateOf(if (selectedProtocol is NetworkProtocol.FTP) savedFtpPassword else savedSmbPassword)
     }
     var share by remember { mutableStateOf(savedSmbShare) }
     var domain by remember { mutableStateOf(savedSmbDomain) }
