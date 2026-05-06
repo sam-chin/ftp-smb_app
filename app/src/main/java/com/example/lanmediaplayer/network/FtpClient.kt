@@ -125,28 +125,26 @@ class FtpClient {
             val files = mutableListOf<FtpFileInfo>()
             dataSocket?.let { socket ->
                 val inputStream = socket.getInputStream()
-                // Try multiple encodings for Chinese filenames
-                var reader: BufferedReader? = null
-                var lines = listOf<String>()
                 
-                // Try UTF-8 first, then GBK, then default
+                // Read all bytes first
+                val bytes = inputStream.readBytes()
+                println("[FTP] Read ${bytes.size} bytes from data connection")
+                
+                // Try multiple encodings for Chinese filenames
+                var lines = listOf<String>()
                 val encodings = listOf("UTF-8", "GBK", "GB2312", "ISO-8859-1")
                 
                 for (encoding in encodings) {
                     try {
-                        reader = BufferedReader(InputStreamReader(inputStream, encoding))
-                        val tempLines = mutableListOf<String>()
-                        var line: String?
-                        while (reader.readLine().also { line = it } != null) {
-                            line?.let { tempLines.add(it) }
+                        val text = String(bytes, charset(encoding))
+                        val tempLines = text.lines().filter { it.isNotBlank() }
+                        if (tempLines.isNotEmpty()) {
+                            lines = tempLines
+                            println("[FTP] Successfully decoded with encoding: $encoding (${lines.size} lines)")
+                            break
                         }
-                        reader.close()
-                        lines = tempLines
-                        println("[FTP] Successfully read with encoding: $encoding")
-                        break
                     } catch (e: Exception) {
                         println("[FTP] Failed with encoding $encoding: ${e.message}")
-                        reader?.close()
                     }
                 }
                 
