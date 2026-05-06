@@ -43,7 +43,7 @@ class SmbClient {
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             println("[SMB] Starting connection to: $host")
-            println("[SMB] Share: $share, User: $username, Domain: $domain")
+            println("[SMB] Share: '$share', User: '$username', Domain: '$domain'")
             
             this@SmbClient.host = host
             this@SmbClient.share = share
@@ -54,46 +54,85 @@ class SmbClient {
             println("[SMB] Creating SMBClient...")
             smbClient = SMBClient()
             
-            println("[SMB] Connecting to host...")
+            println("[SMB] Connecting to host: $host...")
             connection = smbClient?.connect(host)
             if (connection == null) {
-                println("[SMB] Failed to create connection")
+                println("[SMB] ERROR: Failed to create connection object")
                 return@withContext false
             }
             println("[SMB] Connection established")
             
-            val authContext = if (domain.isNotEmpty()) {
-                println("[SMB] Creating auth context with domain: $domain")
-                AuthenticationContext(username, password.toCharArray(), domain)
-            } else {
-                println("[SMB] Creating auth context without domain")
-                // Use empty string instead of null for domain
-                AuthenticationContext(username, password.toCharArray(), "")
-            }
+            // Create authentication context - use empty string for domain if not provided
+            val authDomain = if (domain.isNotEmpty()) domain else ""
+            println("[SMB] Creating auth context with domain: '$authDomain'")
+            val authContext = AuthenticationContext(username, password.toCharArray(), authDomain)
             
             println("[SMB] Authenticating...")
             session = connection?.authenticate(authContext)
             if (session == null) {
-                println("[SMB] Authentication failed")
+                println("[SMB] ERROR: Authentication returned null session")
                 return@withContext false
             }
             println("[SMB] Authentication successful")
             
-            println("[SMB] Connecting to share: $share")
-            val connectedShare = session?.connectShare(share)
-            diskShare = if (connectedShare is DiskShare) connectedShare else null
-            if (diskShare == null) {
-                println("[SMB] Failed to connect to share: $share")
+            // If share is empty, we're just testing the connection
+            if (share.isEmpty()) {
+                println("[SMB] No share specified, connection test successful")
+                return@withContext true
+            }
+            
+            println("[SMB] Connecting to share: '$share'")
+            try {
+                val connectedShare = session?.connectShare(share)
+                diskShare = if (connectedShare is DiskShare) connectedShare else null
+                if (diskShare == null) {
+                    println("[SMB] ERROR: Failed to connect to share '$share' or wrong type")
+                    println("[SMB] Connected share type: ${connectedShare?.javaClass?.name}")
+                    return@withContext false
+                }
+                println("[SMB] Successfully connected to share: $share")
+            } catch (e: Exception) {
+                println("[SMB] ERROR: Exception while connecting to share: ${e.message}")
+                e.printStackTrace()
                 return@withContext false
             }
-            println("[SMB] Successfully connected to share")
             
             true
         } catch (e: Exception) {
-            println("[SMB] Connection error: ${e.message}")
+            println("[SMB] Connection error: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
             disconnect()
             false
+        }
+    }
+    
+    suspend fun listShares(): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val shares = mutableListOf<String>()
+            session?.let { sess ->
+                println("[SMB] Listing available shares...")
+                try {
+                    val shareList = sess.listShares()
+                    for (shareInfo in shareList) {
+                        val shareName = shareInfo.shareName
+                        // Skip hidden shares and administrative shares
+                        if (!shareName.endsWith("$") && shareName.isNotBlank()) {
+                            shares.add(shareName)
+                            println("[SMB] Found share: $shareName")
+                        }
+                    }
+                } catch (e: Exception) {
+                    println("[SMB] Error listing shares: ${e.message}")
+                    e.printStackTrace()
+                }
+            } ?: run {
+                println("[SMB] ERROR: Session is null, cannot list shares")
+            }
+            shares
+        } catch (e: Exception) {
+            println("[SMB] Exception while listing shares: ${e.message}")
+            e.printStackTrace()
+            emptyList()
         }
     }
     

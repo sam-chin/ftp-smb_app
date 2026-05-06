@@ -72,14 +72,33 @@ class MediaController(private val context: Context) {
     suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
         return try {
             smbClient = SmbClient()
-            println("[Controller] Connecting to SMB: $host, share: $share")
-            val connected = smbClient?.connect(host, share, username, password, domain) ?: false
-            if (connected) {
-                println("[Controller] SMB connection successful")
-                Pair(true, "Success")
-            } else {
+            println("[Controller] Connecting to SMB: $host, share: '$share'")
+            
+            // Connect without share first if share is empty
+            val connectShare = if (share.isEmpty()) "" else share
+            val connected = smbClient?.connect(host, connectShare, username, password, domain) ?: false
+            
+            if (!connected) {
                 println("[Controller] SMB connection failed")
-                Pair(false, "Failed to connect to SMB server")
+                return Pair(false, "Failed to connect to SMB server")
+            }
+            
+            println("[Controller] SMB connection successful")
+            
+            // If no share was specified, list available shares
+            if (share.isEmpty()) {
+                println("[Controller] No share specified, listing available shares...")
+                val shares = smbClient?.listShares() ?: emptyList()
+                if (shares.isNotEmpty()) {
+                    val sharesList = shares.joinToString(", ")
+                    println("[Controller] Available shares: $sharesList")
+                    Pair(true, "Connected! Available shares: $sharesList")
+                } else {
+                    println("[Controller] No shares found")
+                    Pair(true, "Connected but no shares found")
+                }
+            } else {
+                Pair(true, "Success")
             }
         } catch (e: Exception) {
             println("[Controller] SMB error: ${e.message}")
