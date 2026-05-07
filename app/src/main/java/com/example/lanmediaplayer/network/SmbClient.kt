@@ -300,7 +300,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                val fileName = fullFileName.substringAfterLast('/')
+                var fileName = fullFileName
+                if (normalizedPath.isNotEmpty() && fullFileName.startsWith(normalizedPath)) {
+                    fileName = fullFileName.substring(normalizedPath.length)
+                    if (fileName.startsWith("/")) {
+                        fileName = fileName.substring(1)
+                    }
+                    log("[SMB-JCIFS] Removed normalizedPath prefix from file name: '$fullFileName' -> '$fileName'")
+                }
+                
                 log("[SMB-JCIFS] File: $fullFileName, extracted name: $fileName, isDir: $isDirectory, size: $fileSize")
                 
                 files.add(SmbFileInfo(
