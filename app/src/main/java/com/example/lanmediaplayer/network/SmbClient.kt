@@ -294,22 +294,24 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             }
             
             for (file in fileList) {
-                val fileName = file.name.trimEnd('/')
-                if (fileName == "." || fileName == "..") continue
+                val fullFileName = file.name.trimEnd('/')
+                if (fullFileName == "." || fullFileName == "..") continue
                 
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                log("[SMB-JCIFS] File name: '$fileName', isDir: $isDirectory, size: $fileSize")
-                
-                val filePath = "/$fileName"
-                log("[SMB-JCIFS] Constructed file path: $filePath")
+                val fileName = fullFileName.substringAfterLast('/')
+                log("[SMB-JCIFS] File: $fullFileName, extracted name: $fileName, isDir: $isDirectory, size: $fileSize")
                 
                 files.add(SmbFileInfo(
                     name = fileName,
                     size = fileSize,
                     isDirectory = isDirectory,
-                    path = filePath
+                    path = if (normalizedPath == "") {
+                        "/$fileName"
+                    } else {
+                        "/$normalizedPath/$fileName"
+                    }
                 ))
             }
             
