@@ -544,9 +544,14 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Target path: $newFullPath")
             
             val targetFile = SmbFile(newFullPath, context)
-            success = smbFile.renameTo(targetFile)
-            
-            log("[SMB-JCIFS] Rename ${if (success) "successful" else "failed"}")
+            try {
+                smbFile.renameTo(targetFile)
+                success = true
+                log("[SMB-JCIFS] Rename successful")
+            } catch (re: RuntimeException) {
+                success = false
+                log("[SMB-JCIFS] Rename failed: ${re.message}")
+            }
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error renaming file: ${e.message}")
             e.printStackTrace()
