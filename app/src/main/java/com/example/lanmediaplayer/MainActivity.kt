@@ -23,7 +23,10 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1107,6 +1110,24 @@ fun ImageViewerScreen(
     onBackClick: () -> Unit
 ) {
     var currentPage by remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
+    var isSlideshowPlaying by remember { mutableStateOf(false) }
+    var slideshowInterval by remember { mutableStateOf(6) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    
+    val coroutineScope = rememberCoroutineScope()
+    
+    LaunchedEffect(isSlideshowPlaying, currentPage, slideshowInterval) {
+        if (isSlideshowPlaying && imageFiles.isNotEmpty()) {
+            while (isSlideshowPlaying) {
+                delay(slideshowInterval * 1000L)
+                if (isSlideshowPlaying && currentPage < imageFiles.size - 1) {
+                    currentPage++
+                } else if (isSlideshowPlaying) {
+                    currentPage = 0
+                }
+            }
+        }
+    }
     
     Box(modifier = Modifier.fillMaxSize()) {
         if (imageFiles.isEmpty()) {
@@ -1142,19 +1163,41 @@ fun ImageViewerScreen(
                 }
             }
             
-            Text(
-                text = "${currentPage + 1} / ${imageFiles.size}",
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.5f),
-                        RoundedCornerShape(8.dp)
-                    )
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium
-            )
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${currentPage + 1} / ${imageFiles.size}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                
+                IconButton(
+                    onClick = { isSlideshowPlaying = !isSlideshowPlaying }
+                ) {
+                    Icon(
+                        imageVector = if (isSlideshowPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isSlideshowPlaying) "Pause" else "Play",
+                        tint = Color.White
+                    )
+                }
+                
+                IconButton(
+                    onClick = { showSettingsDialog = true }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = "Settings",
+                        tint = Color.White
+                    )
+                }
+            }
         }
         
         Box(
@@ -1172,6 +1215,123 @@ fun ImageViewerScreen(
             }
         }
     }
+    
+    if (showSettingsDialog) {
+        SlideshowSettingsDialog(
+            currentInterval = slideshowInterval,
+            onIntervalChange = { slideshowInterval = it },
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+}
+
+@Composable
+fun SlideshowSettingsDialog(
+    currentInterval: Int,
+    onIntervalChange: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var customInterval by remember { mutableStateOf(currentInterval.toString()) }
+    var showCustomInput by remember { mutableStateOf(false) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("幻灯片设置") },
+        text = {
+            Column {
+                Text(
+                    text = "切换时间",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = !showCustomInput,
+                        onClick = { showCustomInput = false },
+                        label = { Text("预设") }
+                    )
+                    FilterChip(
+                        selected = showCustomInput,
+                        onClick = { showCustomInput = true },
+                        label = { Text("自定义") }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                if (showCustomInput) {
+                    OutlinedTextField(
+                        value = customInterval,
+                        onValueChange = { newValue ->
+                            if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                                customInterval = newValue
+                            }
+                        },
+                        label = { Text("秒") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        suffix = { Text("秒") }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val interval = customInterval.toIntOrNull()
+                            if (interval != null && interval > 0) {
+                                onIntervalChange(interval)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("应用")
+                    }
+                } else {
+                     Column(
+                         horizontalAlignment = Alignment.CenterHorizontally
+                     ) {
+                         Row(
+                             horizontalArrangement = Arrangement.spacedBy(8.dp)
+                         ) {
+                             listOf(2, 3, 5, 6).forEach { seconds ->
+                                 FilterChip(
+                                     selected = currentInterval == seconds,
+                                     onClick = { onIntervalChange(seconds) },
+                                     label = { Text("${seconds}秒") }
+                                 )
+                             }
+                         }
+                         Spacer(modifier = Modifier.height(8.dp))
+                         Row(
+                             horizontalArrangement = Arrangement.spacedBy(8.dp)
+                         ) {
+                             listOf(10, 15, 30).forEach { seconds ->
+                                 FilterChip(
+                                     selected = currentInterval == seconds,
+                                     onClick = { onIntervalChange(seconds) },
+                                     label = { Text("${seconds}秒") }
+                                 )
+                             }
+                         }
+                     }
+                 }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "当前: ${currentInterval}秒",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("完成")
+            }
+        }
+    )
 }
 
 @Composable
