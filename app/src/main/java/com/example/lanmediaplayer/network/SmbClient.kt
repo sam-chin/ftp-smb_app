@@ -292,15 +292,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                var fileName = fullFileName
-                if (normalizedPath.isNotEmpty() && fullFileName.startsWith(normalizedPath)) {
-                    fileName = fullFileName.substring(normalizedPath.length)
-                    if (fileName.startsWith("/")) {
-                        fileName = fileName.substring(1)
-                    }
-                }
-                
-                val filePath = if (normalizedPath == "") {
+                val fileName = fullFileName.substringAfterLast('/')
+                val filePath = if (normalizedPath.isEmpty()) {
                     "/$fileName"
                 } else {
                     "/$normalizedPath/$fileName"
