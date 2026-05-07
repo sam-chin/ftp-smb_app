@@ -1082,7 +1082,7 @@ fun ImageViewerScreen(
     getImageUrl: (String) -> String,
     onBackClick: () -> Unit
 ) {
-    val (currentPage, setCurrentPage) = remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
+    var currentPage by remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
     
     Box(modifier = Modifier.fillMaxSize()) {
         if (imageFiles.isEmpty()) {
@@ -1093,10 +1093,9 @@ fun ImageViewerScreen(
         } else {
             HorizontalPager(
                 pageCount = imageFiles.size,
-                currentPage = currentPage,
-                onPageChange = setCurrentPage,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
+                currentPage = page
                 val currentFile = imageFiles[page]
                 val imageUrl = remember(currentFile) {
                     getImageUrl(currentFile.path)
