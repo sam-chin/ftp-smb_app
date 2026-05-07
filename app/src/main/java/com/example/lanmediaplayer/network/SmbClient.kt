@@ -84,22 +84,18 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 this@SmbClient.domain = testDomain
                 log("[SMB-JCIFS] Trying domain: '${if (testDomain.isEmpty()) "(empty)" else testDomain}'")
                 
-                // Configure JCIFS to use SMB2/SMB3 only (disable SMB1)
+                // Configure JCIFS for file operations (SMB2/3)
                 val properties = Properties()
-                properties.setProperty("jcifs.smb.client.minVersion", "SMB202")
-                properties.setProperty("jcifs.smb.client.maxVersion", "SMB311")
-                properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
                 properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
                 properties.setProperty("jcifs.smb.client.soTimeout", "30000")
-                
-                // Set authentication in properties
+                properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
                 if (testDomain.isNotEmpty()) {
                     properties.setProperty("jcifs.smb.client.domain", testDomain)
                 }
                 properties.setProperty("jcifs.smb.client.username", username)
                 properties.setProperty("jcifs.smb.client.password", password)
                 
-                log("[SMB-JCIFS] Creating configuration...")
+                log("[SMB-JCIFS] Creating CIFS context...")
                 val config = PropertyConfiguration(properties)
                 context = BaseContext(config)
                 
@@ -189,34 +185,56 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             val shares = mutableListOf<String>()
             
             if (host.isEmpty()) {
-            log("[SMB-JCIFS] ERROR: Host not set, cannot list shares")
+                log("[SMB-JCIFS] ERROR: Host not set, cannot list shares")
                 return@withContext emptyList()
             }
             
             log("[SMB-JCIFS] Listing available shares on: $host")
             
-            // Connect to server root to enumerate shares
+            // Try to create a SMB1 context for share enumeration
+            var shareEnumContext: CIFSContext? = null
+            try {
+                val props = Properties()
+                props.setProperty("jcifs.smb.client.responseTimeout", "30000")
+                props.setProperty("jcifs.smb.client.soTimeout", "30000")
+                props.setProperty("jcifs.smb.client.username", username)
+                props.setProperty("jcifs.smb.client.password", password)
+                if (domain.isNotEmpty()) {
+                    props.setProperty("jcifs.smb.client.domain", domain)
+                }
+                shareEnumContext = BaseContext(PropertyConfiguration(props))
+            } catch (e: Exception) {
+                log("[SMB-JCIFS] Failed to create share enumeration context: ${e.message}")
+            }
+            
+            val enumContext = shareEnumContext ?: context
             val serverUrl = "smb://$host/"
-            val serverFile = SmbFile(serverUrl, context)
+            log("[SMB-JCIFS] Connecting to: $serverUrl with enumeration context")
             
             try {
+                val serverFile = SmbFile(serverUrl, enumContext)
+                log("[SMB-JCIFS] Server file created, checking exists...")
+                
                 val files = serverFile.listFiles()
+                log("[SMB-JCIFS] Listed ${files.size} items")
+                
                 for (file in files) {
                     val shareName = file.name.trimEnd('/')
-                    // Skip hidden shares and administrative shares
-                    if (!shareName.endsWith("$") && shareName.isNotBlank()) {
+                    log("[SMB-JCIFS] Checking share: '$shareName'")
+                    if (!shareName.endsWith("$") && shareName.isNotBlank() && shareName != "." && shareName != "..") {
                         shares.add(shareName)
-            log("[SMB-JCIFS] Found share: $shareName")
+                        log("[SMB-JCIFS] Added share: $shareName")
                     }
                 }
             } catch (e: Exception) {
-            log("[SMB-JCIFS] Error listing shares: ${e.message}")
+                log("[SMB-JCIFS] Error listing shares: ${e.message}")
                 e.printStackTrace()
             }
             
+            log("[SMB-JCIFS] Total shares found: ${shares.size}")
             shares
         } catch (e: Exception) {
-            log("[SMB-JCIFS] Exception while listing shares: ${e.message}")
+            log("[SMB-JCIFS] Exception listing shares: ${e.message}")
             e.printStackTrace()
             emptyList()
         }
