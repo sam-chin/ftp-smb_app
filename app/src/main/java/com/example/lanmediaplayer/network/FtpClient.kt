@@ -554,6 +554,10 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         val size = parts[4].toLongOrNull() ?: 0L
         val name = parts.subList(8, parts.size).joinToString(" ")
         
+        if (name == "." || name == "..") {
+            return null
+        }
+        
         val isDirectory = permissions.startsWith("d")
         
         return FtpFileInfo(
