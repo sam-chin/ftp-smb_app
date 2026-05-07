@@ -489,7 +489,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
      * Clear any pending responses from the control connection
      * This prevents response mixing when commands are sent in quick succession
      */
-    private fun clearPendingResponses() {
+    private suspend fun clearPendingResponses() {
         var originalTimeout = 30000
         
         try {
@@ -498,7 +498,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             
             originalTimeout = controlSocket?.soTimeout ?: 30000
             
-            val totalTimeout = 1000
+            val totalTimeout = 1000L
             val startTime = System.currentTimeMillis()
             
             while (System.currentTimeMillis() - startTime < totalTimeout) {
@@ -506,7 +506,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 try {
                     if (!reader.ready()) {
-                        kotlinx.coroutines.delay(50)
+                        delay(50)
                         if (!reader.ready()) {
                             break
                         }
