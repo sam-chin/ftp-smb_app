@@ -285,6 +285,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             for (file in fileList) {
                 val rawName = file.name
                 log("[SMB-JCIFS] JCIFS raw file.name: '$rawName'")
+                log("[SMB-JCIFS] baseUrl: '$baseUrl', normalizedPath: '$normalizedPath'")
                 
                 val trimmedName = rawName.trimEnd('/')
                 if (trimmedName == "." || trimmedName == "..") continue
@@ -292,39 +293,48 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                val fileName: String
-                val filePath: String
-                
+                var fileName: String
                 val cleanBaseUrl = baseUrl.trimEnd('/')
                 
                 if (cleanBaseUrl.isNotEmpty() && rawName.startsWith(cleanBaseUrl)) {
-                    val relativeName = rawName.substring(cleanBaseUrl.length)
-                    val trimmed = relativeName.trimEnd('/')
-                    fileName = if (trimmed.contains('/')) {
-                        trimmed.substringAfterLast('/')
+                    val relativeName = rawName.substring(cleanBaseUrl.length).trimStart('/')
+                    if (relativeName.contains('/')) {
+                        fileName = relativeName.substringAfterLast('/')
                     } else {
-                        trimmed
+                        fileName = relativeName
                     }
-                    filePath = if (normalizedPath.isEmpty()) {
-                        "/$fileName"
-                    } else {
-                        "/$normalizedPath/$fileName"
-                    }
-                    log("[SMB-JCIFS] Extracted from baseUrl: name='$fileName', path='$filePath'")
+                    log("[SMB-JCIFS] [baseUrl match] relativeName: '$relativeName', fileName: '$fileName'")
                 } else {
-                    val trimmedName = rawName.trimEnd('/')
-                    fileName = if (trimmedName.contains('/')) {
-                        trimmedName.substringAfterLast('/')
+                    if (trimmedName.contains('/')) {
+                        fileName = trimmedName.substringAfterLast('/')
                     } else {
-                        trimmedName
+                        fileName = trimmedName
                     }
-                    filePath = if (normalizedPath.isEmpty()) {
-                        "/$fileName"
-                    } else {
-                        "/$normalizedPath/$fileName"
-                    }
-                    log("[SMB-JCIFS] Extracted from relative: name='$fileName', path='$filePath'")
+                    log("[SMB-JCIFS] [relative] rawName: '$rawName', fileName: '$fileName'")
                 }
+                
+                if (normalizedPath.isNotEmpty() && fileName.startsWith(normalizedPath)) {
+                    val afterNormalized = fileName.substring(normalizedPath.length)
+                    if (!afterNormalized.startsWith("/") && afterNormalized.isNotEmpty()) {
+                        log("[SMB-JCIFS] Detected path prefix in filename! normalizedPath='$normalizedPath', fileName='$fileName'")
+                        fileName = afterNormalized
+                        log("[SMB-JCIFS] Stripped prefix, new fileName: '$fileName'")
+                    }
+                }
+                
+                val normalizedWithSlash = if (normalizedPath.endsWith("/")) normalizedPath else "$normalizedPath/"
+                if (fileName.startsWith(normalizedWithSlash)) {
+                    log("[SMB-JCIFS] Detected normalizedPath with slash in filename! fileName='$fileName'")
+                    fileName = fileName.substring(normalizedWithSlash.length)
+                    log("[SMB-JCIFS] Stripped slash prefix, new fileName: '$fileName'")
+                }
+                
+                val filePath = if (normalizedPath.isEmpty()) {
+                    "/$fileName"
+                } else {
+                    "/$normalizedPath/$fileName"
+                }
+                log("[SMB-JCIFS] Final: name='$fileName', path='$filePath'")
                 
                 files.add(SmbFileInfo(
                     name = fileName,
