@@ -305,28 +305,34 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     }
                     log("[SMB-JCIFS] [baseUrl match] relativeName: '$relativeName', fileName: '$fileName'")
                 } else {
-                    if (trimmedName.contains('/')) {
-                        fileName = trimmedName.substringAfterLast('/')
+                    fileName = if (trimmedName.contains('/')) {
+                        trimmedName.substringAfterLast('/')
                     } else {
-                        fileName = trimmedName
+                        trimmedName
                     }
-                    log("[SMB-JCIFS] [relative] rawName: '$rawName', fileName: '$fileName'")
+                    log("[SMB-JCIFS] [relative] trimmedName: '$trimmedName', fileName: '$fileName'")
                 }
                 
-                if (normalizedPath.isNotEmpty() && fileName.startsWith(normalizedPath)) {
-                    val afterNormalized = fileName.substring(normalizedPath.length)
-                    if (!afterNormalized.startsWith("/") && afterNormalized.isNotEmpty()) {
-                        log("[SMB-JCIFS] Detected path prefix in filename! normalizedPath='$normalizedPath', fileName='$fileName'")
-                        fileName = afterNormalized
-                        log("[SMB-JCIFS] Stripped prefix, new fileName: '$fileName'")
+                if (normalizedPath.isNotEmpty()) {
+                    val normalizedWithSlash = "$normalizedPath/"
+                    val normalizedNoSlash = normalizedPath
+                    
+                    log("[SMB-JCIFS] Checking if fileName needs stripping: normalizedPath='$normalizedPath', fileName='$fileName'")
+                    
+                    if (fileName.startsWith(normalizedWithSlash)) {
+                        fileName = fileName.substring(normalizedWithSlash.length)
+                        log("[SMB-JCIFS] Stripped normalizedWithSlash prefix: new fileName='$fileName'")
+                    } else if (fileName.startsWith(normalizedNoSlash + "/")) {
+                        fileName = fileName.substring((normalizedNoSlash + "/").length)
+                        log("[SMB-JCIFS] Stripped normalizedNoSlash+slash prefix: new fileName='$fileName'")
+                    } else if (fileName.startsWith(normalizedNoSlash) && fileName.length > normalizedNoSlash.length) {
+                        val remainder = fileName.substring(normalizedNoSlash.length)
+                        log("[SMB-JCIFS] fileName starts with normalizedPath, remainder='$remainder'")
+                        if (!remainder.startsWith("/") && remainder.isNotEmpty()) {
+                            fileName = remainder
+                            log("[SMB-JCIFS] Stripped normalizedNoSlash prefix: new fileName='$fileName'")
+                        }
                     }
-                }
-                
-                val normalizedWithSlash = if (normalizedPath.endsWith("/")) normalizedPath else "$normalizedPath/"
-                if (fileName.startsWith(normalizedWithSlash)) {
-                    log("[SMB-JCIFS] Detected normalizedPath with slash in filename! fileName='$fileName'")
-                    fileName = fileName.substring(normalizedWithSlash.length)
-                    log("[SMB-JCIFS] Stripped slash prefix, new fileName: '$fileName'")
                 }
                 
                 val filePath = if (normalizedPath.isEmpty()) {
