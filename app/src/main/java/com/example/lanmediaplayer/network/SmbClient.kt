@@ -541,11 +541,11 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     log("[SMB-JCIFS] Rename failed")
                 }
                 
-                return@withContext success
+                success
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error renaming file: ${e.message}")
                 e.printStackTrace()
-                return@withContext false
+                false
             }
         }
     }

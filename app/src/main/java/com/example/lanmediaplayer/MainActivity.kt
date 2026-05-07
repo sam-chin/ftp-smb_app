@@ -133,6 +133,7 @@ fun MainScreen(
     
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
     
     // Use logs from Activity instead of local state
     var debugLogs by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -156,11 +157,7 @@ fun MainScreen(
             val downloadDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
             val localFile = java.io.File(downloadDir, fileName)
             
-            val inputStream: java.io.InputStream? = when (selectedProtocol) {
-                is NetworkProtocol.FTP -> mediaController.ftpClient?.getFileStream(file.path, 0)
-                is NetworkProtocol.SMB -> mediaController.smbClient?.getFileStream(file.path, 0)
-                else -> null
-            }
+            val inputStream = mediaController.getFileStream(file.path, selectedProtocol)
             
             if (inputStream == null) {
                 onError("Failed to get file stream")
@@ -188,11 +185,7 @@ fun MainScreen(
     suspend fun renameFile(file: MediaFile, newName: String) {
         addLog("Renaming: ${file.name} -> $newName")
         try {
-            val success = when (selectedProtocol) {
-                is NetworkProtocol.FTP -> mediaController.ftpClient?.rename(file.path, newName) ?: false
-                is NetworkProtocol.SMB -> mediaController.smbClient?.rename(file.path, newName) ?: false
-                else -> false
-            }
+            val success = mediaController.renameFile(file.path, newName, selectedProtocol)
             
             if (success) {
                 addLog("Rename successful")
@@ -221,11 +214,7 @@ fun MainScreen(
                 val tempDir = context.cacheDir
                 val tempFile = java.io.File(tempDir, file.name)
                 
-                val inputStream: java.io.InputStream? = when (selectedProtocol) {
-                    is NetworkProtocol.FTP -> mediaController.ftpClient?.getFileStream(file.path, 0)
-                    is NetworkProtocol.SMB -> mediaController.smbClient?.getFileStream(file.path, 0)
-                    else -> null
-                }
+                val inputStream = mediaController.getFileStream(file.path, selectedProtocol)
                 
                 if (inputStream == null) {
                     onError("Failed to get file stream")
@@ -1087,10 +1076,7 @@ fun ImageViewerScreen(
     getImageUrl: (String) -> String,
     onBackClick: () -> Unit
 ) {
-    val pagerState = rememberPagerState(
-        initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1)),
-        pageCount = { imageFiles.size }
-    )
+    val pagerState = rememberPagerState(initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1)))
     
     Box(modifier = Modifier.fillMaxSize()) {
         if (imageFiles.isEmpty()) {
@@ -1223,7 +1209,12 @@ fun FileOperationMenu(
                 modifier = Modifier.padding(bottom = 16.dp)
             )
             
-            HorizontalDivider()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            )
             
             if (!file.isDirectory) {
                 ListItem(

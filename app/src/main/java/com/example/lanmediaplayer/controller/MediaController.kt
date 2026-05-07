@@ -471,4 +471,18 @@ class MediaController(private val context: Context, private val logCallback: ((S
         smbClient?.disconnect()
         smbClient = null
     }
+
+    suspend fun renameFile(path: String, newName: String, protocol: NetworkProtocol): Boolean {
+        return when (protocol) {
+            is NetworkProtocol.FTP -> ftpClient?.rename(path, newName) ?: false
+            is NetworkProtocol.SMB -> smbClient?.rename(path, newName) ?: false
+        }
+    }
+
+    suspend fun getFileStream(path: String, protocol: NetworkProtocol): InputStream? {
+        return when (protocol) {
+            is NetworkProtocol.FTP -> ftpClient?.getFileStream(path, 0)
+            is NetworkProtocol.SMB -> smbClient?.getFileStream(path, 0)
+        }
+    }
 }
