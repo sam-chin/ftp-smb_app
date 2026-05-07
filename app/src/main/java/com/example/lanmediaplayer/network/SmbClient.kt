@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.net.URLDecoder
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -299,21 +300,16 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-            log("[SMB-JCIFS] File: $fileName, isDir: $isDirectory, size: $fileSize")
+                log("[SMB-JCIFS] File name: '$fileName', isDir: $isDirectory, size: $fileSize")
+                
+                val filePath = "/$fileName"
+                log("[SMB-JCIFS] Constructed file path: $filePath")
                 
                 files.add(SmbFileInfo(
                     name = fileName,
                     size = fileSize,
                     isDirectory = isDirectory,
-                    path = if (normalizedPath == "") {
-                        val constructedPath = "/$fileName"
-                        log("[SMB-PATH-DEBUG] Building root path: '$constructedPath' (fileName='$fileName')")
-                        constructedPath
-                    } else {
-                        val constructedPath = "/$normalizedPath/$fileName"
-                        log("[SMB-PATH-DEBUG] Building path: '$constructedPath' (dir='$normalizedPath', file='$fileName')")
-                        constructedPath
-                    }
+                    path = filePath
                 ))
             }
             
@@ -361,7 +357,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
                 
                 val normalizedPath = normalizePathForSmb(remotePath)
-                val fullPath = buildFullPath(normalizedPath)
+                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
+                val fullPath = buildFullPath(decodedPath)
                 
                 log("[SMB-JCIFS] Full path: $fullPath")
                 
@@ -396,7 +393,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
                 
                 val normalizedPath = normalizePathForSmb(remotePath)
-                val fullPath = buildFullPath(normalizedPath)
+                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
+                val fullPath = buildFullPath(decodedPath)
                 
                 log("[SMB-JCIFS] Full path: $fullPath")
                 
@@ -410,9 +408,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 log("[SMB-JCIFS] File not found, trying alternatives...")
                 
-                if (normalizedPath.isNotEmpty()) {
-                    val parentPath = normalizedPath.substringBeforeLast('/', "")
-                    val fileName = normalizedPath.substringAfterLast('/')
+                if (decodedPath.isNotEmpty()) {
+                    val parentPath = decodedPath.substringBeforeLast('/', "")
+                    val fileName = decodedPath.substringAfterLast('/')
                     
                     if (parentPath.isNotEmpty()) {
                         val parentFullPath = buildFullPath(parentPath)
@@ -453,18 +451,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             remotePath
         }
         
-        if (share.isNotEmpty() && normalized.startsWith(share)) {
-            val afterShare = normalized.substring(share.length)
-            if (afterShare.isEmpty() || afterShare.startsWith("/") || afterShare.startsWith("%2F")) {
-                val cleanAfterShare = if (afterShare.startsWith("%2F")) {
-                    afterShare.substring(3)
-                } else if (afterShare.startsWith("/")) {
-                    afterShare.substring(1)
-                } else {
-                    ""
-                }
-                normalized = cleanAfterShare
+        if (share.isNotEmpty()) {
+            if (normalized.startsWith("$share/")) {
+                normalized = normalized.substring(share.length + 1)
                 log("[SMB-JCIFS] Removed share prefix from path: $normalized")
+            } else if (normalized == share) {
+                normalized = ""
+                log("[SMB-JCIFS] Path is just share name, set to empty")
             }
         }
         
