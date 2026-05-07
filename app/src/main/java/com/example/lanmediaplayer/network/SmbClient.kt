@@ -506,52 +506,49 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     suspend fun rename(remotePath: String, newName: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            val mutex = operationMutex
-            mutex.lock()
-            try {
-                log("[SMB-JCIFS] Renaming: $remotePath -> $newName")
-                
-                val normalizedPath = normalizePathForSmb(remotePath)
-                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
-                val fullPath = buildFullPath(decodedPath)
-                
-                log("[SMB-JCIFS] Full path: $fullPath")
-                
-                val smbFile = SmbFile(fullPath, context)
-                
-                if (!smbFile.exists()) {
-                    log("[SMB-JCIFS] File not found")
-                    mutex.unlock()
-                    return@withContext false
-                }
-                
-                val parentPath = decodedPath.substringBeforeLast('/', "")
-                val newFullPath = if (parentPath.isEmpty()) {
-                    buildFullPath(newName)
-                } else {
-                    "${buildFullPath(parentPath)}/$newName"
-                }
-                
-                log("[SMB-JCIFS] Target path: $newFullPath")
-                
-                val targetFile = SmbFile(newFullPath, context)
-                val success = smbFile.renameTo(targetFile)
-                
-                if (success) {
-                    log("[SMB-JCIFS] Rename successful")
-                } else {
-                    log("[SMB-JCIFS] Rename failed")
-                }
-                
-                mutex.unlock()
-                success
-            } catch (e: Exception) {
-                log("[SMB-JCIFS] Error renaming file: ${e.message}")
-                e.printStackTrace()
-                mutex.unlock()
-                false
+        var result = false
+        operationMutex.withLock {
+            result = renameInternal(remotePath, newName)
+        }
+        return result
+    }
+    
+    private fun renameInternal(remotePath: String, newName: String): Boolean {
+        return try {
+            log("[SMB-JCIFS] Renaming: $remotePath -> $newName")
+            
+            val normalizedPath = normalizePathForSmb(remotePath)
+            val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
+            val fullPath = buildFullPath(decodedPath)
+            
+            log("[SMB-JCIFS] Full path: $fullPath")
+            
+            val smbFile = SmbFile(fullPath, context)
+            
+            if (!smbFile.exists()) {
+                log("[SMB-JCIFS] File not found")
+                return false
             }
+            
+            val parentPath = decodedPath.substringBeforeLast('/', "")
+            val newFullPath = if (parentPath.isEmpty()) {
+                buildFullPath(newName)
+            } else {
+                "${buildFullPath(parentPath)}/$newName"
+            }
+            
+            log("[SMB-JCIFS] Target path: $newFullPath")
+            
+            val targetFile = SmbFile(newFullPath, context)
+            val success = smbFile.renameTo(targetFile)
+            
+            log("[SMB-JCIFS] Rename ${if (success) "successful" else "failed"}")
+            
+            success
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error renaming file: ${e.message}")
+            e.printStackTrace()
+            false
         }
     }
     
