@@ -1,17 +1,14 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.example.lanmediaplayer
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -867,7 +864,7 @@ fun ImageViewerScreen(
     getImageUrl: (String) -> String,
     onBackClick: () -> Unit
 ) {
-    val pagerState = rememberPagerState(initialPage = initialIndex) { imageFiles.size }
+    var currentPage by remember { mutableIntStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
     
     Box(modifier = Modifier.fillMaxSize()) {
         if (imageFiles.isEmpty()) {
@@ -876,34 +873,48 @@ fun ImageViewerScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
         } else {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                val currentFile = imageFiles[page]
-                val imageUrl = remember(currentFile) {
-                    getImageUrl(currentFile.path)
+            Box(modifier = Modifier.fillMaxSize()) {
+                imageFiles.forEachIndexed { index, file ->
+                    if (index == currentPage) {
+                        val imageUrl = remember(file) {
+                            getImageUrl(file.path)
+                        }
+                        ImageLoader(
+                            imageUrl = imageUrl,
+                            contentDescription = file.name
+                        )
+                    }
                 }
-                
-                ImageLoader(
-                    imageUrl = imageUrl,
-                    contentDescription = currentFile.name
-                )
             }
             
-            Text(
-                text = "${pagerState.currentPage + 1} / ${imageFiles.size}",
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.5f),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium
-            )
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { if (currentPage > 0) currentPage-- },
+                    enabled = currentPage > 0
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Previous", tint = Color.White)
+                }
+                
+                Text(
+                    text = "${currentPage + 1} / ${imageFiles.size}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                
+                IconButton(
+                    onClick = { if (currentPage < imageFiles.size - 1) currentPage++ },
+                    enabled = currentPage < imageFiles.size - 1
+                ) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Next", tint = Color.White, modifier = Modifier.graphicsLayer { scaleX = -1f })
+                }
+            }
         }
         
         IconButton(
