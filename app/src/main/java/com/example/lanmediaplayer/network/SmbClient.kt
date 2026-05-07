@@ -38,6 +38,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     // Track server's detected encoding from file listings
     private var serverEncoding: Charset? = null
     
+    // Available shares detected during connection
+    private var availableShares: List<String> = emptyList()
+    
     // Mutex to synchronize SMB operations
     private val operationMutex = Mutex()
     
@@ -77,7 +80,6 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             var connected = false
             var detectedShare = share
             var detectedDomain = domain
-            var availableShares = listOf<String>()
             
             for (testDomain in domainsToTry) {
                 if (connected) break
@@ -167,7 +169,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         }
         
         try {
-            this.share = shareName
+            share = shareName
             baseUrl = "smb://$host/$shareName/"
             log("[SMB-JCIFS] Selected share: $shareName")
             log("[SMB-JCIFS] New baseUrl: $baseUrl")
