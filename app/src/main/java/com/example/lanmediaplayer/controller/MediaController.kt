@@ -315,7 +315,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         log("[Controller] getFileStream called for: $path (offset: $startOffset)")
                         return when (mediaRef?.protocol) {
                             is NetworkProtocol.FTP -> ftpRef?.getFileStream(path, startOffset)
-                            is NetworkProtocol.SMB -> smbRef?.getFileStream(path, startOffset)
+                            is NetworkProtocol.SMB -> {
+                                val smbPath = if (path.startsWith("/")) path else "/$path"
+                                smbRef?.getFileStream(smbPath, startOffset)
+                            }
                             else -> null
                         }
                     }
@@ -324,7 +327,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         log("[Controller] getFileSize called for: $path")
                         return when (mediaRef?.protocol) {
                             is NetworkProtocol.FTP -> ftpRef?.getFileSize(path) ?: mediaRef?.size ?: 0L
-                            is NetworkProtocol.SMB -> smbRef?.getFileSize(path) ?: mediaRef?.size ?: 0L
+                            is NetworkProtocol.SMB -> {
+                                val smbPath = if (path.startsWith("/")) path else "/$path"
+                                smbRef?.getFileSize(smbPath) ?: mediaRef?.size ?: 0L
+                            }
                             else -> mediaRef?.size ?: 0L
                         }
                     }
