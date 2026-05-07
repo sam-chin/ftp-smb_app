@@ -227,6 +227,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] === listFiles START ===")
             log("[SMB-JCIFS] Input remotePath: '$remotePath'")
             log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
+            val files = mutableListOf<SmbFileInfo>()
             
             val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
                 remotePath.substring(1)
