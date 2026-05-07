@@ -3,10 +3,13 @@
 package com.example.lanmediaplayer
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,7 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -69,7 +76,21 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(mediaController, connectionPrefs) { debugLogs.toList() }
+                    MainScreen(
+                        mediaController = mediaController,
+                        connectionPrefs = connectionPrefs,
+                        getDebugLogs = { debugLogs.toList() },
+                        onDownloadComplete = { path ->
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, "Downloaded: $path", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onError = { error ->
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -85,7 +106,9 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     mediaController: MediaController,
     connectionPrefs: ConnectionPreferences,
-    getDebugLogs: () -> List<String>
+    getDebugLogs: () -> List<String>,
+    onDownloadComplete: (String) -> Unit,
+    onError: (String) -> Unit
 ) {
     var currentScreen by remember { mutableStateOf(Screen.Connection) }
     var files by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
@@ -100,6 +123,16 @@ fun MainScreen(
     
     var imageFiles by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var initialImageIndex by remember { mutableStateOf(0) }
+    
+    var selectedFile by remember { mutableStateOf<MediaFile?>(null) }
+    var showFileMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
+    var showLoadingDialog by remember { mutableStateOf(false) }
+    var loadingMessage by remember { mutableStateOf("") }
+    
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     
     // Use logs from Activity instead of local state
     var debugLogs by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -116,7 +149,130 @@ fun MainScreen(
         debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
     }
     
-    val coroutineScope = rememberCoroutineScope()
+    suspend fun downloadFile(file: MediaFile) {
+        addLog("Starting download: ${file.name}")
+        try {
+            val fileName = file.name
+            val downloadDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val localFile = java.io.File(downloadDir, fileName)
+            
+            val inputStream: java.io.InputStream? = when (selectedProtocol) {
+                is NetworkProtocol.FTP -> mediaController.ftpClient?.getFileStream(file.path, 0)
+                is NetworkProtocol.SMB -> mediaController.smbClient?.getFileStream(file.path, 0)
+                else -> null
+            }
+            
+            if (inputStream == null) {
+                onError("Failed to get file stream")
+                return
+            }
+            
+            java.io.FileOutputStream(localFile).use { output ->
+                inputStream.use { input ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                    }
+                }
+            }
+            
+            addLog("Download complete: ${localFile.absolutePath}")
+            onDownloadComplete(localFile.absolutePath)
+        } catch (e: Exception) {
+            addLog("Download error: ${e.message}")
+            onError("Download failed: ${e.message}")
+        }
+    }
+    
+    suspend fun renameFile(file: MediaFile, newName: String) {
+        addLog("Renaming: ${file.name} -> $newName")
+        try {
+            val success = when (selectedProtocol) {
+                is NetworkProtocol.FTP -> mediaController.ftpClient?.rename(file.path, newName) ?: false
+                is NetworkProtocol.SMB -> mediaController.smbClient?.rename(file.path, newName) ?: false
+                else -> false
+            }
+            
+            if (success) {
+                addLog("Rename successful")
+                val parentPath = file.path.substringBeforeLast("/", "")
+                val newPath = if (parentPath.isEmpty()) "/$newName" else "$parentPath/$newName"
+                val index = files.indexOfFirst { it.path == file.path }
+                if (index >= 0) {
+                    files = files.toMutableList().apply {
+                        set(index, MediaFile(newName, file.size, file.isDirectory, newPath, file.protocol))
+                    }
+                }
+            } else {
+                addLog("Rename failed")
+                onError("Rename failed")
+            }
+        } catch (e: Exception) {
+            addLog("Rename error: ${e.message}")
+            onError("Rename error: ${e.message}")
+        }
+    }
+    
+    fun openWithSystemApp(file: MediaFile) {
+        addLog("Opening with system app: ${file.name}")
+        try {
+            coroutineScope.launch {
+                val tempDir = context.cacheDir
+                val tempFile = java.io.File(tempDir, file.name)
+                
+                val inputStream: java.io.InputStream? = when (selectedProtocol) {
+                    is NetworkProtocol.FTP -> mediaController.ftpClient?.getFileStream(file.path, 0)
+                    is NetworkProtocol.SMB -> mediaController.smbClient?.getFileStream(file.path, 0)
+                    else -> null
+                }
+                
+                if (inputStream == null) {
+                    onError("Failed to get file stream")
+                    return@launch
+                }
+                
+                java.io.FileOutputStream(tempFile).use { output ->
+                    inputStream.use { input ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                val mimeType = getMimeType(file.name)
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(android.net.Uri.fromFile(tempFile), mimeType)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(intent)
+            }
+        } catch (e: Exception) {
+            addLog("Open error: ${e.message}")
+            onError("Failed to open file: ${e.message}")
+        }
+    }
+    
+    fun getMimeType(fileName: String): String {
+        val extension = fileName.substringAfterLast('.', "").lowercase()
+        return when (extension) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "bmp" -> "image/bmp"
+            "webp" -> "image/webp"
+            "mp4" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "mov" -> "video/quicktime"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "flac" -> "audio/flac"
+            "pdf" -> "application/pdf"
+            "doc", "docx" -> "application/msword"
+            "xls", "xlsx" -> "application/vnd.ms-excel"
+            "txt" -> "text/plain"
+            else -> "*/*"
+        }
+    }
     
     // Load saved connection info separately for FTP and SMB
     val savedFtpHost = remember { connectionPrefs.getFtpHost() }
@@ -293,6 +449,10 @@ fun MainScreen(
                     }
                 }
             },
+            onFileLongClick = { file ->
+                selectedFile = file
+                showFileMenu = true
+            },
             onBackClick = {
                 if (currentPath != "/") {
                     val parentPath = currentPath.substringBeforeLast("/")
@@ -340,6 +500,60 @@ fun MainScreen(
             onBackClick = {
                 currentScreen = Screen.FileBrowser
             }
+        )
+    }
+    
+    if (showFileMenu && selectedFile != null) {
+        FileOperationMenu(
+            file = selectedFile!!,
+            onDismiss = { showFileMenu = false },
+            onRename = {
+                showFileMenu = false
+                renameText = selectedFile!!.name
+                showRenameDialog = true
+            },
+            onCopyPath = {
+                clipboardManager.setText(AnnotatedString(selectedFile!!.path))
+                showFileMenu = false
+            },
+            onDownload = {
+                showFileMenu = false
+                showLoadingDialog = true
+                loadingMessage = "Downloading ${selectedFile!!.name}..."
+                coroutineScope.launch {
+                    downloadFile(selectedFile!!)
+                    showLoadingDialog = false
+                }
+            },
+            onOpenWith = {
+                showFileMenu = false
+                openWithSystemApp(selectedFile!!)
+            }
+        )
+    }
+    
+    if (showRenameDialog && selectedFile != null) {
+        RenameDialog(
+            originalName = selectedFile!!.name,
+            newName = renameText,
+            onNameChange = { renameText = it },
+            onConfirm = {
+                showRenameDialog = false
+                coroutineScope.launch {
+                    renameFile(selectedFile!!, renameText)
+                }
+            },
+            onDismiss = {
+                showRenameDialog = false
+                renameText = ""
+            }
+        )
+    }
+    
+    if (showLoadingDialog) {
+        LoadingDialog(
+            message = loadingMessage,
+            onDismiss = { showLoadingDialog = false }
         )
     }
     
@@ -666,6 +880,7 @@ fun FileBrowserScreen(
     currentPath: String,
     debugLogs: List<String>,
     onFileClick: (MediaFile) -> Unit,
+    onFileLongClick: (MediaFile) -> Unit,
     onBackClick: () -> Unit,
     onDisconnect: () -> Unit,
     isLoading: Boolean
@@ -772,7 +987,8 @@ fun FileBrowserScreen(
                     items(files) { file ->
                         FileListItem(
                             file = file,
-                            onClick = { onFileClick(file) }
+                            onClick = { onFileClick(file) },
+                            onLongClick = { onFileLongClick(file) }
                         )
                     }
                 }
@@ -784,13 +1000,17 @@ fun FileBrowserScreen(
 @Composable
 fun FileListItem(
     file: MediaFile,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        onClick = onClick
+            .padding(vertical = 4.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
     ) {
         Row(
             modifier = Modifier
@@ -960,7 +1180,7 @@ fun ImageLoader(
         if (isLoading) {
             CircularProgressIndicator(color = Color.White)
         }
-        
+
         error?.let { errorMsg ->
             Column(
                 modifier = Modifier
@@ -973,4 +1193,127 @@ fun ImageLoader(
             }
         }
     }
+}
+
+@Composable
+fun FileOperationMenu(
+    file: MediaFile,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onCopyPath: () -> Unit,
+    onDownload: () -> Unit,
+    onOpenWith: () -> Unit
+) {
+    val extension = file.name.substringAfterLast('.', "").lowercase()
+    val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+    val isVideo = extension in listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm")
+    val isAudio = extension in listOf("mp3", "wav", "flac", "aac", "ogg", "m4a")
+    val isDocument = extension in listOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt")
+    val canOpenWith = isImage || isVideo || isAudio || isDocument
+    
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            
+            HorizontalDivider()
+            
+            if (!file.isDirectory) {
+                ListItem(
+                    headlineContent = { Text("Rename") },
+                    leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
+                    modifier = Modifier.clickable { onDismiss(); onRename() }
+                )
+                
+                ListItem(
+                    headlineContent = { Text("Copy Path") },
+                    leadingContent = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                    modifier = Modifier.clickable { onDismiss(); onCopyPath() }
+                )
+                
+                ListItem(
+                    headlineContent = { Text("Download") },
+                    leadingContent = { Icon(Icons.Default.Download, contentDescription = null) },
+                    modifier = Modifier.clickable { onDismiss(); onDownload() }
+                )
+                
+                if (canOpenWith) {
+                    ListItem(
+                        headlineContent = { Text("Open with...") },
+                        leadingContent = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
+                        modifier = Modifier.clickable { onDismiss(); onOpenWith() }
+                    )
+                }
+            } else {
+                ListItem(
+                    headlineContent = { Text("Rename") },
+                    leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
+                    modifier = Modifier.clickable { onDismiss(); onRename() }
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+fun RenameDialog(
+    originalName: String,
+    newName: String,
+    onNameChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename") },
+        text = {
+            OutlinedTextField(
+                value = newName,
+                onValueChange = onNameChange,
+                label = { Text("New name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = newName.isNotBlank() && newName != originalName) {
+                Text("Rename")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun LoadingDialog(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { if (false) onDismiss() },
+        title = { Text("Please wait") },
+        text = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                Text(message)
+            }
+        },
+        confirmButton = {}
+    )
 }

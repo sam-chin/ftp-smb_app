@@ -397,6 +397,39 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         }
     }
     
+    suspend fun rename(remotePath: String, newName: String): Boolean = withContext(Dispatchers.IO) {
+        commandMutex.withLock {
+            try {
+                log("[FTP] Renaming: $remotePath -> $newName")
+                
+                clearPendingResponses()
+                
+                sendCommand("RNFR $remotePath")
+                var response = readResponse()
+                
+                if (response.code != 350) {
+                    log("[FTP] RNFR failed: ${response.code} ${response.message}")
+                    return@withContext false
+                }
+                
+                sendCommand("RNTO $newName")
+                response = readResponse()
+                
+                if (response.code == 250) {
+                    log("[FTP] Rename successful")
+                    return@withContext true
+                } else {
+                    log("[FTP] RNTO failed: ${response.code} ${response.message}")
+                    return@withContext false
+                }
+            } catch (e: Exception) {
+                log("[FTP] Error renaming file: ${e.message}")
+                e.printStackTrace()
+                return@withContext false
+            }
+        }
+    }
+
     fun disconnect() {
         try {
             sendCommand("QUIT")
