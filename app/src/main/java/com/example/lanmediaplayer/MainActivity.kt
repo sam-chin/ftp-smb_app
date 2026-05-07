@@ -1114,16 +1114,16 @@ fun ImageViewerScreen(
     var slideshowInterval by remember { mutableStateOf(6) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     
-    val coroutineScope = rememberCoroutineScope()
-    
-    LaunchedEffect(isSlideshowPlaying, currentPage, slideshowInterval) {
+    LaunchedEffect(isSlideshowPlaying, slideshowInterval) {
         if (isSlideshowPlaying && imageFiles.isNotEmpty()) {
             while (isSlideshowPlaying) {
                 delay(slideshowInterval * 1000L)
-                if (isSlideshowPlaying && currentPage < imageFiles.size - 1) {
-                    currentPage++
-                } else if (isSlideshowPlaying) {
-                    currentPage = 0
+                if (isSlideshowPlaying) {
+                    if (currentPage < imageFiles.size - 1) {
+                        currentPage++
+                    } else {
+                        currentPage = 0
+                    }
                 }
             }
         }
@@ -1140,27 +1140,11 @@ fun ImageViewerScreen(
                 pageCount = imageFiles.size,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                currentPage = page
                 val currentFile = imageFiles[page]
-                var imageUrl by remember(page) { mutableStateOf("") }
-                
-                LaunchedEffect(page) {
-                    imageUrl = getImageUrl(currentFile.path)
-                }
-                
-                if (imageUrl.isNotEmpty()) {
-                    ImageLoader(
-                        imageUrl = imageUrl,
-                        contentDescription = currentFile.name
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = Color.White)
-                    }
-                }
+                ImageLoader(
+                    imageUrl = getImageUrl(currentFile.path),
+                    contentDescription = currentFile.name
+                )
             }
             
             Row(
