@@ -506,6 +506,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     suspend fun rename(remotePath: String, newName: String): Boolean = withContext(Dispatchers.IO) {
+        var result = false
         operationMutex.withLock {
             try {
                 log("[SMB-JCIFS] Renaming: $remotePath -> $newName")
@@ -520,7 +521,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 if (!smbFile.exists()) {
                     log("[SMB-JCIFS] File not found")
-                    return@withContext false
+                    result = false
+                    return@withLock
                 }
                 
                 val parentPath = decodedPath.substringBeforeLast('/', "")
@@ -541,13 +543,14 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     log("[SMB-JCIFS] Rename failed")
                 }
                 
-                success
+                result = success
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error renaming file: ${e.message}")
                 e.printStackTrace()
-                false
+                result = false
             }
         }
+        result
     }
     
     fun disconnect() {

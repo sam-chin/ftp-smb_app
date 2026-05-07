@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -193,8 +192,15 @@ fun MainScreen(
                 val newPath = if (parentPath.isEmpty()) "/$newName" else "$parentPath/$newName"
                 val index = files.indexOfFirst { it.path == file.path }
                 if (index >= 0) {
+                    val updatedFile = MediaFile(
+                        name = newName,
+                        path = newPath,
+                        size = file.size,
+                        isDirectory = file.isDirectory,
+                        protocol = file.protocol
+                    )
                     files = files.toMutableList().apply {
-                        set(index, MediaFile(newName, file.size, file.isDirectory, newPath, file.protocol))
+                        set(index, updatedFile)
                     }
                 }
             } else {
@@ -237,29 +243,6 @@ fun MainScreen(
         } catch (e: Exception) {
             addLog("Open error: ${e.message}")
             onError("Failed to open file: ${e.message}")
-        }
-    }
-    
-    fun getMimeType(fileName: String): String {
-        val extension = fileName.substringAfterLast('.', "").lowercase()
-        return when (extension) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "gif" -> "image/gif"
-            "bmp" -> "image/bmp"
-            "webp" -> "image/webp"
-            "mp4" -> "video/mp4"
-            "mkv" -> "video/x-matroska"
-            "avi" -> "video/x-msvideo"
-            "mov" -> "video/quicktime"
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/wav"
-            "flac" -> "audio/flac"
-            "pdf" -> "application/pdf"
-            "doc", "docx" -> "application/msword"
-            "xls", "xlsx" -> "application/vnd.ms-excel"
-            "txt" -> "text/plain"
-            else -> "*/*"
         }
     }
     
@@ -1068,6 +1051,29 @@ fun formatFileSize(size: Long): String {
     }
 }
 
+fun getMimeType(fileName: String): String {
+    val extension = fileName.substringAfterLast('.', "").lowercase()
+    return when (extension) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "bmp" -> "image/bmp"
+        "webp" -> "image/webp"
+        "mp4" -> "video/mp4"
+        "mkv" -> "video/x-matroska"
+        "avi" -> "video/x-msvideo"
+        "mov" -> "video/quicktime"
+        "mp3" -> "audio/mpeg"
+        "wav" -> "audio/wav"
+        "flac" -> "audio/flac"
+        "pdf" -> "application/pdf"
+        "doc", "docx" -> "application/msword"
+        "xls", "xlsx" -> "application/vnd.ms-excel"
+        "txt" -> "text/plain"
+        else -> "*/*"
+    }
+}
+
 @Composable
 fun ImageViewerScreen(
     imageFiles: List<MediaFile>,
@@ -1076,7 +1082,7 @@ fun ImageViewerScreen(
     getImageUrl: (String) -> String,
     onBackClick: () -> Unit
 ) {
-    val pagerState = rememberPagerState(initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1)))
+    val (currentPage, setCurrentPage) = remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
     
     Box(modifier = Modifier.fillMaxSize()) {
         if (imageFiles.isEmpty()) {
@@ -1086,7 +1092,9 @@ fun ImageViewerScreen(
             )
         } else {
             HorizontalPager(
-                state = pagerState,
+                pageCount = imageFiles.size,
+                currentPage = currentPage,
+                onPageChange = setCurrentPage,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val currentFile = imageFiles[page]
@@ -1101,7 +1109,7 @@ fun ImageViewerScreen(
             }
             
             Text(
-                text = "${pagerState.currentPage + 1} / ${imageFiles.size}",
+                text = "${currentPage + 1} / ${imageFiles.size}",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp)
