@@ -506,7 +506,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 try {
                     if (!reader.ready()) {
-                        delay(50)
+                        Thread.sleep(50)
                         if (!reader.ready()) {
                             break
                         }
