@@ -66,6 +66,9 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer:1.1.1'
     implementation 'androidx.media3:media3-ui:1.1.1'
     
+    // Coil for image loading
+    implementation 'io.coil-kt:coil-compose:2.4.0'
+    
     // JCIFS-NG for SMB with share enumeration support
     implementation 'org.codelibs:jcifs:2.1.34'
     

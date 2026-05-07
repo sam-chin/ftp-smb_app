@@ -419,6 +419,46 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Playback stopped")
     }
     
+    fun getImageUrl(path: String, protocol: NetworkProtocol): String {
+        httpProxy?.stop()
+        httpProxy = HttpProxyServer(logCallback)
+        
+        val ftpRef = ftpClient
+        val smbRef = smbClient
+        
+        val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
+            override suspend fun getFileStream(filePath: String, startOffset: Long): InputStream? {
+                return when (protocol) {
+                    is NetworkProtocol.FTP -> ftpRef?.getFileStream(filePath, startOffset)
+                    is NetworkProtocol.SMB -> {
+                        val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
+                        smbRef?.getFileStream(smbPath, startOffset)
+                    }
+                    else -> null
+                }
+            }
+            
+            override suspend fun getFileSize(filePath: String): Long {
+                return when (protocol) {
+                    is NetworkProtocol.FTP -> ftpRef?.getFileSize(filePath) ?: 0L
+                    is NetworkProtocol.SMB -> {
+                        val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
+                        smbRef?.getFileSize(smbPath) ?: 0L
+                    }
+                    else -> 0L
+                }
+            }
+        }) ?: -1
+        
+        val cleanPath = if (path.startsWith("/")) path.substring(1) else path
+        val encodedPath = try {
+            java.net.URLEncoder.encode(cleanPath, "UTF-8").replace("+", "%20")
+        } catch (e: Exception) {
+            cleanPath
+        }
+        return "http://127.0.0.1:$port/$encodedPath"
+    }
+    
     fun release() {
         connectionScope.cancel()
         browseScope.cancel()

@@ -1,13 +1,18 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package com.example.lanmediaplayer
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
@@ -17,12 +22,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import com.example.lanmediaplayer.controller.MediaController
 import com.example.lanmediaplayer.controller.MediaFile
 import com.example.lanmediaplayer.controller.NetworkProtocol
@@ -87,7 +96,10 @@ fun MainScreen(
     
     var availableShares by remember { mutableStateOf<List<String>>(emptyList()) }
     var pendingShareSelection by remember { mutableStateOf(false) }
-    var pendingSmbParams by remember { mutableStateOf<Triple<String, String, String>?>(null) } // host, credentials
+    var pendingSmbParams by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+    
+    var imageFiles by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
+    var initialImageIndex by remember { mutableStateOf(0) }
     
     // Use logs from Activity instead of local state
     var debugLogs by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -255,16 +267,30 @@ fun MainScreen(
                         }
                     }
                 } else {
-                    mediaController.playMedia(file, object : MediaController.MediaCallback {
-                        override fun onFilesLoaded(files: List<MediaFile>) {}
-                        
-                        override fun onError(error: String) {
-                            errorMessage = error
+                    val extension = file.name.substringAfterLast('.', "").lowercase()
+                    val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+                    
+                    if (isImage) {
+                        val allImageFiles = files.filter { f ->
+                            val ext = f.name.substringAfterLast('.', "").lowercase()
+                            ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
                         }
-                        
-                        override fun onPlaybackStateChanged(state: Int) {}
-                    })
-                    currentScreen = Screen.Player
+                        val index = allImageFiles.indexOfFirst { it.path == file.path }
+                        imageFiles = allImageFiles
+                        initialImageIndex = if (index >= 0) index else 0
+                        currentScreen = Screen.ImageViewer
+                    } else {
+                        mediaController.playMedia(file, object : MediaController.MediaCallback {
+                            override fun onFilesLoaded(files: List<MediaFile>) {}
+                            
+                            override fun onError(error: String) {
+                                errorMessage = error
+                            }
+                            
+                            override fun onPlaybackStateChanged(state: Int) {}
+                        })
+                        currentScreen = Screen.Player
+                    }
                 }
             },
             onBackClick = {
@@ -302,6 +328,16 @@ fun MainScreen(
             mediaController = mediaController,
             onBackClick = {
                 mediaController.stopPlayback()
+                currentScreen = Screen.FileBrowser
+            }
+        )
+        
+        Screen.ImageViewer -> ImageViewerScreen(
+            imageFiles = imageFiles,
+            initialIndex = initialImageIndex,
+            currentProtocol = selectedProtocol,
+            getImageUrl = { path -> mediaController.getImageUrl(path, selectedProtocol) },
+            onBackClick = {
                 currentScreen = Screen.FileBrowser
             }
         )
@@ -381,7 +417,8 @@ fun MainScreen(
 enum class Screen {
     Connection,
     FileBrowser,
-    Player
+    Player,
+    ImageViewer
 }
 
 @Composable
@@ -819,5 +856,118 @@ fun formatFileSize(size: Long): String {
         size < 1024 * 1024 -> "${size / 1024} KB"
         size < 1024 * 1024 * 1024 -> "${size / (1024 * 1024)} MB"
         else -> "${size / (1024 * 1024 * 1024)} GB"
+    }
+}
+
+@Composable
+fun ImageViewerScreen(
+    imageFiles: List<MediaFile>,
+    initialIndex: Int,
+    currentProtocol: NetworkProtocol,
+    getImageUrl: (String) -> String,
+    onBackClick: () -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialIndex) { imageFiles.size }
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (imageFiles.isEmpty()) {
+            Text(
+                text = "No images to display",
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                val currentFile = imageFiles[page]
+                val imageUrl = remember(currentFile) {
+                    getImageUrl(currentFile.path)
+                }
+                
+                ImageLoader(
+                    imageUrl = imageUrl,
+                    contentDescription = currentFile.name
+                )
+            }
+            
+            Text(
+                text = "${pagerState.currentPage + 1} / ${imageFiles.size}",
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        
+        IconButton(
+            onClick = onBackClick,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+        ) {
+            Icon(
+                Icons.Default.ArrowBack,
+                contentDescription = "Back",
+                tint = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun ImageLoader(
+    imageUrl: String,
+    contentDescription: String
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = contentDescription,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+            onState = { state ->
+                when (state) {
+                    is AsyncImagePainter.State.Loading -> isLoading = true
+                    is AsyncImagePainter.State.Success -> {
+                        isLoading = false
+                        error = null
+                    }
+                    is AsyncImagePainter.State.Error -> {
+                        isLoading = false
+                        error = state.result.throwable.message
+                    }
+                    else -> {}
+                }
+            }
+        )
+        
+        if (isLoading) {
+            CircularProgressIndicator(color = Color.White)
+        }
+        
+        error?.let { errorMsg ->
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Error loading image", color = Color.White)
+                Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+            }
+        }
     }
 }

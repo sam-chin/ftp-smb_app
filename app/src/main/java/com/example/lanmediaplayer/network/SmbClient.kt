@@ -306,12 +306,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 log("[SMB-JCIFS] fileName from JCIFS: '$fileName'")
                 
-                if (normalizedPath.isNotEmpty() && fileName.startsWith(normalizedPath)) {
-                    val afterPath = fileName.substring(normalizedPath.length)
-                    if (afterPath.isNotEmpty() && !afterPath.startsWith("/")) {
-                        log("[SMB-JCIFS] JCIFS returned filename with path prefix! Stripping '$normalizedPath' from '$fileName'")
-                        fileName = afterPath
-                        log("[SMB-JCIFS] After strip: '$fileName'")
+                if (normalizedPath.isNotEmpty()) {
+                    val lastSegment = normalizedPath.substringAfterLast('/')
+                    if (lastSegment.isNotEmpty() && fileName.startsWith(lastSegment)) {
+                        val afterSegment = fileName.substring(lastSegment.length)
+                        if (afterSegment.isNotEmpty() && !afterSegment.startsWith("/")) {
+                            log("[SMB-JCIFS] JCIFS returned filename with lastSegment prefix! Stripping '$lastSegment' from '$fileName'")
+                            fileName = afterSegment
+                            log("[SMB-JCIFS] After strip: '$fileName'")
+                        }
                     }
                 }
                 
