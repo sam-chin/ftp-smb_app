@@ -1142,7 +1142,7 @@ fun ImageViewerScreen(
             ) { page ->
                 currentPage = page
                 val currentFile = imageFiles[page]
-                val imageUrl by remember(page) { mutableStateOf("") }
+                var imageUrl by remember(page) { mutableStateOf("") }
                 
                 LaunchedEffect(page) {
                     imageUrl = getImageUrl(currentFile.path)
