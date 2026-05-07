@@ -85,6 +85,10 @@ fun MainScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     
+    var availableShares by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingShareSelection by remember { mutableStateOf(false) }
+    var pendingSmbParams by remember { mutableStateOf<Triple<String, String, String>?>(null) } // host, credentials
+    
     // Use logs from Activity instead of local state
     var debugLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     
@@ -169,13 +173,11 @@ fun MainScreen(
                         addLog("Previous files count: ${files.size}")
                         
                         currentScreen = Screen.FileBrowser
-                        // Clear files before browsing to avoid showing old protocol's files
                         files = emptyList()
                         addLog("Files cleared: ${files.size}")
                         
-                        // SMB root directory should be "", FTP uses "/"
                         val rootPath = if (protocol is NetworkProtocol.SMB) "" else "/"
-                        currentPath = "/"  // Display path always starts with /
+                        currentPath = "/"
                         
                         addLog("Root path for browseFiles: '$rootPath' (length: ${rootPath.length})")
                         addLog("Display currentPath: '$currentPath'")
@@ -204,6 +206,12 @@ fun MainScreen(
                             
                             override fun onPlaybackStateChanged(state: Int) {}
                         })
+                    } else if (message.startsWith("SHARES:")) {
+                        val shares = message.substringAfter("SHARES:").split(",")
+                        addLog("Shares found: ${shares.joinToString(", ")}")
+                        availableShares = shares
+                        pendingShareSelection = true
+                        pendingSmbParams = Triple(host, "$username:$password", domain)
                     } else {
                         addLog("Connection failed: $message")
                         errorMessage = message
@@ -307,6 +315,63 @@ fun MainScreen(
             confirmButton = {
                 TextButton(onClick = { errorMessage = null }) {
                     Text("OK")
+                }
+            }
+        )
+    }
+    
+    if (pendingShareSelection && availableShares.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Select Share") },
+            text = {
+                Column {
+                    Text("Available shares on server:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    availableShares.forEach { shareName ->
+                        TextButton(
+                            onClick = {
+                                pendingShareSelection = false
+                                isLoading = true
+                                pendingSmbParams?.let { (host, credentials, domain) ->
+                                    val (username, password) = credentials.split(":", limit = 2)
+                                    coroutineScope.launch {
+                                        val success = mediaController.selectShare(shareName)
+                                        if (success) {
+                                            currentScreen = Screen.FileBrowser
+                                            files = emptyList()
+                                            currentPath = "/"
+                                            mediaController.browseFiles("", NetworkProtocol.SMB, object : MediaController.MediaCallback {
+                                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                                    files = loadedFiles
+                                                }
+                                                override fun onError(error: String) {
+                                                    errorMessage = error
+                                                }
+                                                override fun onPlaybackStateChanged(state: Int) {}
+                                            })
+                                        } else {
+                                            errorMessage = "Failed to access share: $shareName"
+                                        }
+                                        isLoading = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(shareName)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingShareSelection = false
+                    availableShares = emptyList()
+                    pendingSmbParams = null
+                }) {
+                    Text("Cancel")
                 }
             }
         )

@@ -77,6 +77,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             var connected = false
             var detectedShare = share
             var detectedDomain = domain
+            var availableShares = listOf<String>()
             
             for (testDomain in domainsToTry) {
                 if (connected) break
@@ -119,43 +120,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     }
                 } else {
                     // Auto-detect shares using listShares method
-                    log("[SMB-JCIFS] Auto-detecting available shares using listShares()...")
-                    try {
-                        val availableShares = listShares()
-                        log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
-                        
-                        if (availableShares.isNotEmpty()) {
-                            // Try each share until we find one that's accessible
-                            for (shareName in availableShares) {
-                                log("[SMB-JCIFS] Testing share: $shareName")
-                                val shareUrl = "smb://$host/$shareName/"
-                                
-                                try {
-                                    val shareFile = SmbFile(shareUrl, context)
-                                    if (shareFile.exists() && shareFile.isDirectory) {
-                                        log("[SMB-JCIFS] Found accessible share: $shareName")
-                                        detectedShare = shareName
-                                        detectedDomain = testDomain
-                                        baseUrl = shareUrl
-                                        connected = true
-                                        break
-                                    } else {
-                                        log("[SMB-JCIFS] Share $shareName exists but is not accessible or not a directory")
-                                    }
-                                } catch (e: Exception) {
-                                    log("[SMB-JCIFS] Error testing share $shareName: ${e.message}")
-                                }
-                            }
-                        } else {
-                            log("[SMB-JCIFS] No shares found on server")
-                            log("[SMB-JCIFS] TIP: Please specify share name manually (e.g., 'gx', 'shared', etc.)")
-                        }
-                    } catch (e: Exception) {
-                        log("[SMB-JCIFS] Error listing shares: ${e.message}")
-                        log("[SMB-JCIFS] Exception type: ${e.javaClass.simpleName}")
-                        log("[SMB-JCIFS] TIP: Auto-detection failed. Please specify share name manually.")
-                        e.printStackTrace()
-                    }
+                    log("[SMB-JCIFS] Auto-detecting available shares...")
+                    availableShares = listSharesInternal()
+                    log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
                 }
             }
             
@@ -166,17 +133,57 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 log("[SMB-JCIFS] Connected to share: $detectedShare")
                 log("[SMB-JCIFS] Domain: ${if (detectedDomain.isEmpty()) "(empty)" else detectedDomain}")
                 log("[SMB-JCIFS] Base URL: $baseUrl")
-                true
+                return@withContext true
+            } else if (availableShares.isNotEmpty() && share.isNotEmpty()) {
+                this@SmbClient.share = share
+                this@SmbClient.domain = detectedDomain
+                baseUrl = "smb://$host/$share/"
+                log("[SMB-JCIFS] === Connection successful ===")
+                return@withContext true
+            } else if (availableShares.isNotEmpty()) {
+                this@SmbClient.share = ""
+                this@SmbClient.domain = detectedDomain
+                log("[SMB-JCIFS] === Share enumeration successful, no share selected ===")
+                log("[SMB-JCIFS] Available shares: ${availableShares.joinToString(", ")}")
+                return@withContext false
             } else {
                 log("[SMB-JCIFS] === Connection failed ===")
-                false
+                return@withContext false
             }
         } catch (e: Exception) {
             log("[SMB-JCIFS] === Connection error ===")
             log("[SMB-JCIFS] Error type: ${e.javaClass.simpleName}")
             log("[SMB-JCIFS] Error message: ${e.message}")
             e.printStackTrace()
-            false
+            return@withContext false
+        }
+    }
+    
+    fun getAvailableShares(): List<String> = availableShares
+    
+    suspend fun selectShare(shareName: String): Boolean = withContext(Dispatchers.IO) {
+        if (shareName !in availableShares) {
+            log("[SMB-JCIFS] Share '$shareName' not in available shares")
+            return@withContext false
+        }
+        
+        try {
+            this.share = shareName
+            baseUrl = "smb://$host/$shareName/"
+            log("[SMB-JCIFS] Selected share: $shareName")
+            log("[SMB-JCIFS] New baseUrl: $baseUrl")
+            
+            val testFile = SmbFile(baseUrl, context)
+            if (testFile.exists() && testFile.isDirectory) {
+                log("[SMB-JCIFS] Share is accessible")
+                return@withContext true
+            } else {
+                log("[SMB-JCIFS] Share is not accessible")
+                return@withContext false
+            }
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error selecting share: ${e.message}")
+            return@withContext false
         }
     }
     
