@@ -514,7 +514,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun renameInternal(remotePath: String, newName: String): Boolean {
-        return try {
+        var fileExists = false
+        var success = false
+        
+        try {
             log("[SMB-JCIFS] Renaming: $remotePath -> $newName")
             
             val normalizedPath = normalizePathForSmb(remotePath)
@@ -525,7 +528,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             
             val smbFile = SmbFile(fullPath, context)
             
-            if (!smbFile.exists()) {
+            fileExists = smbFile.exists()
+            if (!fileExists) {
                 log("[SMB-JCIFS] File not found")
                 return false
             }
@@ -540,16 +544,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Target path: $newFullPath")
             
             val targetFile = SmbFile(newFullPath, context)
-            val success = smbFile.renameTo(targetFile)
+            success = smbFile.renameTo(targetFile)
             
             log("[SMB-JCIFS] Rename ${if (success) "successful" else "failed"}")
-            
-            success
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error renaming file: ${e.message}")
             e.printStackTrace()
-            false
         }
+        
+        return success
     }
     
     fun disconnect() {
