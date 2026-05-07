@@ -292,29 +292,30 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                var fileName = fullFileName
-                if (normalizedPath.isNotEmpty() && fullFileName.startsWith(normalizedPath)) {
-                    fileName = fullFileName.substring(normalizedPath.length)
-                    if (fileName.startsWith("/")) {
-                        fileName = fileName.substring(1)
-                    }
-                    log("[SMB-JCIFS] Removed normalizedPath prefix: '$fullFileName' -> '$fileName'")
+                val fileName = if (fullFileName.contains('/')) {
+                    fullFileName.substringAfterLast('/')
+                } else {
+                    fullFileName
                 }
                 
                 if (fileName.isEmpty()) {
-                    fileName = fullFileName
+                    log("[SMB-JCIFS] Warning: extracted empty filename from '$fullFileName', using full name")
+                } else {
+                    log("[SMB-JCIFS] Extracted filename: '$fileName' from '$fullFileName'")
                 }
+                
+                val finalFileName = if (fileName.isEmpty()) fullFileName else fileName
                 
                 val filePath = if (normalizedPath.isEmpty()) {
-                    "/$fileName"
+                    "/$finalFileName"
                 } else {
-                    "/$normalizedPath/$fileName"
+                    "/$normalizedPath/$finalFileName"
                 }
                 
-                log("[SMB-JCIFS] Constructed SmbFileInfo: name='$fileName', path='$filePath'")
+                log("[SMB-JCIFS] Constructed SmbFileInfo: name='$finalFileName', path='$filePath'")
                 
                 files.add(SmbFileInfo(
-                    name = fileName,
+                    name = finalFileName,
                     size = fileSize,
                     isDirectory = isDirectory,
                     path = filePath
