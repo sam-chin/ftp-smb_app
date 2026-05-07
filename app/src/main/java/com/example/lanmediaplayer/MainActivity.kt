@@ -2,6 +2,7 @@
 
 package com.example.lanmediaplayer
 
+import android.app.Activity
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -1024,7 +1025,6 @@ fun PlayerScreen(
     
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
-        val originalFlags = window?.attributes?.flags ?: 0
         window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
         window?.decorView?.systemUiVisibility = (
             android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
