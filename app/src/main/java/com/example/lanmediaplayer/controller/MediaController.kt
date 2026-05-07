@@ -256,8 +256,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         }
                         log("[Controller] Calling smbClient.listFiles($path)")
                         smbClient?.listFiles(path)?.map { smbFile ->
-                            log("[Controller] SMB file: ${smbFile.name}, path: ${smbFile.path}")
-                            log("[Controller] SMB file - constructing MediaFile with path: ${smbFile.path}")
+                            log("[Controller] SmbFileInfo - name: '${smbFile.name}', path: '${smbFile.path}'")
                             MediaFile(
                                 name = smbFile.name,
                                 path = smbFile.path,
@@ -265,6 +264,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 isDirectory = smbFile.isDirectory,
                                 protocol = NetworkProtocol.SMB
                             )
+                        }?.also { mediaFiles ->
+                            mediaFiles.forEach { mf ->
+                                log("[Controller] MediaFile created - name: '${mf.name}', path: '${mf.path}'")
+                            }
                         } ?: emptyList()
                     }
                 }
