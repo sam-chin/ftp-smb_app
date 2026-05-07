@@ -420,15 +420,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     fun getImageUrl(path: String, protocol: NetworkProtocol): String {
-        httpProxy?.stop()
-        httpProxy = HttpProxyServer(logCallback)
+        if (httpProxy == null) {
+            httpProxy = HttpProxyServer(logCallback)
+        }
         
         val ftpRef = ftpClient
         val smbRef = smbClient
+        val currentProtocol = protocol
         
         val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
             override suspend fun getFileStream(filePath: String, startOffset: Long): InputStream? {
-                return when (protocol) {
+                return when (currentProtocol) {
                     is NetworkProtocol.FTP -> ftpRef?.getFileStream(filePath, startOffset)
                     is NetworkProtocol.SMB -> {
                         val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
@@ -439,7 +441,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             }
             
             override suspend fun getFileSize(filePath: String): Long {
-                return when (protocol) {
+                return when (currentProtocol) {
                     is NetworkProtocol.FTP -> ftpRef?.getFileSize(filePath) ?: 0L
                     is NetworkProtocol.SMB -> {
                         val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"

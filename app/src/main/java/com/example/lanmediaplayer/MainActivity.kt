@@ -1114,16 +1114,34 @@ fun ImageViewerScreen(
     var slideshowInterval by remember { mutableStateOf(6) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     
+    val imageCache = remember { mutableStateMapOf<Int, String>() }
+    
+    LaunchedEffect(currentPage) {
+        if (imageFiles.isEmpty()) return@LaunchedEffect
+        
+        val indicesToLoad = listOf(
+            currentPage,
+            currentPage + 1,
+            currentPage + 2,
+            currentPage - 1,
+            currentPage - 2
+        ).filter { it in 0 until imageFiles.size }
+        
+        indicesToLoad.forEach { index ->
+            if (!imageCache.containsKey(index)) {
+                val url = getImageUrl(imageFiles[index].path)
+                imageCache[index] = url
+            }
+        }
+    }
+    
     LaunchedEffect(isSlideshowPlaying, slideshowInterval) {
         if (isSlideshowPlaying && imageFiles.isNotEmpty()) {
             while (isSlideshowPlaying) {
                 delay(slideshowInterval * 1000L)
                 if (isSlideshowPlaying) {
-                    if (currentPage < imageFiles.size - 1) {
-                        currentPage++
-                    } else {
-                        currentPage = 0
-                    }
+                    val nextPage = if (currentPage < imageFiles.size - 1) currentPage + 1 else 0
+                    currentPage = nextPage
                 }
             }
         }
@@ -1140,11 +1158,23 @@ fun ImageViewerScreen(
                 pageCount = imageFiles.size,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                val currentFile = imageFiles[page]
-                ImageLoader(
-                    imageUrl = getImageUrl(currentFile.path),
-                    contentDescription = currentFile.name
-                )
+                val cachedUrl = imageCache[page]
+                if (cachedUrl != null) {
+                    ImageLoader(
+                        imageUrl = cachedUrl,
+                        contentDescription = imageFiles[page].name
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+                    LaunchedEffect(page) {
+                        imageCache[page] = getImageUrl(imageFiles[page].path)
+                    }
+                }
             }
             
             Row(
