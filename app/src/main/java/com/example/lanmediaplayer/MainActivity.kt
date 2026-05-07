@@ -44,6 +44,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import com.example.lanmediaplayer.controller.CastController
+import com.example.lanmediaplayer.controller.CastDevice
 import com.example.lanmediaplayer.controller.MediaController
 import com.example.lanmediaplayer.controller.MediaFile
 import com.example.lanmediaplayer.controller.NetworkProtocol
@@ -1100,7 +1101,7 @@ fun PlayerScreen(
             CastDeviceDialog(
                 castController = castController,
                 onDismiss = { showCastDialog = false },
-                onDeviceSelected = { device ->
+                onDeviceSelected = { device: CastDevice ->
                     showCastDialog = false
                     val videoUrl = mediaController.getVideoUrl()
                     if (videoUrl.isNotEmpty()) {
@@ -1312,7 +1313,7 @@ fun ImageViewerScreen(
         CastDeviceDialog(
             castController = castController,
             onDismiss = { showCastDialog = false },
-            onDeviceSelected = { device ->
+            onDeviceSelected = { device: CastDevice ->
                 showCastDialog = false
                 val currentImage = imageFiles[currentPage]
                 val imageUrl = getImageUrl(currentImage.path)
@@ -1443,11 +1444,11 @@ fun CastDeviceDialog(
     onDismiss: () -> Unit,
     onDeviceSelected: (CastDevice) -> Unit
 ) {
-    var devices by remember { mutableStateOf<List<CastDevice>>(emptyList()) }
+    var devices by remember { mutableStateOf(emptyList<CastDevice>()) }
     var isSearching by remember { mutableStateOf(true) }
     
     LaunchedEffect(Unit) {
-        castController.searchDevices { foundDevices ->
+        castController.searchDevices { foundDevices: List<CastDevice> ->
             devices = foundDevices
             isSearching = false
         }
@@ -1479,7 +1480,7 @@ fun CastDeviceDialog(
                         style = MaterialTheme.typography.titleSmall
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    devices.forEach { device ->
+                    devices.forEach { device: CastDevice ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1516,7 +1517,7 @@ fun CastDeviceDialog(
                     TextButton(
                         onClick = {
                             isSearching = true
-                            castController.searchDevices { foundDevices ->
+                            castController.searchDevices { foundDevices: List<CastDevice> ->
                                 devices = foundDevices
                                 isSearching = false
                             }
