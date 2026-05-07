@@ -15,7 +15,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
@@ -1163,7 +1167,8 @@ fun ImageViewerScreen(
     onBackClick: () -> Unit,
     onError: (String) -> Unit
 ) {
-    var currentPage by remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
+    val initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { imageFiles.size })
     var isSlideshowPlaying by remember { mutableStateOf(false) }
     var slideshowInterval by remember { mutableStateOf(6) }
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -1172,15 +1177,15 @@ fun ImageViewerScreen(
     
     val imageCache = remember { mutableStateMapOf<Int, String>() }
     
-    LaunchedEffect(currentPage) {
+    LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val indicesToLoad = listOf(
-            currentPage,
-            currentPage + 1,
-            currentPage + 2,
-            currentPage - 1,
-            currentPage - 2
+            pagerState.currentPage,
+            pagerState.currentPage + 1,
+            pagerState.currentPage + 2,
+            pagerState.currentPage - 1,
+            pagerState.currentPage - 2
         ).filter { it in 0 until imageFiles.size }
         
         indicesToLoad.forEach { index ->
@@ -1196,8 +1201,8 @@ fun ImageViewerScreen(
             while (isSlideshowPlaying) {
                 delay(slideshowInterval * 1000L)
                 if (isSlideshowPlaying) {
-                    val nextPage = if (currentPage < imageFiles.size - 1) currentPage + 1 else 0
-                    currentPage = nextPage
+                    val nextPage = if (pagerState.currentPage < imageFiles.size - 1) pagerState.currentPage + 1 else 0
+                    pagerState.animateScrollToPage(nextPage)
                 }
             }
         }
@@ -1211,7 +1216,7 @@ fun ImageViewerScreen(
             )
         } else {
             HorizontalPager(
-                pageCount = imageFiles.size,
+                state = pagerState,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val cachedUrl = imageCache[page]
@@ -1243,7 +1248,7 @@ fun ImageViewerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${currentPage + 1} / ${imageFiles.size}",
+                    text = "${pagerState.currentPage + 1} / ${imageFiles.size}",
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -1315,7 +1320,7 @@ fun ImageViewerScreen(
             onDismiss = { showCastDialog = false },
             onDeviceSelected = { device: CastDevice ->
                 showCastDialog = false
-                val currentImage = imageFiles[currentPage]
+                val currentImage = imageFiles[pagerState.currentPage]
                 val imageUrl = getImageUrl(currentImage.path)
                 castController.castImage(device, imageUrl, currentImage.name) { success, message ->
                     if (success) {
@@ -1458,7 +1463,9 @@ fun CastDeviceDialog(
         onDismissRequest = onDismiss,
         title = { Text("投屏设备") },
         text = {
-            Column {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 if (isSearching) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
