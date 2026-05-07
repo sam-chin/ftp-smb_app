@@ -1020,6 +1020,24 @@ fun PlayerScreen(
     mediaController: MediaController,
     onBackClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    
+    DisposableEffect(Unit) {
+        val window = (context as? Activity)?.window
+        val originalFlags = window?.attributes?.flags ?: 0
+        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window?.decorView?.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+            or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        )
+        
+        onDispose {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window?.decorView?.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+    
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
@@ -1031,13 +1049,19 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
         
-        IconButton(
-            onClick = onBackClick,
+        Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
         ) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
+            }
         }
     }
 }
@@ -1083,6 +1107,13 @@ fun ImageViewerScreen(
     onBackClick: () -> Unit
 ) {
     var currentPage by remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
+    var imageUrl by remember { mutableStateOf("") }
+    
+    LaunchedEffect(currentPage, imageFiles) {
+        if (imageFiles.isNotEmpty() && currentPage < imageFiles.size) {
+            imageUrl = getImageUrl(imageFiles[currentPage].path)
+        }
+    }
     
     Box(modifier = Modifier.fillMaxSize()) {
         if (imageFiles.isEmpty()) {
@@ -1096,14 +1127,17 @@ fun ImageViewerScreen(
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 currentPage = page
-                val currentFile = imageFiles[page]
-                val imageUrl = remember(currentFile) {
-                    getImageUrl(currentFile.path)
-                }
-                
+            }
+            
+            if (imageUrl.isNotEmpty()) {
                 ImageLoader(
                     imageUrl = imageUrl,
-                    contentDescription = currentFile.name
+                    contentDescription = if (currentPage < imageFiles.size) imageFiles[currentPage].name else ""
+                )
+            } else {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.White
                 )
             }
             
@@ -1122,17 +1156,19 @@ fun ImageViewerScreen(
             )
         }
         
-        IconButton(
-            onClick = onBackClick,
+        Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
         ) {
-            Icon(
-                Icons.Default.ArrowBack,
-                contentDescription = "Back",
-                tint = Color.White
-            )
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
+            }
         }
     }
 }
