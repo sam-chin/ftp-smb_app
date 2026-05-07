@@ -314,23 +314,16 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 }
                 
                 if (normalizedPath.isNotEmpty()) {
-                    val normalizedWithSlash = "$normalizedPath/"
-                    val normalizedNoSlash = normalizedPath
+                    val pathSegments = normalizedPath.split("/")
+                    val lastSegment = pathSegments.lastOrNull() ?: ""
                     
-                    log("[SMB-JCIFS] Checking if fileName needs stripping: normalizedPath='$normalizedPath', fileName='$fileName'")
+                    log("[SMB-JCIFS] Checking if fileName needs stripping: normalizedPath='$normalizedPath', lastSegment='$lastSegment', fileName='$fileName'")
                     
-                    if (fileName.startsWith(normalizedWithSlash)) {
-                        fileName = fileName.substring(normalizedWithSlash.length)
-                        log("[SMB-JCIFS] Stripped normalizedWithSlash prefix: new fileName='$fileName'")
-                    } else if (fileName.startsWith(normalizedNoSlash + "/")) {
-                        fileName = fileName.substring((normalizedNoSlash + "/").length)
-                        log("[SMB-JCIFS] Stripped normalizedNoSlash+slash prefix: new fileName='$fileName'")
-                    } else if (fileName.startsWith(normalizedNoSlash) && fileName.length > normalizedNoSlash.length) {
-                        val remainder = fileName.substring(normalizedNoSlash.length)
-                        log("[SMB-JCIFS] fileName starts with normalizedPath, remainder='$remainder'")
-                        if (!remainder.startsWith("/") && remainder.isNotEmpty()) {
+                    if (lastSegment.isNotEmpty() && fileName.startsWith(lastSegment) && !fileName.substring(lastSegment.length).startsWith("/")) {
+                        if (fileName.length > lastSegment.length) {
+                            val remainder = fileName.substring(lastSegment.length)
+                            log("[SMB-JCIFS] fileName starts with lastSegment, stripping: '$fileName' -> '$remainder'")
                             fileName = remainder
-                            log("[SMB-JCIFS] Stripped normalizedNoSlash prefix: new fileName='$fileName'")
                         }
                     }
                 }
