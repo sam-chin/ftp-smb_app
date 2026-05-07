@@ -153,26 +153,45 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     suspend fun listFiles(remotePath: String = "/"): List<FtpFileInfo> = withContext(Dispatchers.IO) {
-        try {
+        commandMutex.withLock {
+            listFilesInternal(remotePath)
+        }
+    }
+    
+    private suspend fun listFilesInternal(remotePath: String = "/"): List<FtpFileInfo> {
+        return try {
             log("[FTP] === Listing files START ===")
-            log("[FTP] Listing files in: $remotePath")
+            log("[FTP] Listing files in: '$remotePath'")
+            log("[FTP] Server encoding: $serverEncoding")
             log("[FTP] Control socket connected: ${controlSocket?.isConnected}")
             log("[FTP] Data socket status: ${if (dataSocket == null) "null" else "exists"}")
+            
+            clearPendingResponses()
             
             sendCommand("TYPE I")
             readResponse()
             
             sendCommand("PASV")
-            val pasvResponse = readResponse()
+            var pasvResponse = readResponse()
             log("[FTP] PASV response: ${pasvResponse.code} ${pasvResponse.message}")
             
             if (pasvResponse.code != 227) {
-            log("[FTP] PASV failed with code: ${pasvResponse.code}")
-                return@withContext emptyList()
+                log("[FTP] PASV failed with code: ${pasvResponse.code}, attempting reconnect...")
+                if (reconnectControlConnection()) {
+                    sendCommand("TYPE I")
+                    readResponse()
+                    sendCommand("PASV")
+                    pasvResponse = readResponse()
+                    if (pasvResponse.code != 227) {
+                        log("[FTP] PASV still failing after reconnect")
+                        return emptyList()
+                    }
+                } else {
+                    return emptyList()
+                }
             }
             
             val dataPort = parsePasvPort(pasvResponse.message)
-            // Use the same host as control connection
             val dataHost = host
             log("[FTP] Connecting to data socket: $dataHost:$dataPort")
             
@@ -184,35 +203,34 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP] LIST response: ${listResponse.code} ${listResponse.message}")
             
             if (listResponse.code !in 100..199) {
-            log("[FTP] LIST command failed with code: ${listResponse.code}")
-                return@withContext emptyList()
+                log("[FTP] LIST command failed with code: ${listResponse.code}")
+                return emptyList()
             }
             
             val files = mutableListOf<FtpFileInfo>()
             dataSocket?.let { socket ->
                 val inputStream = socket.getInputStream()
                 
-                // Read all bytes first
                 val bytes = inputStream.readBytes()
-            log("[FTP] Read ${bytes.size} bytes from data connection")
+                log("[FTP] Read ${bytes.size} bytes from data connection")
                 
-                // Auto-detect encoding and decode to UTF-8
                 val (text, detectedEncoding) = EncodingUtils.decodeWithFallback(bytes)
                 log("[FTP] Detected encoding: $detectedEncoding")
+                
+                val preview = text.take(200).replace("\n", "\\n").replace("\r", "\\r")
+                log("[FTP] Decoded text preview: $preview")
                 
                 val lines = text.lines().filter { it.isNotBlank() }
                 log("[FTP] Decoded ${lines.size} lines")
                 
-                // Log first line to verify encoding
                 if (lines.isNotEmpty()) {
                     log("[FTP] First line sample: ${lines[0].take(100)}")
                 }
                 
-                // Parse all collected lines
                 for (line in lines) {
-            log("[FTP] Raw line: $line")
+                    log("[FTP] Raw line: $line")
                     parseFtpLine(line)?.let { fileInfo ->
-            log("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
+                        log("[FTP] Parsed file: ${fileInfo.name}, isDir: ${fileInfo.isDirectory}")
                         files.add(fileInfo)
                     }
                 }
@@ -416,10 +434,55 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         val firstLine = controlReader?.readLine() ?: throw IOException("No response from server")
         
         val code = firstLine.substring(0, 3).toInt()
-        val message = if (firstLine.length > 4) firstLine.substring(4) else ""
+        var message = if (firstLine.length > 4) firstLine.substring(4) else ""
         
         log("[FTP] Received: $firstLine")
+        
+        if (firstLine.length >= 4 && firstLine[3] == '-') {
+            val codePrefix = firstLine.substring(0, 3)
+            var line: String?
+            while (controlReader?.readLine().also { line = it } != null) {
+                log("[FTP] Received (multiline): $line")
+                if (line!!.length >= 4 && line!!.substring(0, 3) == codePrefix && line!![3] == ' ') {
+                    message += " " + line!!.substring(4)
+                    break
+                }
+            }
+        }
+        
         return FtpResponse(code, message)
+    }
+    
+    private suspend fun reconnectControlConnection(): Boolean {
+        log("[FTP] Attempting to reconnect control connection...")
+        try {
+            controlReader?.close()
+            controlInputStream?.close()
+            controlOutputStream?.close()
+            
+            controlOutputStream = controlSocket?.getOutputStream()
+            controlInputStream = controlSocket?.getInputStream()
+            controlReader = BufferedReader(InputStreamReader(controlInputStream, Charsets.ISO_8859_1))
+            
+            log("[FTP] Reinitializing server encoding...")
+            try {
+                sendCommand("OPTS UTF8 ON")
+                val utf8Response = readResponse()
+                if (utf8Response.code == 200 || utf8Response.code == 202) {
+                    serverEncoding = StandardCharsets.UTF_8
+                } else {
+                    serverEncoding = Charset.forName("GBK")
+                }
+            } catch (e: Exception) {
+                serverEncoding = Charset.forName("GBK")
+            }
+            
+            log("[FTP] Control connection reinitialized")
+            return true
+        } catch (e: Exception) {
+            log("[FTP] Failed to reconnect: ${e.message}")
+            return false
+        }
     }
     
     /**
@@ -427,38 +490,42 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
      * This prevents response mixing when commands are sent in quick succession
      */
     private fun clearPendingResponses() {
+        var originalTimeout = 30000
+        
         try {
             val reader = controlReader ?: return
+            if (controlSocket == null) return
             
-            // Set a short timeout to avoid blocking indefinitely
-            val originalTimeout = controlSocket?.soTimeout ?: 0
-            controlSocket?.soTimeout = 100 // 100ms timeout
+            originalTimeout = controlSocket?.soTimeout ?: 30000
             
-            var clearedCount = 0
-            while (true) {
+            val totalTimeout = 1000
+            val startTime = System.currentTimeMillis()
+            
+            while (System.currentTimeMillis() - startTime < totalTimeout) {
+                controlSocket?.soTimeout = 100
+                
                 try {
                     if (!reader.ready()) {
-                        // No more data available immediately
-                        break
+                        kotlinx.coroutines.delay(50)
+                        if (!reader.ready()) {
+                            break
+                        }
                     }
                     val line = reader.readLine()
                     if (line == null) break
                     log("[FTP] Cleared stale response: $line")
-                    clearedCount++
                 } catch (e: java.net.SocketTimeoutException) {
-                    // Timeout means no more data
                     break
                 }
             }
-            
-            // Restore original timeout
-            controlSocket?.soTimeout = originalTimeout
-            
-            if (clearedCount > 0) {
-                log("[FTP] Cleared $clearedCount pending responses")
-            }
         } catch (e: Exception) {
             log("[FTP] Error clearing pending responses: ${e.message}")
+        } finally {
+            try {
+                controlSocket?.soTimeout = originalTimeout
+            } catch (e: Exception) {
+                log("[FTP] Failed to restore timeout: ${e.message}")
+            }
         }
     }
     
