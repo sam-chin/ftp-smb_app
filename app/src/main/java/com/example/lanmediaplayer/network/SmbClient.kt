@@ -286,36 +286,48 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 val rawName = file.name
                 log("[SMB-JCIFS] JCIFS raw file.name: '$rawName'")
                 
-                val fullFileName = rawName.trimEnd('/')
-                if (fullFileName == "." || fullFileName == "..") continue
+                val trimmedName = rawName.trimEnd('/')
+                if (trimmedName == "." || trimmedName == "..") continue
                 
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                val fileName = if (fullFileName.contains('/')) {
-                    fullFileName.substringAfterLast('/')
+                val fileName: String
+                val filePath: String
+                
+                val cleanBaseUrl = baseUrl.trimEnd('/')
+                
+                if (cleanBaseUrl.isNotEmpty() && rawName.startsWith(cleanBaseUrl)) {
+                    val relativeName = rawName.substring(cleanBaseUrl.length)
+                    val trimmed = relativeName.trimEnd('/')
+                    fileName = if (trimmed.contains('/')) {
+                        trimmed.substringAfterLast('/')
+                    } else {
+                        trimmed
+                    }
+                    filePath = if (normalizedPath.isEmpty()) {
+                        "/$fileName"
+                    } else {
+                        "/$normalizedPath/$fileName"
+                    }
+                    log("[SMB-JCIFS] Extracted from baseUrl: name='$fileName', path='$filePath'")
                 } else {
-                    fullFileName
+                    val trimmedName = rawName.trimEnd('/')
+                    fileName = if (trimmedName.contains('/')) {
+                        trimmedName.substringAfterLast('/')
+                    } else {
+                        trimmedName
+                    }
+                    filePath = if (normalizedPath.isEmpty()) {
+                        "/$fileName"
+                    } else {
+                        "/$normalizedPath/$fileName"
+                    }
+                    log("[SMB-JCIFS] Extracted from relative: name='$fileName', path='$filePath'")
                 }
-                
-                if (fileName.isEmpty()) {
-                    log("[SMB-JCIFS] Warning: extracted empty filename from '$fullFileName', using full name")
-                } else {
-                    log("[SMB-JCIFS] Extracted filename: '$fileName' from '$fullFileName'")
-                }
-                
-                val finalFileName = if (fileName.isEmpty()) fullFileName else fileName
-                
-                val filePath = if (normalizedPath.isEmpty()) {
-                    "/$finalFileName"
-                } else {
-                    "/$normalizedPath/$finalFileName"
-                }
-                
-                log("[SMB-JCIFS] Constructed SmbFileInfo: name='$finalFileName', path='$filePath'")
                 
                 files.add(SmbFileInfo(
-                    name = finalFileName,
+                    name = fileName,
                     size = fileSize,
                     isDirectory = isDirectory,
                     path = filePath
