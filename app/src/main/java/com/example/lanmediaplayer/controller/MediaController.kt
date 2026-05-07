@@ -414,6 +414,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Stopping playback...")
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
+        httpProxy?.stop()
+        httpProxy = null
         log("[Controller] Playback stopped")
     }
     
