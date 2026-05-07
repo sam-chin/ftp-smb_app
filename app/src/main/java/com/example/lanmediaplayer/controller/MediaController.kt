@@ -32,6 +32,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
     private var currentMediaFile: MediaFile? = null
+    private var currentVideoUrl: String = ""
     
     private val connectionScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var browseScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -361,6 +362,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
                 
                 val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: ""
+                currentVideoUrl = proxyUrl
                 log("[Controller] Proxy URL: $proxyUrl")
                 log("[Controller] Media file path: ${mediaFile.path}")
                 log("[Controller] Media file name: ${mediaFile.name}")
@@ -460,6 +462,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
         return "http://127.0.0.1:$port/$encodedPath"
     }
+    
+    fun getVideoUrl(): String = currentVideoUrl
     
     fun release() {
         connectionScope.cancel()

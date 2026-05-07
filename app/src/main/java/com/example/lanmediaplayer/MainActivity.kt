@@ -18,6 +18,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -42,6 +43,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import com.example.lanmediaplayer.controller.CastController
 import com.example.lanmediaplayer.controller.MediaController
 import com.example.lanmediaplayer.controller.MediaFile
 import com.example.lanmediaplayer.controller.NetworkProtocol
@@ -51,6 +53,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
+    private lateinit var castController: CastController
     private lateinit var connectionPrefs: ConnectionPreferences
     private val debugLogs = mutableListOf<String>()
     
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
         
         mediaController = MediaController(this, logCallback)
         mediaController.initializePlayer()
+        castController = CastController(this)
         connectionPrefs = ConnectionPreferences(this)
         
         setContent {
@@ -81,6 +85,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     MainScreen(
                         mediaController = mediaController,
+                        castController = castController,
                         connectionPrefs = connectionPrefs,
                         getDebugLogs = { debugLogs.toList() },
                         onDownloadComplete = { path ->
@@ -102,12 +107,14 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mediaController.release()
+        castController.release()
     }
 }
 
 @Composable
 fun MainScreen(
     mediaController: MediaController,
+    castController: CastController,
     connectionPrefs: ConnectionPreferences,
     getDebugLogs: () -> List<String>,
     onDownloadComplete: (String) -> Unit,
@@ -462,10 +469,12 @@ fun MainScreen(
         
         Screen.Player -> PlayerScreen(
             mediaController = mediaController,
+            castController = castController,
             onBackClick = {
                 mediaController.stopPlayback()
                 currentScreen = Screen.FileBrowser
-            }
+            },
+            onError = onError
         )
         
         Screen.ImageViewer -> ImageViewerScreen(
@@ -473,9 +482,11 @@ fun MainScreen(
             initialIndex = initialImageIndex,
             currentProtocol = selectedProtocol,
             getImageUrl = { path -> mediaController.getImageUrl(path, selectedProtocol) },
+            castController = castController,
             onBackClick = {
                 currentScreen = Screen.FileBrowser
-            }
+            },
+            onError = onError
         )
     }
     
@@ -1022,9 +1033,12 @@ fun FileListItem(
 @Composable
 fun PlayerScreen(
     mediaController: MediaController,
-    onBackClick: () -> Unit
+    castController: CastController,
+    onBackClick: () -> Unit,
+    onError: (String) -> Unit
 ) {
     val context = LocalContext.current
+    var showCastDialog by remember { mutableStateOf(false) }
     
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
@@ -1065,6 +1079,43 @@ fun PlayerScreen(
                     tint = Color.White
                 )
             }
+        }
+        
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+        ) {
+            IconButton(onClick = { showCastDialog = true }) {
+                Icon(
+                    Icons.Default.Cast,
+                    contentDescription = "Cast",
+                    tint = Color.White
+                )
+            }
+        }
+        
+        if (showCastDialog) {
+            CastDeviceDialog(
+                castController = castController,
+                onDismiss = { showCastDialog = false },
+                onDeviceSelected = { device ->
+                    showCastDialog = false
+                    val videoUrl = mediaController.getVideoUrl()
+                    if (videoUrl.isNotEmpty()) {
+                        castController.castVideo(device, videoUrl, "Video") { success, message ->
+                            if (success) {
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            } else {
+                                onError(message)
+                            }
+                        }
+                    } else {
+                        onError("No video URL available")
+                    }
+                }
+            )
         }
     }
 }
@@ -1107,12 +1158,16 @@ fun ImageViewerScreen(
     initialIndex: Int,
     currentProtocol: NetworkProtocol,
     getImageUrl: (String) -> String,
-    onBackClick: () -> Unit
+    castController: CastController,
+    onBackClick: () -> Unit,
+    onError: (String) -> Unit
 ) {
     var currentPage by remember { mutableStateOf(initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))) }
     var isSlideshowPlaying by remember { mutableStateOf(false) }
     var slideshowInterval by remember { mutableStateOf(6) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showCastDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     
     val imageCache = remember { mutableStateMapOf<Int, String>() }
     
@@ -1228,6 +1283,21 @@ fun ImageViewerScreen(
                 )
             }
         }
+        
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+        ) {
+            IconButton(onClick = { showCastDialog = true }) {
+                Icon(
+                    Icons.Default.Cast,
+                    contentDescription = "Cast",
+                    tint = Color.White
+                )
+            }
+        }
     }
     
     if (showSettingsDialog) {
@@ -1235,6 +1305,25 @@ fun ImageViewerScreen(
             currentInterval = slideshowInterval,
             onIntervalChange = { slideshowInterval = it },
             onDismiss = { showSettingsDialog = false }
+        )
+    }
+    
+    if (showCastDialog) {
+        CastDeviceDialog(
+            castController = castController,
+            onDismiss = { showCastDialog = false },
+            onDeviceSelected = { device ->
+                showCastDialog = false
+                val currentImage = imageFiles[currentPage]
+                val imageUrl = getImageUrl(currentImage.path)
+                castController.castImage(device, imageUrl, currentImage.name) { success, message ->
+                    if (success) {
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    } else {
+                        onError(message)
+                    }
+                }
+            }
         )
     }
 }
@@ -1343,6 +1432,105 @@ fun SlideshowSettingsDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("完成")
+            }
+        }
+    )
+}
+
+@Composable
+fun CastDeviceDialog(
+    castController: CastController,
+    onDismiss: () -> Unit,
+    onDeviceSelected: (CastDevice) -> Unit
+) {
+    var devices by remember { mutableStateOf<List<CastDevice>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(Unit) {
+        castController.searchDevices { foundDevices ->
+            devices = foundDevices
+            isSearching = false
+        }
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("投屏设备") },
+        text = {
+            Column {
+                if (isSearching) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("搜索设备中...")
+                    }
+                } else if (devices.isEmpty()) {
+                    Text(
+                        text = "未找到可投屏设备\n请确保电视或设备在同一局域网",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    Text(
+                        text = "选择设备",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    devices.forEach { device ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { onDeviceSelected(device) }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Cast,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = device.name,
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Text(
+                                        text = device.ip,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            isSearching = true
+                            castController.searchDevices { foundDevices ->
+                                devices = foundDevices
+                                isSearching = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("刷新设备")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
             }
         }
     )
