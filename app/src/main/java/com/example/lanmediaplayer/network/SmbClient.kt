@@ -283,24 +283,30 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Found ${fileList.size} items")
             
             val cleanFullPath = fullPath.trimEnd('/')
+            log("[SMB-JCIFS] fullPath: '$fullPath', cleanFullPath: '$cleanFullPath', normalizedPath: '$normalizedPath'")
             
             for (file in fileList) {
                 val rawName = file.name
-                log("[SMB-JCIFS] JCIFS raw file.name: '$rawName'")
+                val getNameResult = try { file.getName() } catch (e: Exception) { null }
+                log("[SMB-JCIFS] === JCIFS raw file.name: '$rawName', getName(): '$getNameResult'")
                 
-                val trimmedName = rawName.trimEnd('/')
+                val displayName = getNameResult ?: rawName
+                val trimmedName = displayName.trimEnd('/')
+                log("[SMB-JCIFS] trimmedName: '$trimmedName'")
+                
                 if (trimmedName == "." || trimmedName == "..") continue
                 
                 val isDirectory = file.isDirectory
                 val fileSize = if (isDirectory) 0L else file.length()
                 
-                val fileName = if (trimmedName.contains('/')) {
-                    trimmedName.substringAfterLast('/')
+                val fileName: String
+                if (trimmedName.contains('/')) {
+                    fileName = trimmedName.substringAfterLast('/')
                 } else {
-                    trimmedName
+                    fileName = trimmedName
                 }
                 
-                log("[SMB-JCIFS] Extracted fileName: '$fileName'")
+                log("[SMB-JCIFS] fileName from substringAfterLast: '$fileName'")
                 
                 val filePath: String
                 if (normalizedPath.isEmpty()) {
