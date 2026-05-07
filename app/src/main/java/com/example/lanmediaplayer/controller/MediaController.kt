@@ -31,8 +31,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var httpProxy: HttpProxyServer? = null
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
+    private var currentMediaFile: MediaFile? = null
     
-    // Separate scopes for different operations
     private val connectionScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var browseScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
@@ -289,91 +289,77 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${mediaFile.protocol::class.simpleName}")
         log("[Controller] Size: ${mediaFile.size}")
         
-        // Additional debug for path structure
-        log("[CONTROLLER-PATH-DEBUG] MediaFile path analysis: path='${mediaFile.path}', name='${mediaFile.name}'")
-        
-        // Check if file is an image (ExoPlayer doesn't support images)
         val extension = mediaFile.name.substringAfterLast('.', "").lowercase()
         val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
         
         if (isImage) {
-            log("[Controller] WARNING: ExoPlayer does not support image files. Use ImageView instead.")
-            log("[Controller] For images, consider downloading and displaying with Image composable.")
+            log("[Controller] WARNING: ExoPlayer does not support image files.")
         }
         
         browseScope.launch {
             try {
-                log("[Controller] HTTP Proxy port: ${httpProxy?.getPort()}")
+                exoPlayer?.stop()
+                exoPlayer?.clearMediaItems()
                 
-                if (httpProxy?.getPort() == 0) {
-                    log("[Controller] Starting HTTP proxy...")
-                    val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
-                        override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
-                            log("[Controller] getFileStream called for: $path (offset: $startOffset)")
-                            return when (mediaFile.protocol) {
-                                is NetworkProtocol.FTP -> {
-                                    log("[Controller] Streaming via FTP...")
-                                    ftpClient?.getFileStream(path, startOffset)
-                                }
-                                is NetworkProtocol.SMB -> {
-                                    log("[Controller] Streaming via SMB...")
-                                    smbClient?.getFileStream(path, startOffset)
-                                }
-                            }
+                httpProxy?.stop()
+                httpProxy = HttpProxyServer(logCallback)
+                
+                currentMediaFile = mediaFile
+                
+                val ftpRef = ftpClient
+                val smbRef = smbClient
+                val mediaRef = currentMediaFile
+                
+                val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
+                    override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
+                        log("[Controller] getFileStream called for: $path (offset: $startOffset)")
+                        return when (mediaRef?.protocol) {
+                            is NetworkProtocol.FTP -> ftpRef?.getFileStream(path, startOffset)
+                            is NetworkProtocol.SMB -> smbRef?.getFileStream(path, startOffset)
+                            else -> null
                         }
-                        
-                        override suspend fun getFileSize(path: String): Long {
-                            log("[CONTROLLER-PATH-DEBUG] getFileSize called for: $path")
-                            log("[CONTROLLER-PATH-DEBUG] Original mediaFile path: ${mediaFile.path}")
-                            log("[CONTROLLER-PATH-DEBUG] Comparing paths - received: '$path', expected: '${mediaFile.path.substring(1)}' (without leading slash)")
-                            return when (mediaFile.protocol) {
-                                is NetworkProtocol.FTP -> {
-                                    ftpClient?.getFileSize(path) ?: mediaFile.size
-                                }
-                                is NetworkProtocol.SMB -> {
-                                    smbClient?.getFileSize(path) ?: mediaFile.size
-                                }
-                            }
-                        }
-                    }) ?: -1
-                    
-                    log("[Controller] HTTP Proxy started on port: $port")
-                    
-                    if (port <= 0) {
-                        log("[Controller] ERROR: Failed to start proxy server")
-                        withContext(Dispatchers.Main) {
-                            callback.onError("Failed to start proxy server")
-                        }
-                        return@launch
                     }
+                    
+                    override suspend fun getFileSize(path: String): Long {
+                        log("[Controller] getFileSize called for: $path")
+                        return when (mediaRef?.protocol) {
+                            is NetworkProtocol.FTP -> ftpRef?.getFileSize(path) ?: mediaRef?.size ?: 0L
+                            is NetworkProtocol.SMB -> smbRef?.getFileSize(path) ?: mediaRef?.size ?: 0L
+                            else -> mediaRef?.size ?: 0L
+                        }
+                    }
+                }) ?: -1
+                
+                log("[Controller] HTTP Proxy started on port: $port")
+                
+                if (port <= 0) {
+                    log("[Controller] ERROR: Failed to start proxy server")
+                    withContext(Dispatchers.Main) {
+                        callback.onError("Failed to start proxy server")
+                    }
+                    return@launch
                 }
                 
                 val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: ""
                 log("[Controller] Proxy URL: $proxyUrl")
                 log("[Controller] Media file path: ${mediaFile.path}")
                 log("[Controller] Media file name: ${mediaFile.name}")
-                log("[Controller] HTTP Proxy port: ${httpProxy?.getPort()}")
                 
                 withContext(Dispatchers.Main) {
-                    // Create a DefaultHttpDataSource.Factory for HTTP streaming
                     val dataSourceFactory = DefaultHttpDataSource.Factory()
                         .setAllowCrossProtocolRedirects(true)
                         .setConnectTimeoutMs(10000)
                         .setReadTimeoutMs(10000)
                     
-                    // Create media source
                     val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
                         .createMediaSource(MediaItem.fromUri(proxyUrl))
                     
                     log("[Controller] Setting media source...")
                     
-                    // Add error listener before setting media source
                     exoPlayer?.addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             log("[Controller] Player error: ${error.message}")
                             log("[Controller] Error code: ${error.errorCode}")
-                            log("[Controller] Error code name: ${error.errorCodeName}")
-                            error.printStackTrace()
                         }
                         
                         override fun onPlaybackStateChanged(state: Int) {
@@ -402,6 +388,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
             }
         }
+    }
+    
+    fun stopPlayback() {
+        log("[Controller] Stopping playback...")
+        exoPlayer?.stop()
+        exoPlayer?.clearMediaItems()
+        log("[Controller] Playback stopped")
     }
     
     fun release() {

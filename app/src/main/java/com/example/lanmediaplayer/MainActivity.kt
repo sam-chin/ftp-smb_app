@@ -293,6 +293,7 @@ fun MainScreen(
         Screen.Player -> PlayerScreen(
             mediaController = mediaController,
             onBackClick = {
+                mediaController.stopPlayback()
                 currentScreen = Screen.FileBrowser
             }
         )
