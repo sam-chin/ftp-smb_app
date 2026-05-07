@@ -357,11 +357,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         operationMutex.withLock {
             try {
                 log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
+                log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
                 
                 val normalizedPath = normalizePathForSmb(remotePath)
-                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
-                val fullPath = buildFullPath(decodedPath)
+                log("[SMB-JCIFS] After normalizePathForSmb: '$normalizedPath'")
                 
+                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
+                log("[SMB-JCIFS] After URL decode: '$decodedPath'")
+                
+                val fullPath = buildFullPath(decodedPath)
                 log("[SMB-JCIFS] Full path: $fullPath")
                 
                 val smbFile = SmbFile(fullPath, context)
@@ -445,6 +449,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun normalizePathForSmb(remotePath: String): String {
+        log("[SMB-JCIFS] normalizePathForSmb input: '$remotePath', share: '$share'")
+        
         var normalized = if (remotePath.startsWith("/") && remotePath.length > 1) {
             remotePath.substring(1)
         } else if (remotePath == "/") {
@@ -453,10 +459,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             remotePath
         }
         
+        log("[SMB-JCIFS] After removing leading slash: '$normalized'")
+        
         if (share.isNotEmpty()) {
             if (normalized.startsWith("$share/")) {
                 normalized = normalized.substring(share.length + 1)
-                log("[SMB-JCIFS] Removed share prefix from path: $normalized")
+                log("[SMB-JCIFS] Removed share prefix, new path: '$normalized'")
             } else if (normalized == share) {
                 normalized = ""
                 log("[SMB-JCIFS] Path is just share name, set to empty")
