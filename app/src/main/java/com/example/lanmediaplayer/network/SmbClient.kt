@@ -119,9 +119,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                         log("[SMB-JCIFS] Error testing share: ${e.message}")
                     }
                 } else {
-                    // Auto-detect shares using listShares method
                     log("[SMB-JCIFS] Auto-detecting available shares...")
-                    availableShares = listSharesInternal()
+                    availableShares = listShares()
                     log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
                 }
             }
@@ -134,10 +133,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 log("[SMB-JCIFS] Domain: ${if (detectedDomain.isEmpty()) "(empty)" else detectedDomain}")
                 log("[SMB-JCIFS] Base URL: $baseUrl")
                 return@withContext true
-            } else if (availableShares.isNotEmpty() && share.isNotEmpty()) {
-                this@SmbClient.share = share
+            } else if (availableShares.isNotEmpty() && detectedShare.isNotEmpty()) {
+                this@SmbClient.share = detectedShare
                 this@SmbClient.domain = detectedDomain
-                baseUrl = "smb://$host/$share/"
+                baseUrl = "smb://$host/$detectedShare/"
                 log("[SMB-JCIFS] === Connection successful ===")
                 return@withContext true
             } else if (availableShares.isNotEmpty()) {
