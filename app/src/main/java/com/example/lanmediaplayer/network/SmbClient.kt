@@ -360,37 +360,23 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             try {
                 log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
                 
-                // Normalize path - ensure consistent encoding
-                val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
-                    remotePath.substring(1)
-                } else if (remotePath == "/") {
-                    ""
-                } else {
-                    remotePath
-                }
+                val normalizedPath = normalizePathForSmb(remotePath)
+                val fullPath = buildFullPath(normalizedPath)
                 
-                // If path contains non-ASCII characters, ensure proper encoding
-                val finalPath = if (EncodingConverter.containsNonAscii(normalizedPath)) {
-                    log("[SMB-JCIFS] Path contains non-ASCII characters")
-                    normalizedPath
-                } else {
-                    normalizedPath
-                }
+                log("[SMB-JCIFS] Full path: $fullPath")
                 
-                val fullPath = "$baseUrl$finalPath"
                 val smbFile = SmbFile(fullPath, context)
                 
                 if (!smbFile.exists() || smbFile.isDirectory) {
+                    log("[SMB-JCIFS] File not found or is directory")
                     return@withContext null
                 }
                 
                 val inputStream = smbFile.getInputStream()
                 
-                // Skip to offset if needed
                 if (startOffset > 0) {
-                    log("[SMB-JCIFS] Skipping $startOffset bytes to reach offset")
-                    val skipped = inputStream.skip(startOffset)
-                    log("[SMB-JCIFS] Skipped $skipped bytes")
+                    log("[SMB-JCIFS] Skipping $startOffset bytes")
+                    inputStream.skip(startOffset)
                 }
                 
                 inputStream
@@ -409,87 +395,71 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             try {
                 log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
                 
-                // Normalize path - ensure consistent encoding
-                val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
-                    remotePath.substring(1)
-                } else if (remotePath == "/") {
-                    ""
-                } else {
-                    remotePath
-                }
+                val normalizedPath = normalizePathForSmb(remotePath)
+                val fullPath = buildFullPath(normalizedPath)
                 
-                // If path contains non-ASCII characters, ensure proper encoding
-                val finalPath = if (EncodingConverter.containsNonAscii(normalizedPath)) {
-                    // Path has Chinese or other non-ASCII chars
-                    // JCIFS-NG should handle this, but let's ensure consistency
-                    log("[SMB-JCIFS] Path contains non-ASCII characters")
-                    normalizedPath
-                } else {
-                    normalizedPath
-                }
-                
-                val fullPath = "$baseUrl$finalPath"
-                log("[SMB-JCIFS] Constructed full path: '$fullPath'")
-                log("[SMB-JCIFS] Base URL: '$baseUrl'")
+                log("[SMB-JCIFS] Full path: $fullPath")
                 
                 val smbFile = SmbFile(fullPath, context)
-                
-                // Debug: If file doesn't exist, list parent directory to see actual files
-                if (!smbFile.exists()) {
-                    log("[SMB-JCIFS] File does not exist, attempting alternative approaches...")
-                    
-                    // Try with URL-encoded path
-                    try {
-                        val encodedPath = java.net.URLEncoder.encode(normalizedPath, "UTF-8")
-                            .replace("+", "%20") // URLEncoder encodes spaces as +, but we need %20
-                            .replace("/", "%2F") // Also encode slashes
-                        val encodedFullPath = "$baseUrl$encodedPath"
-                        log("[SMB-JCIFS] Trying URL-encoded path: $encodedFullPath")
-                        val encodedSmbFile = SmbFile(encodedFullPath, context)
-                        if (encodedSmbFile.exists() && !encodedSmbFile.isDirectory) {
-                            val size = encodedSmbFile.length()
-                            log("[SMB-JCIFS] URL-encoded path works! Size: $size")
-                            return@withContext size
-                        }
-                    } catch (e: Exception) {
-                        log("[SMB-JCIFS] URL-encoded path failed: ${e.message}")
-                    }
-                    
-                    // List parent directory to see actual filenames
-                    val parentPath = normalizedPath.substringBeforeLast('/', "")
-                    val parentFullPath = if (parentPath.isEmpty()) baseUrl else "$baseUrl$parentPath/"
-                    log("[SMB-JCIFS] Listing parent directory: $parentFullPath")
-                    try {
-                        val parentFile = SmbFile(parentFullPath, context)
-                        if (parentFile.exists() && parentFile.isDirectory) {
-                            val siblings = parentFile.listFiles()
-                            log("[SMB-JCIFS] Parent directory contains ${siblings.size} items:")
-                            for (sibling in siblings) {
-                                val siblingName = sibling.name.trimEnd('/')
-                                if (siblingName != "." && siblingName != "..") {
-                                    log("[SMB-JCIFS]   - $siblingName (${if (sibling.isDirectory) "DIR" else "FILE"})")
-                                }
-                            }
-                        } else {
-                            log("[SMB-JCIFS] Parent directory does not exist or is not a directory")
-                        }
-                    } catch (e: Exception) {
-                        log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
-                    }
-                }
                 
                 if (smbFile.exists() && !smbFile.isDirectory) {
                     val size = smbFile.length()
                     log("[SMB-JCIFS] File exists, size: $size")
-                    size
-                } else {
-                    log("[SMB-JCIFS] File does not exist or is directory")
-                    0L
+                    return@withContext size
                 }
+                
+                log("[SMB-JCIFS] File not found, trying alternatives...")
+                
+                if (normalizedPath.isNotEmpty()) {
+                    val parentPath = normalizedPath.substringBeforeLast('/', "")
+                    val fileName = normalizedPath.substringAfterLast('/')
+                    
+                    if (parentPath.isNotEmpty()) {
+                        val parentFullPath = buildFullPath(parentPath)
+                        log("[SMB-JCIFS] Listing parent: $parentFullPath")
+                        
+                        try {
+                            val parentFile = SmbFile(parentFullPath, context)
+                            if (parentFile.exists() && parentFile.isDirectory) {
+                                for (f in parentFile.listFiles()) {
+                                    val name = f.name.trimEnd('/')
+                                    if (name == fileName && f.isDirectory == false) {
+                                        val size = f.length()
+                                        log("[SMB-JCIFS] Found file in parent: $name, size: $size")
+                                        return@withContext size
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            log("[SMB-JCIFS] Error listing parent: ${e.message}")
+                        }
+                    }
+                }
+                
+                0L
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error getting file size: ${e.message}")
                 0L
             }
+        }
+    }
+    
+    private fun normalizePathForSmb(remotePath: String): String {
+        return if (remotePath.startsWith("/") && remotePath.length > 1) {
+            remotePath.substring(1)
+        } else if (remotePath == "/") {
+            ""
+        } else {
+            remotePath
+        }
+    }
+    
+    private fun buildFullPath(relativePath: String): String {
+        val cleanBaseUrl = baseUrl.trimEnd('/')
+        return if (relativePath.isEmpty()) {
+            cleanBaseUrl
+        } else {
+            "$cleanBaseUrl/$relativePath"
         }
     }
     
