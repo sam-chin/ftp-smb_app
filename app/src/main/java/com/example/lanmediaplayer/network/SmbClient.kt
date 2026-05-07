@@ -445,13 +445,30 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun normalizePathForSmb(remotePath: String): String {
-        return if (remotePath.startsWith("/") && remotePath.length > 1) {
+        var normalized = if (remotePath.startsWith("/") && remotePath.length > 1) {
             remotePath.substring(1)
         } else if (remotePath == "/") {
             ""
         } else {
             remotePath
         }
+        
+        if (share.isNotEmpty() && normalized.startsWith(share)) {
+            val afterShare = normalized.substring(share.length)
+            if (afterShare.isEmpty() || afterShare.startsWith("/") || afterShare.startsWith("%2F")) {
+                val cleanAfterShare = if (afterShare.startsWith("%2F")) {
+                    afterShare.substring(3)
+                } else if (afterShare.startsWith("/")) {
+                    afterShare.substring(1)
+                } else {
+                    ""
+                }
+                normalized = cleanAfterShare
+                log("[SMB-JCIFS] Removed share prefix from path: $normalized")
+            }
+        }
+        
+        return normalized
     }
     
     private fun buildFullPath(relativePath: String): String {
