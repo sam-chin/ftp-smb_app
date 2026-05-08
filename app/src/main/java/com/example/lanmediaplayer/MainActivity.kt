@@ -1461,7 +1461,8 @@ fun PlayerScreen(
                                 val port = connectionPrefs.getSmbPort()
                                 val username = connectionPrefs.getSmbUsername()
                                 val password = connectionPrefs.getSmbPassword()
-                                castController.buildRealMediaUrl(mediaPath, protocol, host, port, username, password)
+                                val share = connectionPrefs.getSmbShare()  // ✅ 获取共享目录
+                                castController.buildRealMediaUrl(mediaPath, protocol, host, port, username, password, share)
                             }
                             is NetworkProtocol.FTP -> {
                                 val host = connectionPrefs.getFtpHost()
@@ -1862,7 +1863,8 @@ fun ImageViewerScreen(
                         val port = connectionPrefs.getSmbPort()
                         val username = connectionPrefs.getSmbUsername()
                         val password = connectionPrefs.getSmbPassword()
-                        castController.buildRealMediaUrl(currentImage.path, currentProtocol, host, port, username, password)
+                        val share = connectionPrefs.getSmbShare()  // ✅ 获取共享目录
+                        castController.buildRealMediaUrl(currentImage.path, currentProtocol, host, port, username, password, share)
                     }
                     is NetworkProtocol.FTP -> {
                         val host = connectionPrefs.getFtpHost()
