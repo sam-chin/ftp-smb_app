@@ -1455,25 +1455,10 @@ fun PlayerScreen(
                     val protocol = mediaController.getCurrentProtocol()
                     
                     if (mediaPath != null && protocol != null) {
-                        // 构建真实的SMB/FTP URL（DLNA设备可以直接访问）
-                        val realUrl = when (protocol) {
-                            is NetworkProtocol.SMB -> {
-                                val username = connectionPrefs.getSmbUsername()
-                                val password = connectionPrefs.getSmbPassword()
-                                // ✅ 使用 MediaController 的 getSmbFullUrl 方法构建完整URL
-                                mediaController.getSmbFullUrl(mediaPath, username, password)
-                            }
-                            is NetworkProtocol.FTP -> {
-                                val host = connectionPrefs.getFtpHost()
-                                val port = connectionPrefs.getFtpPort()
-                                val username = connectionPrefs.getFtpUsername()
-                                val password = connectionPrefs.getFtpPassword()
-                                castController.buildRealMediaUrl(mediaPath, protocol, host, port, username, password)
-                            }
-                        }
-                        
-                        addLog("Casting with real URL: $realUrl")
-                        castController.castVideo(device, realUrl, "Video") { success, message ->
+                        // ✅ 使用HTTP代理URL（DLNA设备通过HTTP访问）
+                        val videoUrl = mediaController.getVideoUrl()
+                        addLog("Casting with HTTP URL: $videoUrl")
+                        castController.castVideo(device, videoUrl, mediaPath.split("/").lastOrNull() ?: "Video") { success, message ->
                             if (success) {
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                             } else {

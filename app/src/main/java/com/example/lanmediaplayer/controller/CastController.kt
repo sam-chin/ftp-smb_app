@@ -403,7 +403,9 @@ class CastController(private val context: Context, private val logCallback: ((St
                     // ✅ 使用controlUrl或默认路径
                     val controlPath = device.controlUrl?.let {
                         if (it.contains("://")) {
-                            it.substringAfter("/", "").substringAfter("/")
+                            // 从完整URL中提取path部分
+                            // 例如: http://192.168.11.9:1363/upnp/control/avtransport -> upnp/control/avtransport
+                            it.substringAfter("://").substringAfter("/")
                         } else {
                             it
                         }
