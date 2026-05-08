@@ -27,6 +27,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -349,10 +350,14 @@ fun MainScreen(
                     is NetworkProtocol.FTP -> {
                         addLog("FTP Connection: host=$host, port=$port, user=$username")
                         connectionPrefs.saveFtpConnection(host, port, username, password)
+                        // 保存连接历史
+                        connectionPrefs.saveConnectionHistory("FTP", host, port, username, password)
                     }
                     is NetworkProtocol.SMB -> {
                         addLog("SMB Connection: host=$host, share=$share, user=$username, domain=$domain")
                         connectionPrefs.saveSmbConnection(host, port, username, password, share, domain)
+                        // 保存连接历史
+                        connectionPrefs.saveConnectionHistory("SMB", host, port, username, password, share, domain)
                     }
                 }
                 
@@ -439,7 +444,8 @@ fun MainScreen(
                     }
                 }
             },
-            isLoading = isLoading
+            isLoading = isLoading,
+            connectionPrefs = connectionPrefs  // 传递connectionPrefs以支持自动填充
         )
         
         Screen.FileBrowser -> FileBrowserScreen(
@@ -796,7 +802,8 @@ fun ConnectionScreen(
     savedSmbDomain: String,
     debugLogs: List<String>,
     onConnect: (NetworkProtocol, String, Int, String, String, String, String) -> Unit,
-    isLoading: Boolean
+    isLoading: Boolean,
+    connectionPrefs: ConnectionPreferences? = null  // 新增参数
 ) {
     var protocol by remember { mutableStateOf(selectedProtocol) }
     
@@ -813,13 +820,16 @@ fun ConnectionScreen(
     var smbShare by remember { mutableStateOf(savedSmbShare) }
     var smbDomain by remember { mutableStateOf(savedSmbDomain) }
     
-    // Current active fields based on protocol
+    // 当前 active fields based on protocol
     val host = if (protocol is NetworkProtocol.FTP) ftpHost else smbHost
     val port = if (protocol is NetworkProtocol.FTP) ftpPort else smbPort
     val username = if (protocol is NetworkProtocol.FTP) ftpUsername else smbUsername
     val password = if (protocol is NetworkProtocol.FTP) ftpPassword else smbPassword
     val share = smbShare
     val domain = smbDomain
+    
+    // 匹配的连接记录
+    var matchedConnection by remember { mutableStateOf<ConnectionPreferences.ConnectionRecord?>(null) }
     
     Column(
         modifier = Modifier
@@ -857,9 +867,44 @@ fun ConnectionScreen(
             value = host,
             onValueChange = { 
                 if (protocol is NetworkProtocol.FTP) ftpHost = it else smbHost = it
+                // 检查是否有匹配的连接记录
+                if (it.isNotEmpty() && connectionPrefs != null) {
+                    val protocolStr = if (protocol is NetworkProtocol.FTP) "FTP" else "SMB"
+                    matchedConnection = connectionPrefs.findMatchingConnection(it, protocolStr)
+                } else {
+                    matchedConnection = null
+                }
             },
             label = { Text("Host") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            trailingIcon = {
+                // 如果有匹配的连接，显示提示图标
+                if (matchedConnection != null) {
+                    IconButton(onClick = {
+                        // 自动填充匹配的连接信息
+                        matchedConnection?.let { record ->
+                            if (protocol is NetworkProtocol.FTP) {
+                                ftpPort = record.port.toString()
+                                ftpUsername = record.username
+                                ftpPassword = record.password
+                            } else {
+                                smbPort = record.port.toString()
+                                smbUsername = record.username
+                                smbPassword = record.password
+                                smbShare = record.share
+                                smbDomain = record.domain
+                            }
+                            matchedConnection = null  // 清除匹配
+                        }
+                    }) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Auto-fill saved connection",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
         )
         
         Spacer(modifier = Modifier.height(8.dp))

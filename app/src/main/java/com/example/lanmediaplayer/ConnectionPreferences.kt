@@ -21,6 +21,9 @@ class ConnectionPreferences(context: Context) {
         const val KEY_SMB_SHARE = "smb_share"
         const val KEY_SMB_DOMAIN = "smb_domain"
         const val KEY_SMB_SHARES_CACHE = "smb_shares_cache"  // 缓存的共享目录列表
+        
+        // 连接历史记录
+        const val KEY_CONNECTION_HISTORY = "connection_history"  // 格式: protocol|host|port|username|password|share|domain
     }
     
     fun saveFtpConnection(
@@ -90,4 +93,64 @@ class ConnectionPreferences(context: Context) {
     fun clear() {
         prefs.edit().clear().apply()
     }
+    
+    // 保存连接历史（最多保存10条）
+    fun saveConnectionHistory(protocol: String, host: String, port: Int, username: String, password: String, share: String = "", domain: String = "") {
+        val history = getConnectionHistory().toMutableList()
+        
+        // 移除相同的记录（如果存在）
+        history.removeAll { it.host == host && it.protocol == protocol }
+        
+        // 添加新记录到开头
+        history.add(0, ConnectionRecord(protocol, host, port, username, password, share, domain))
+        
+        // 只保留最近10条
+        val limitedHistory = history.take(10)
+        
+        // 保存到 SharedPreferences
+        val historyStr = limitedHistory.joinToString(";;") { record ->
+            "${record.protocol}|${record.host}|${record.port}|${record.username}|${record.password}|${record.share}|${record.domain}"
+        }
+        prefs.edit().putString(KEY_CONNECTION_HISTORY, historyStr).apply()
+    }
+    
+    // 获取连接历史
+    fun getConnectionHistory(): List<ConnectionRecord> {
+        val historyStr = prefs.getString(KEY_CONNECTION_HISTORY, "") ?: ""
+        return if (historyStr.isNotEmpty()) {
+            historyStr.split(";;").filter { it.isNotBlank() }.mapNotNull { entry ->
+                val parts = entry.split("|")
+                if (parts.size >= 7) {
+                    ConnectionRecord(
+                        protocol = parts[0],
+                        host = parts[1],
+                        port = parts[2].toIntOrNull() ?: 0,
+                        username = parts[3],
+                        password = parts[4],
+                        share = parts[5],
+                        domain = parts[6]
+                    )
+                } else null
+            }
+        } else {
+            emptyList()
+        }
+    }
+    
+    // 根据主机名查找匹配的连接记录
+    fun findMatchingConnection(host: String, protocol: String): ConnectionRecord? {
+        val history = getConnectionHistory()
+        return history.find { it.host.equals(host, ignoreCase = true) && it.protocol == protocol }
+    }
+    
+    // 连接记录数据类
+    data class ConnectionRecord(
+        val protocol: String,
+        val host: String,
+        val port: Int,
+        val username: String,
+        val password: String,
+        val share: String = "",
+        val domain: String = ""
+    )
 }
