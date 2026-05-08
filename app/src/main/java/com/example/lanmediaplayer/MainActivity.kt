@@ -1057,7 +1057,10 @@ fun PlayerScreen(
     
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
+        // 设置全屏
         window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        // 保持屏幕常亮，防止锁屏
+        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window?.decorView?.systemUiVisibility = (
             android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
             or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -1066,11 +1069,16 @@ fun PlayerScreen(
         
         onDispose {
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             window?.decorView?.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
         }
     }
     
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -1307,7 +1315,21 @@ fun ImageViewerScreen(
         }
     }
     
-    Box(modifier = Modifier.fillMaxSize()) {
+    // 保持屏幕常亮，防止播放幻灯片时锁屏
+    DisposableEffect(Unit) {
+        val window = (context as? Activity)?.window
+        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        onDispose {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
         if (imageFiles.isEmpty()) {
             Text(
                 text = "No images to display",
