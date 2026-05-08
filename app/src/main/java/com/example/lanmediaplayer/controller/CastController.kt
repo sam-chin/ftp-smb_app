@@ -133,21 +133,28 @@ class CastController(private val context: Context, private val logCallback: ((St
                     // ✅ 从 location URL 中解析正确的控制URL和端口
                     val (controlUrl, httpPort) = extractControlInfo(location)
                     
-                    // ✅ 对于Kodi设备，尝试常见的control URL路径
+                    // ✅ 对于Kodi设备，尝试多个常见的control URL路径
                     var finalControlUrl = controlUrl
                     if (deviceName.contains("Kodi", ignoreCase = true)) {
-                        // Kodi通常使用这些路径
+                        // Kodi可能使用这些路径之一
                         val kodiPaths = listOf(
                             "upnp/control/avtransport",
                             "AVTransport/control",
-                            "MediaRenderer/AVTransport/Control"
+                            "MediaRenderer/AVTransport/Control",
+                            "ctl/AVTransport",
+                            "control/AVTransport"
                         )
-                        // 使用第一个路径作为默认值
+                        
+                        // 尝试第一个路径，如果失败可以在日志中看到并手动切换
                         finalControlUrl = "http://$ip:$httpPort/${kodiPaths[0]}"
-                        log("Kodi device detected, using control URL: $finalControlUrl")
+                        log("Kodi device detected")
+                        log("Trying control URL: $finalControlUrl")
+                        log("Alternative paths: ${kodiPaths.drop(1).joinToString(", ")}")
                     }
                     
-                    log("Found DLNA device: $deviceName at $ip:$httpPort, Location: $location, ControlURL: $finalControlUrl")
+                    log("Found DLNA device: $deviceName at $ip:$httpPort")
+                    log("Location: $location")
+                    log("ControlURL: $finalControlUrl")
                     devices.add(CastDevice(deviceName, ip, httpPort, "DLNA", finalControlUrl))
                 }
             }
