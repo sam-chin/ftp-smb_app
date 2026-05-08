@@ -35,6 +35,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var currentMediaFile: MediaFile? = null
     private var currentVideoUrl: String = ""
     private var currentSmbShare: String = ""  // ✅ 保存当前SMB共享目录
+    private var currentSmbBaseUrl: String = ""  // ✅ 保存SMB baseUrl（完整URL前缀）
     
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
@@ -214,6 +215,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // Connect without share first if share is empty
             val connectShare = if (share.isEmpty()) "" else share
             val connected = smbClient?.connect(host, connectShare, username, password, domain) ?: false
+            
+            // ✅ 保存SMB baseUrl（从SmbClient获取完整URL前缀）
+            currentSmbBaseUrl = smbClient?.getBaseUrl() ?: ""
+            log("[Controller] Saved current SMB baseUrl: '$currentSmbBaseUrl'")
             
             if (!connected) {
                 log("[Controller] === SMB connection failed ===")
@@ -564,6 +569,38 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // 获取当前SMB共享目录（用于DLNA投屏）
     fun getCurrentSmbShare(): String {
         return currentSmbShare
+    }
+    
+    // ✅ 获取完整的SMB URL（用于DLNA投屏）
+    fun getSmbFullUrl(relativePath: String, username: String, password: String): String {
+        if (currentSmbBaseUrl.isEmpty()) {
+            // 如果baseUrl为空，使用旧方法拼接
+            val cleanPath = if (relativePath.startsWith("/")) relativePath.substring(1) else relativePath
+            val fullPath = if (currentSmbShare.isNotEmpty()) {
+                "$currentSmbShare/$cleanPath"
+            } else {
+                cleanPath
+            }
+            val host = connectionPrefs.getSmbHost()
+            val port = connectionPrefs.getSmbPort()
+            return "smb://$username:$password@$host:$port/$fullPath"
+        } else {
+            // ✅ 使用baseUrl构建完整URL
+            // baseUrl格式: smb://host/share/
+            // relativePath格式: /folder/file.mp4
+            val cleanPath = if (relativePath.startsWith("/")) relativePath.substring(1) else relativePath
+            // 替换baseUrl中的主机部分，添加用户名密码
+            val urlWithoutProtocol = currentSmbBaseUrl.substringAfter("://")
+            val hostAndPath = urlWithoutProtocol.split("/", limit = 2)
+            if (hostAndPath.size >= 2) {
+                val hostPart = hostAndPath[0]  // host:port
+                val pathPart = hostAndPath[1]  // share/
+                return "smb://$username:$password@$hostPart/$pathPart$cleanPath"
+            } else {
+                //  fallback
+                return "smb://$username:$password@${currentSmbBaseUrl.substringAfter("://")}$cleanPath"
+            }
+        }
     }
     
     fun release() {

@@ -175,6 +175,11 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         log("[SMB-JCIFS] Set available shares from cache: ${shares.joinToString(", ")}")
     }
     
+    // ✅ 获取baseUrl（完整URL前缀，用于DLNA投屏）
+    fun getBaseUrl(): String {
+        return baseUrl
+    }
+    
     suspend fun selectShare(shareName: String): Boolean = withContext(Dispatchers.IO) {
         if (shareName !in availableShares) {
             log("[SMB-JCIFS] Share '$shareName' not in available shares")

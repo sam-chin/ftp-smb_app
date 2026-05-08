@@ -1458,14 +1458,10 @@ fun PlayerScreen(
                         // 构建真实的SMB/FTP URL（DLNA设备可以直接访问）
                         val realUrl = when (protocol) {
                             is NetworkProtocol.SMB -> {
-                                val host = connectionPrefs.getSmbHost()
-                                val port = connectionPrefs.getSmbPort()
                                 val username = connectionPrefs.getSmbUsername()
                                 val password = connectionPrefs.getSmbPassword()
-                                // ✅ 使用 MediaController 中保存的当前共享目录
-                                val share = mediaController.getCurrentSmbShare()
-                                addLog("SMB Debug: host=$host, port=$port, share='$share', path='$mediaPath'")
-                                castController.buildRealMediaUrl(mediaPath, protocol, host, port, username, password, share)
+                                // ✅ 使用 MediaController 的 getSmbFullUrl 方法构建完整URL
+                                mediaController.getSmbFullUrl(mediaPath, username, password)
                             }
                             is NetworkProtocol.FTP -> {
                                 val host = connectionPrefs.getFtpHost()
@@ -1863,13 +1859,10 @@ fun ImageViewerScreen(
                 // 构建真实的SMB/FTP URL（DLNA设备可以直接访问）
                 val realImageUrl = when (currentProtocol) {
                     is NetworkProtocol.SMB -> {
-                        val host = connectionPrefs.getSmbHost()
-                        val port = connectionPrefs.getSmbPort()
                         val username = connectionPrefs.getSmbUsername()
                         val password = connectionPrefs.getSmbPassword()
-                        // ✅ 使用 MediaController 中保存的当前共享目录
-                        val share = mediaController.getCurrentSmbShare()
-                        castController.buildRealMediaUrl(currentImage.path, currentProtocol, host, port, username, password, share)
+                        // ✅ 使用 MediaController 的 getSmbFullUrl 方法构建完整URL
+                        mediaController.getSmbFullUrl(currentImage.path, username, password)
                     }
                     is NetworkProtocol.FTP -> {
                         val host = connectionPrefs.getFtpHost()
