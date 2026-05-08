@@ -323,24 +323,25 @@ class CastController(private val context: Context, private val logCallback: ((St
             log("=== Preparing SetAVTransportURI ===")
             log("Original videoUrl: $videoUrl")
             
-            // ✅ 测试URL是否可访问
+            // ✅ 测试URL是否可访问（使用GET方法）
             try {
                 val testUrl = java.net.URL(videoUrl)
                 val connection = testUrl.openConnection() as java.net.HttpURLConnection
-                connection.requestMethod = "HEAD"
+                connection.requestMethod = "GET"  // ✅ 使用GET而不是HEAD
                 connection.connectTimeout = 2000
                 connection.readTimeout = 2000
+                
+                // 只读取响应头，不读取body
                 val responseCode = connection.responseCode
                 log("URL accessibility test: HTTP $responseCode")
-                connection.disconnect()
                 
-                if (responseCode != 200) {
-                    log("WARNING: URL is not accessible! Kodi may not be able to reach this URL.")
-                    log("Please check:")
-                    log("1. Phone IP (${device.ip}) and Kodi device are on the same network")
-                    log("2. No firewall blocking port ${testUrl.port}")
-                    log("3. HTTP proxy is bound to 0.0.0.0")
+                if (responseCode == 200 || responseCode == 206) {
+                    log("✅ URL is accessible! Kodi should be able to reach this URL.")
+                } else {
+                    log("WARNING: URL returned HTTP $responseCode")
                 }
+                
+                connection.disconnect()
             } catch (e: Exception) {
                 log("URL test failed: ${e.message}")
                 log("This suggests Kodi cannot access the URL!")

@@ -69,11 +69,19 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             
             log("[HTTP Proxy] Received request: $requestLine")
             
-            if (!requestLine.startsWith("GET")) {
+            // ✅ 支持 GET 和 HEAD 方法
+            val isHeadRequest = requestLine.startsWith("HEAD")
+            val isGetRequest = requestLine.startsWith("GET")
+            
+            if (!isGetRequest && !isHeadRequest) {
                 log("[HTTP Proxy] Method not allowed: $requestLine")
                 sendErrorResponse(outputStream, 405, "Method Not Allowed")
                 clientSocket.close()
                 return
+            }
+            
+            if (isHeadRequest) {
+                log("[HTTP Proxy] Handling HEAD request (for URL accessibility test)")
             }
             
             val parts = requestLine.split(" ")
@@ -130,10 +138,10 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             val rangeHeader = headers["Range"]
             if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                 // Handle range request
-                handleRangeRequest(outputStream, fileProvider, filePath, fileSize, rangeHeader, contentType)
+                handleRangeRequest(outputStream, fileProvider, filePath, fileSize, rangeHeader, contentType, isHeadRequest)
             } else {
                 // Handle full file request
-                handleFullRequest(outputStream, fileProvider, filePath, fileSize, contentType)
+                handleFullRequest(outputStream, fileProvider, filePath, fileSize, contentType, isHeadRequest)
             }
             
             clientSocket.close()
@@ -155,9 +163,26 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         fileProvider: FileProvider,
         filePath: String,
         fileSize: Long,
-        contentType: String
+        contentType: String,
+        isHead: Boolean = false  // ✅ 支持HEAD请求
     ) {
-        log("[HTTP Proxy] Handling full request for: $filePath")
+        log("[HTTP Proxy] Handling ${if (isHead) "HEAD" else "full"} request for: $filePath")
+        
+        // ✅ HEAD请求只返回头信息，不获取文件流
+        if (isHead) {
+            val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: $contentType\r\n" +
+                    "Content-Length: $fileSize\r\n" +
+                    "Accept-Ranges: bytes\r\n" +
+                    "Connection: close\r\n" +
+                    "\r\n"
+            
+            outputStream.write(responseHeader.toByteArray(Charsets.UTF_8))
+            outputStream.flush()
+            log("[HTTP Proxy] HEAD response sent (headers only)")
+            return
+        }
+        
         var fileStream: InputStream? = null
         try {
             fileStream = fileProvider.getFileStream(filePath)
@@ -216,7 +241,8 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         filePath: String,
         fileSize: Long,
         rangeHeader: String,
-        contentType: String
+        contentType: String,
+        isHead: Boolean = false  // ✅ 支持HEAD请求
     ) {
         var fileStream: InputStream? = null
         try {
