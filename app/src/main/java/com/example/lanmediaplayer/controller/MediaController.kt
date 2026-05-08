@@ -567,7 +567,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     fun getVideoUrl(): String {
         // ✅ 将127.0.0.1替换为局域网IP，以便DLNA设备可以访问
-        return currentVideoUrl.replace("127.0.0.1", localIpAddress)
+        val urlWithLocalIp = currentVideoUrl.replace("127.0.0.1", localIpAddress)
+        
+        // ✅ 对于DLNA投屏，解码URL中的特殊字符，避免双重编码
+        try {
+            val decodedUrl = java.net.URLDecoder.decode(urlWithLocalIp, "UTF-8")
+            log("[Controller] getVideoUrl decoded: $decodedUrl")
+            return decodedUrl
+        } catch (e: Exception) {
+            log("[Controller] getVideoUrl decode error: ${e.message}")
+            return urlWithLocalIp
+        }
     }
     
     // 获取当前媒体的真实路径（用于DLNA投屏）
