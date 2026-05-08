@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
         
         mediaController = MediaController(this, logCallback)
         mediaController.initializePlayer()
-        castController = CastController(this)
+        castController = CastController(this, logCallback)
         connectionPrefs = ConnectionPreferences(this)
         
         setContent {

@@ -18,11 +18,11 @@ data class CastDevice(
     val name: String,
     val ip: String,
     val port: Int,
-    val type: String = "DLNA"
+    val type: String = "DLNA",
+    val controlUrl: String? = null  // DLNA控制URL
 )
 
-class CastController(private val context: Context) {
-    private val logCallback: ((String) -> Unit)? = null
+class CastController(private val context: Context, private val logCallback: ((String) -> Unit)? = null) {
     private val devices = CopyOnWriteArrayList<CastDevice>()
     private var isSearching = false
     private var searchJob: Job? = null
@@ -128,14 +128,42 @@ class CastController(private val context: Context) {
             
             if (location != null && ip != null) {
                 val deviceName = server ?: "DLNA Device"
-                val existingDevice = devices.find { it.ip == ip && it.port == port }
+                val existingDevice = devices.find { it.ip == ip }
                 if (existingDevice == null) {
-                    devices.add(CastDevice(deviceName, ip, port, "DLNA"))
-                    log("Found DLNA device: $deviceName at $ip:$port")
+                    // 从 location URL 中解析控制URL
+                    val controlUrl = extractControlUrl(location)
+                    log("Found DLNA device: $deviceName at $ip, Location: $location, ControlURL: $controlUrl")
+                    devices.add(CastDevice(deviceName, ip, port, "DLNA", controlUrl))
                 }
             }
         } catch (e: Exception) {
             log("Parse error: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+    
+    private fun extractControlUrl(location: String): String? {
+        return try {
+            // 从 location URL 获取设备描述XML的基URL
+            val baseUrl = if (location.contains("://")) {
+                val urlParts = location.split("://")
+                if (urlParts.size >= 2) {
+                    val hostAndPath = urlParts[1].split("/", limit = 2)
+                    if (hostAndPath.size >= 2) {
+                        "http://${hostAndPath[0]}/${hostAndPath[1]}"
+                    } else {
+                        location
+                    }
+                } else {
+                    location
+                }
+            } else {
+                location
+            }
+            baseUrl
+        } catch (e: Exception) {
+            log("Extract control URL error: ${e.message}")
+            null
         }
     }
     
@@ -147,46 +175,44 @@ class CastController(private val context: Context) {
     fun castImage(device: CastDevice, imageUrl: String, title: String, onResult: (Boolean, String) -> Unit) {
         scope.launch {
             try {
-                log("Casting image to ${device.name} at ${device.ip}")
+                log("=== Casting image to ${device.name} ===")
+                log("Device IP: ${device.ip}")
+                log("Device Port: ${device.port}")
+                log("Image URL: $imageUrl")
                 
-                val soapAction = "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"
                 val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$imageUrl</CurrentURI>
-<CurrentURIMetaData>&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata:1-0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata:1-0"&gt;&lt;item id="1" parentID="-1"&gt;&lt;dc:title&gt;$title&lt;/dc:title&gt;&lt;res protocolInfo="http-get:*:image/jpeg:*"&gt;$imageUrl&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
+<CurrentURIMetaData>&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata:1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;$title&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.imageItem&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:image/jpeg:*"&gt;$imageUrl&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
                 
-                sendSoapRequest(device.ip, device.port, soapAction, soapBody)
+                val setUriSuccess = sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI", soapBody)
+                if (!setUriSuccess) {
+                    mainHandler.post {
+                        onResult(false, "Failed to set image URI")
+                    }
+                    return@launch
+                }
                 
                 delay(500)
                 
-                val playAction = "urn:schemas-upnp-org:service:AVTransport:1#Play"
-                val playBody = """<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-<s:Body>
-<u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-<InstanceID>0</InstanceID>
-<Speed>1</Speed>
-</u:Play>
-</s:Body>
-</s:Envelope>"""
-                
-                val success = sendSoapRequest(device.ip, device.port, playAction, playBody)
+                val playSuccess = sendPlay(device)
                 
                 mainHandler.post {
-                    if (success) {
+                    if (playSuccess) {
                         onResult(true, "Image sent to ${device.name}")
                     } else {
-                        onResult(false, "Failed to cast image")
+                        onResult(false, "Failed to display image")
                     }
                 }
             } catch (e: Exception) {
                 log("Cast error: ${e.message}")
+                e.printStackTrace()
                 mainHandler.post {
                     onResult(false, "Error: ${e.message}")
                 }
@@ -197,27 +223,72 @@ class CastController(private val context: Context) {
     fun castVideo(device: CastDevice, videoUrl: String, title: String, onResult: (Boolean, String) -> Unit) {
         scope.launch {
             try {
-                log("Casting video to ${device.name} at ${device.ip}")
+                log("=== Casting video to ${device.name} ===")
+                log("Device IP: ${device.ip}")
+                log("Device Port: ${device.port}")
+                log("Control URL: ${device.controlUrl}")
+                log("Video URL: $videoUrl")
                 
-                val soapAction = "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI"
-                val contentType = if (videoUrl.contains(".mp4")) "video/mp4" else "video/x-matroska"
-                val soapBody = """<?xml version="1.0" encoding="utf-8"?>
+                // 首先设置URI
+                val setUriSuccess = sendSetAVTransportURI(device, videoUrl, title)
+                if (!setUriSuccess) {
+                    log("Failed to set URI")
+                    mainHandler.post {
+                        onResult(false, "Failed to set video URI")
+                    }
+                    return@launch
+                }
+                
+                delay(500)
+                
+                // 然后播放
+                val playSuccess = sendPlay(device)
+                
+                mainHandler.post {
+                    if (playSuccess) {
+                        log("Video casting successful!")
+                        onResult(true, "Video playing on ${device.name}")
+                    } else {
+                        log("Failed to play video")
+                        onResult(false, "Failed to start playback")
+                    }
+                }
+            } catch (e: Exception) {
+                log("Cast error: ${e.message}")
+                e.printStackTrace()
+                mainHandler.post {
+                    onResult(false, "Error: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    private suspend fun sendSetAVTransportURI(device: CastDevice, videoUrl: String, title: String): Boolean {
+        return try {
+            val contentType = if (videoUrl.contains(".mp4")) "video/mp4" else "video/*"
+            val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$videoUrl</CurrentURI>
-<CurrentURIMetaData>&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata:1-0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata:1-0"&gt;&lt;item id="1" parentID="-1"&gt;&lt;dc:title&gt;$title&lt;/dc:title&gt;&lt;res protocolInfo="http-get:*:$contentType:*"&gt;$videoUrl&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
+<CurrentURIMetaData>&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata:1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;$title&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.videoItem&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:$contentType:*"&gt;$videoUrl&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
-                
-                sendSoapRequest(device.ip, device.port, soapAction, soapBody)
-                
-                delay(500)
-                
-                val playAction = "urn:schemas-upnp-org:service:AVTransport:1#Play"
-                val playBody = """<?xml version="1.0" encoding="utf-8"?>
+            
+            log("Sending SetAVTransportURI request...")
+            sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI", soapBody)
+        } catch (e: Exception) {
+            log("SetAVTransportURI error: ${e.message}")
+            e.printStackTrace()
+            false
+        }
+    }
+    
+    private suspend fun sendPlay(device: CastDevice): Boolean {
+        return try {
+            val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
@@ -226,68 +297,82 @@ class CastController(private val context: Context) {
 </u:Play>
 </s:Body>
 </s:Envelope>"""
-                
-                val success = sendSoapRequest(device.ip, device.port, playAction, playBody)
-                
-                mainHandler.post {
-                    if (success) {
-                        onResult(true, "Video playing on ${device.name}")
-                    } else {
-                        onResult(false, "Failed to cast video")
-                    }
-                }
-            } catch (e: Exception) {
-                log("Cast error: ${e.message}")
-                mainHandler.post {
-                    onResult(false, "Error: ${e.message}")
-                }
-            }
+            
+            log("Sending Play request...")
+            sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#Play", soapBody)
+        } catch (e: Exception) {
+            log("Play error: ${e.message}")
+            e.printStackTrace()
+            false
         }
     }
     
-    private suspend fun sendSoapRequest(ip: String, port: Int, soapAction: String, body: String): Boolean {
+    private suspend fun sendSoapRequest(device: CastDevice, soapAction: String, body: String): Boolean {
         return suspendCoroutine { continuation ->
             scope.launch {
+                var socket: java.net.Socket? = null
                 try {
-                    val envelope = """<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-<s:Body>
-${body.substringAfter("<s:Body>").substringBefore("</s:Body>")}
-</s:Body>
-</s:Envelope>"""
+                    log("=== Sending SOAP Request ===")
+                    log("Action: $soapAction")
+                    log("Target: ${device.ip}:${device.port}")
                     
-                    val contentLength = body.toByteArray().size
+                    // DLNA 设备通常使用 80 或 8080 端口
+                    val targetPort = device.port
+                    
+                    val contentLength = body.toByteArray(Charsets.UTF_8).size
                     val request = "POST /upnp/control/AVTransport HTTP/1.1\r\n" +
-                            "Host: $ip:$port\r\n" +
+                            "Host: ${device.ip}:$targetPort\r\n" +
                             "Content-Type: text/xml; charset=\"utf-8\"\r\n" +
                             "SOAPACTION: \"$soapAction\"\r\n" +
                             "Content-Length: $contentLength\r\n" +
+                            "Connection: close\r\n" +
                             "\r\n" +
                             body
                     
-                    val socket = java.net.Socket(ip, port)
+                    log("Request length: ${request.length} bytes")
+                    
+                    socket = java.net.Socket(device.ip, targetPort)
                     socket.soTimeout = 5000
-                    socket.outputStream.write(request.toByteArray())
+                    socket.outputStream.write(request.toByteArray(Charsets.UTF_8))
                     socket.outputStream.flush()
                     
-                    val responseBuffer = ByteArray(4096)
+                    log("Request sent, waiting for response...")
+                    
+                    val responseBuffer = ByteArray(8192)
                     val responseStream = socket.getInputStream()
                     var response = ""
+                    var totalBytes = 0
+                    
                     try {
-                        val bytesRead = responseStream.read(responseBuffer)
-                        if (bytesRead > 0) {
-                            response = String(responseBuffer, 0, bytesRead)
+                        while (true) {
+                            val bytesRead = responseStream.read(responseBuffer)
+                            if (bytesRead <= 0) break
+                            response += String(responseBuffer, 0, bytesRead, Charsets.UTF_8)
+                            totalBytes += bytesRead
+                            // 如果响应包含结束标记，提前退出
+                            if (response.contains("</s:Envelope>") || response.contains("</s:Body>")) {
+                                break
+                            }
                         }
                     } catch (e: Exception) {
-                        log("Read response error: ${e.message}")
+                        log("Read response partial: ${e.message}")
                     }
+                    
+                    log("Response received ($totalBytes bytes): ${response.take(200)}...")
                     
                     socket.close()
                     
-                    val success = response.contains("200 OK") || response.contains("AVTransport")
+                    // 检查响应是否成功
+                    val success = response.contains("200 OK") || 
+                                 response.contains("HTTP/1.1 200") ||
+                                 (!response.contains("500") && !response.contains("400"))
+                    
+                    log("SOAP request ${if (success) "SUCCESS" else "FAILED"}")
                     continuation.resume(success)
                 } catch (e: Exception) {
                     log("SOAP request error: ${e.message}")
+                    e.printStackTrace()
+                    socket?.close()
                     continuation.resume(false)
                 }
             }
@@ -297,8 +382,7 @@ ${body.substringAfter("<s:Body>").substringBefore("</s:Body>")}
     fun stopCast(device: CastDevice, onResult: (Boolean) -> Unit) {
         scope.launch {
             try {
-                val stopAction = "urn:schemas-upnp-org:service:AVTransport:1#Stop"
-                val stopBody = """<?xml version="1.0" encoding="utf-8"?>
+                val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
@@ -307,9 +391,11 @@ ${body.substringAfter("<s:Body>").substringBefore("</s:Body>")}
 </s:Body>
 </s:Envelope>"""
                 
-                val success = sendSoapRequest(device.ip, device.port, stopAction, stopBody)
+                val success = sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#Stop", soapBody)
                 mainHandler.post { onResult(success) }
             } catch (e: Exception) {
+                log("Stop cast error: ${e.message}")
+                e.printStackTrace()
                 mainHandler.post { onResult(false) }
             }
         }
