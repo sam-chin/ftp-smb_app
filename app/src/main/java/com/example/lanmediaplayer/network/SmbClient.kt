@@ -142,11 +142,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 log("[SMB-JCIFS] === Connection successful ===")
                 return@withContext true
             } else if (availableShares.isNotEmpty()) {
+                // 成功枚举到共享目录，但没有选择具体共享
                 this@SmbClient.share = ""
                 this@SmbClient.domain = detectedDomain
                 log("[SMB-JCIFS] === Share enumeration successful, no share selected ===")
                 log("[SMB-JCIFS] Available shares: ${availableShares.joinToString(", ")}")
-                return@withContext false
+                // 返回true表示连接成功，让上层代码处理共享选择
+                return@withContext true
             } else {
                 log("[SMB-JCIFS] === Connection failed ===")
                 return@withContext false
@@ -255,16 +257,22 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
             val files = mutableListOf<SmbFileInfo>()
             
-            val normalizedPath = if (remotePath.startsWith("/") && remotePath.length > 1) {
+            // 规范化路径：移除开头的斜杠，因为baseUrl已经包含了共享名
+            val normalizedPath = if (remotePath.startsWith("/")) {
+                // 如果路径以/开头，去掉它
+                // 例如：/folder1/subfolder -> folder1/subfolder
                 remotePath.substring(1)
-            } else if (remotePath == "/") {
-                ""
             } else {
                 remotePath
             }
             log("[SMB-JCIFS] normalizedPath: '$normalizedPath'")
             
-            val fullPath = "$baseUrl$normalizedPath"
+            // 构建完整路径：baseUrl已经包含smb://host/share/
+            val fullPath = if (normalizedPath.isEmpty()) {
+                baseUrl  // 共享根目录
+            } else {
+                "$baseUrl$normalizedPath"
+            }
             log("[SMB-JCIFS] JCIFS fullPath: '$fullPath'")
             
             val smbFile = SmbFile(fullPath, context)
@@ -322,8 +330,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 val filePath: String
                 if (normalizedPath.isEmpty()) {
+                    // 共享根目录下的文件：/fileName
                     filePath = "/$fileName"
                 } else {
+                    // 子目录下的文件：/folder/subfolder/fileName
                     filePath = "/$normalizedPath/$fileName"
                 }
                 

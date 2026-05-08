@@ -29,6 +29,7 @@ data class MediaFile(
 class MediaController(private val context: Context, private val logCallback: ((String) -> Unit)? = null) {
     private var exoPlayer: ExoPlayer? = null
     private var httpProxy: HttpProxyServer? = null
+    private var currentPort: Int = 0  // HTTP代理服务器端口，0表示未启动
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
     private var currentMediaFile: MediaFile? = null
@@ -434,37 +435,49 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     fun getImageUrl(path: String, protocol: NetworkProtocol): String {
+        // 确保 HTTP 代理服务器只启动一次
         if (httpProxy == null) {
             httpProxy = HttpProxyServer(logCallback)
         }
         
+        // 检查代理服务器是否已经在运行，如果没有则启动
         val ftpRef = ftpClient
         val smbRef = smbClient
         val currentProtocol = protocol
         
-        val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
-            override suspend fun getFileStream(filePath: String, startOffset: Long): InputStream? {
-                return when (currentProtocol) {
-                    is NetworkProtocol.FTP -> ftpRef?.getFileStream(filePath, startOffset)
-                    is NetworkProtocol.SMB -> {
-                        val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
-                        smbRef?.getFileStream(smbPath, startOffset)
+        // 只在第一次调用时启动代理服务器，后续调用复用同一个实例
+        val port = if (currentPort <= 0) {
+            // 首次启动，传入 FileProvider
+            val newPort = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
+                override suspend fun getFileStream(filePath: String, startOffset: Long): InputStream? {
+                    return when (currentProtocol) {
+                        is NetworkProtocol.FTP -> ftpRef?.getFileStream(filePath, startOffset)
+                        is NetworkProtocol.SMB -> {
+                            val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
+                            smbRef?.getFileStream(smbPath, startOffset)
+                        }
+                        else -> null
                     }
-                    else -> null
                 }
-            }
-            
-            override suspend fun getFileSize(filePath: String): Long {
-                return when (currentProtocol) {
-                    is NetworkProtocol.FTP -> ftpRef?.getFileSize(filePath) ?: 0L
-                    is NetworkProtocol.SMB -> {
-                        val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
-                        smbRef?.getFileSize(smbPath) ?: 0L
+                
+                override suspend fun getFileSize(filePath: String): Long {
+                    return when (currentProtocol) {
+                        is NetworkProtocol.FTP -> ftpRef?.getFileSize(filePath) ?: 0L
+                        is NetworkProtocol.SMB -> {
+                            val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
+                            smbRef?.getFileSize(smbPath) ?: 0L
+                        }
+                        else -> 0L
                     }
-                    else -> 0L
                 }
-            }
-        }) ?: -1
+            }) ?: -1
+            currentPort = newPort
+            log("[Controller] HTTP Proxy started on port: $currentPort")
+            newPort
+        } else {
+            // 已经启动，直接返回端口号
+            currentPort
+        }
         
         val cleanPath = if (path.startsWith("/")) path.substring(1) else path
         val encodedPath = try {
@@ -484,6 +497,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         exoPlayer = null
         httpProxy?.stop()
         httpProxy = null
+        currentPort = 0  // 重置端口
         ftpClient?.disconnect()
         ftpClient = null
         smbClient?.disconnect()

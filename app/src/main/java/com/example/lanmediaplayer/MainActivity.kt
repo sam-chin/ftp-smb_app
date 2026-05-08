@@ -493,9 +493,14 @@ fun MainScreen(
             onBackClick = {
                 if (selectedProtocol is NetworkProtocol.SMB) {
                     // SMB协议的返回逻辑
+                    addLog("=== SMB Back Click ===")
+                    addLog("Current path: '$currentPath'")
+                    addLog("isAtSmbRoot: $isAtSmbRoot")
+                    
                     if (currentPath == "/" || currentPath.matches(Regex("^/[^/]+$"))) {
-                        // 当前在SMB根目录或共享根目录（如/shareName），返回到SMB根目录显示所有共享
+                        // 当前在SMB根目录("/")或共享根目录("/shareName")，返回到SMB根目录显示所有共享
                         if (!isAtSmbRoot) {
+                            addLog("Returning to SMB root from share: $currentPath")
                             isAtSmbRoot = true
                             currentPath = "/"
                             browserTitle = "选择共享目录"
@@ -509,25 +514,35 @@ fun MainScreen(
                                 )
                             }
                             addLog("Returned to SMB root, showing ${files.size} shares")
+                        } else {
+                            addLog("Already at SMB root, ignoring back click")
                         }
                     } else {
                         // 当前在子目录中，返回上级目录
                         val parentPath = currentPath.substringBeforeLast("/")
-                        currentPath = if (parentPath.isEmpty()) "/" else parentPath
-                        browserTitle = currentPath.substringAfterLast("/")
+                        val newPath = if (parentPath.isEmpty()) "/" else parentPath
+                        addLog("Navigating to parent directory: '$newPath'")
+                        
+                        currentPath = newPath
+                        browserTitle = if (newPath == "/") {
+                            "选择共享目录"
+                        } else {
+                            newPath.substringAfterLast("/")
+                        }
+                        
                         isLoading = true
                         coroutineScope.launch {
-                            mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
+                            mediaController.browseFiles(newPath, selectedProtocol, object : MediaController.MediaCallback {
                                 override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
                                     files = loadedFiles
                                     isLoading = false
-                                    addLog("Loaded ${loadedFiles.size} files in $currentPath")
+                                    addLog("Loaded ${loadedFiles.size} files in $newPath")
                                 }
                                 
                                 override fun onError(error: String) {
                                     errorMessage = error
                                     isLoading = false
-                                    addLog("Error browsing $currentPath: $error")
+                                    addLog("Error browsing $newPath: $error")
                                 }
                                 
                                 override fun onPlaybackStateChanged(state: Int) {}
