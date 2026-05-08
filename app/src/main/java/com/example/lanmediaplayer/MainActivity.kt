@@ -1255,7 +1255,7 @@ fun ImageViewerScreen(
     onError: (String) -> Unit
 ) {
     val initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))
-    val pagerState = rememberPagerState(initialPage = initialPage) { imageFiles.size }
+    val pagerState = rememberPagerState(initialPage = initialPage)
     var isSlideshowPlaying by remember { mutableStateOf(false) }
     var slideshowInterval by remember { mutableStateOf(6) }
     var showSettingsDialog by remember { mutableStateOf(false) }
