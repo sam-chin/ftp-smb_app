@@ -132,8 +132,23 @@ class CastController(private val context: Context, private val logCallback: ((St
                 if (existingDevice == null) {
                     // ✅ 从 location URL 中解析正确的控制URL和端口
                     val (controlUrl, httpPort) = extractControlInfo(location)
-                    log("Found DLNA device: $deviceName at $ip:$httpPort, Location: $location, ControlURL: $controlUrl")
-                    devices.add(CastDevice(deviceName, ip, httpPort, "DLNA", controlUrl))
+                    
+                    // ✅ 对于Kodi设备，尝试常见的control URL路径
+                    var finalControlUrl = controlUrl
+                    if (deviceName.contains("Kodi", ignoreCase = true)) {
+                        // Kodi通常使用这些路径
+                        val kodiPaths = listOf(
+                            "upnp/control/avtransport",
+                            "AVTransport/control",
+                            "MediaRenderer/AVTransport/Control"
+                        )
+                        // 使用第一个路径作为默认值
+                        finalControlUrl = "http://$ip:$httpPort/${kodiPaths[0]}"
+                        log("Kodi device detected, using control URL: $finalControlUrl")
+                    }
+                    
+                    log("Found DLNA device: $deviceName at $ip:$httpPort, Location: $location, ControlURL: $finalControlUrl")
+                    devices.add(CastDevice(deviceName, ip, httpPort, "DLNA", finalControlUrl))
                 }
             }
         } catch (e: Exception) {
@@ -305,18 +320,47 @@ class CastController(private val context: Context, private val logCallback: ((St
     
     private suspend fun sendSetAVTransportURI(device: CastDevice, videoUrl: String, title: String): Boolean {
         return try {
+            log("=== Preparing SetAVTransportURI ===")
+            log("Original videoUrl: $videoUrl")
+            
+            // ✅ 对URL和标题进行XML转义
+            val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            val escapedVideoUrl = videoUrl.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            
             val contentType = if (videoUrl.contains(".mp4")) "video/mp4" else "video/*"
+            
+            // ✅ 构建DIDL-Lite元数据（使用转义后的URL）
+            val didlLite = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/\" " +
+                    "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
+                    "xmlns:upnp=\"urn:schemas-upnp-org:metadata:1-0/upnp/\">" +
+                    "<item id=\"1\" parentID=\"0\" restricted=\"1\">" +
+                    "<dc:title>$escapedTitle</dc:title>" +
+                    "<upnp:class>object.item.videoItem</upnp:class>" +
+                    "<res protocolInfo=\"http-get:*:$contentType:*\">$escapedVideoUrl</res>" +
+                    "</item>" +
+                    "</DIDL-Lite>"
+            
+            log("DIDL-Lite metadata: $didlLite")
+            
+            // ✅ 对DIDL-Lite进行XML编码（用于嵌入SOAP请求）
+            val encodedMetaData = didlLite
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+            
             val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
-<CurrentURI>$videoUrl</CurrentURI>
-<CurrentURIMetaData>&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata:1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;$title&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.videoItem&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:$contentType:*"&gt;$videoUrl&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
+<CurrentURI>$escapedVideoUrl</CurrentURI>
+<CurrentURIMetaData>$encodedMetaData</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
             
+            log("SOAP request length: ${soapBody.length} bytes")
             log("Sending SetAVTransportURI request...")
             sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI", soapBody)
         } catch (e: Exception) {
@@ -356,12 +400,20 @@ class CastController(private val context: Context, private val logCallback: ((St
                     log("Action: $soapAction")
                     log("Target: ${device.ip}:${device.port}")
                     
-                    // DLNA 设备通常使用 80 或 8080 端口
-                    val targetPort = device.port
+                    // ✅ 使用controlUrl或默认路径
+                    val controlPath = device.controlUrl?.let {
+                        if (it.contains("://")) {
+                            it.substringAfter("/", "").substringAfter("/")
+                        } else {
+                            it
+                        }
+                    } ?: "upnp/control/AVTransport"
+                    
+                    log("Control path: $controlPath")
                     
                     val contentLength = body.toByteArray(Charsets.UTF_8).size
-                    val request = "POST /upnp/control/AVTransport HTTP/1.1\r\n" +
-                            "Host: ${device.ip}:$targetPort\r\n" +
+                    val request = "POST /$controlPath HTTP/1.1\r\n" +
+                            "Host: ${device.ip}:${device.port}\r\n" +
                             "Content-Type: text/xml; charset=\"utf-8\"\r\n" +
                             "SOAPACTION: \"$soapAction\"\r\n" +
                             "Content-Length: $contentLength\r\n" +
@@ -370,8 +422,9 @@ class CastController(private val context: Context, private val logCallback: ((St
                             body
                     
                     log("Request length: ${request.length} bytes")
+                    log("Request preview: ${request.take(300)}...")
                     
-                    socket = java.net.Socket(device.ip, targetPort)
+                    socket = java.net.Socket(device.ip, device.port)
                     socket.soTimeout = 5000
                     socket.outputStream.write(request.toByteArray(Charsets.UTF_8))
                     socket.outputStream.flush()
