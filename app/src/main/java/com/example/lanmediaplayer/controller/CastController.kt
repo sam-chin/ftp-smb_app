@@ -369,13 +369,14 @@ class CastController(private val context: Context, private val logCallback: ((St
             
             log("DIDL-Lite metadata (encoded): ${didlLite.take(200)}...")
             
+            // ✅ 尝试不发送CurrentURIMetaData（某些设备如Kodi可能更喜欢这样）
             val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$escapedVideoUrl</CurrentURI>
-<CurrentURIMetaData>$didlLite</CurrentURIMetaData>
+<CurrentURIMetaData></CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
