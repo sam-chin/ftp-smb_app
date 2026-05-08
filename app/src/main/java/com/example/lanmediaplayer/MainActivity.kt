@@ -710,6 +710,7 @@ fun MainScreen(
             initialIndex = initialImageIndex,
             currentProtocol = selectedProtocol,
             connectionPrefs = connectionPrefs,
+            mediaController = mediaController,  // ✅ 传递
             getImageUrl = { path -> mediaController.getImageUrl(path, selectedProtocol) },
             castController = castController,
             onBackClick = {
@@ -1530,6 +1531,7 @@ fun ImageViewerScreen(
     initialIndex: Int,
     currentProtocol: NetworkProtocol,
     connectionPrefs: ConnectionPreferences,
+    mediaController: MediaController,  // ✅ 新增参数
     getImageUrl: (String) -> String,
     castController: CastController,
     onBackClick: () -> Unit,
