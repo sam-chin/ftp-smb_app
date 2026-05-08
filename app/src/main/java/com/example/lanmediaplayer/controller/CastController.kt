@@ -361,26 +361,19 @@ class CastController(private val context: Context, private val logCallback: ((St
             // ✅ 使用更标准的protocolInfo格式
             val protocolInfo = "http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_BL_CIF15_AAC_520;DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
             
-            // ✅ 构建DIDL-Lite元数据（使用转义后的URL）
-            val didlLite = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/\" " +
+            // ✅ 构建DIDL-Lite元数据（只转义必要的内容）
+            val didlLite = "&lt;DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/\" " +
                     "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
                     "xmlns:upnp=\"urn:schemas-upnp-org:metadata:1-0/upnp/\" " +
-                    "xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">" +
-                    "<item id=\"1\" parentID=\"0\" restricted=\"1\">" +
-                    "<dc:title>$escapedTitle</dc:title>" +
-                    "<upnp:class>object.item.videoItem.movie</upnp:class>" +
-                    "<res protocolInfo=\"$protocolInfo\">$escapedVideoUrl</res>" +
-                    "</item>" +
-                    "</DIDL-Lite>"
+                    "xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\"&gt;" +
+                    "&lt;item id=\"1\" parentID=\"0\" restricted=\"1\"&gt;" +
+                    "&lt;dc:title&gt;$escapedTitle&lt;/dc:title&gt;" +
+                    "&lt;upnp:class&gt;object.item.videoItem.movie&lt;/upnp:class&gt;" +
+                    "&lt;res protocolInfo=\"$protocolInfo\"&gt;$escapedVideoUrl&lt;/res&gt;" +
+                    "&lt;/item&gt;" +
+                    "&lt;/DIDL-Lite&gt;"
             
-            log("DIDL-Lite metadata: $didlLite")
-            
-            // ✅ 对DIDL-Lite进行XML编码（用于嵌入SOAP请求）
-            val encodedMetaData = didlLite
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
+            log("DIDL-Lite metadata (encoded): ${didlLite.take(200)}...")
             
             val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
@@ -388,7 +381,7 @@ class CastController(private val context: Context, private val logCallback: ((St
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$escapedVideoUrl</CurrentURI>
-<CurrentURIMetaData>$encodedMetaData</CurrentURIMetaData>
+<CurrentURIMetaData>$didlLite</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
