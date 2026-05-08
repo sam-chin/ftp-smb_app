@@ -327,16 +327,18 @@ class CastController(private val context: Context, private val logCallback: ((St
             val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             val escapedVideoUrl = videoUrl.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             
-            val contentType = if (videoUrl.contains(".mp4")) "video/mp4" else "video/*"
+            // ✅ 使用更标准的protocolInfo格式
+            val protocolInfo = "http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_BL_CIF15_AAC_520;DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
             
             // ✅ 构建DIDL-Lite元数据（使用转义后的URL）
             val didlLite = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/\" " +
                     "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
-                    "xmlns:upnp=\"urn:schemas-upnp-org:metadata:1-0/upnp/\">" +
+                    "xmlns:upnp=\"urn:schemas-upnp-org:metadata:1-0/upnp/\" " +
+                    "xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">" +
                     "<item id=\"1\" parentID=\"0\" restricted=\"1\">" +
                     "<dc:title>$escapedTitle</dc:title>" +
-                    "<upnp:class>object.item.videoItem</upnp:class>" +
-                    "<res protocolInfo=\"http-get:*:$contentType:*\">$escapedVideoUrl</res>" +
+                    "<upnp:class>object.item.videoItem.movie</upnp:class>" +
+                    "<res protocolInfo=\"$protocolInfo\">$escapedVideoUrl</res>" +
                     "</item>" +
                     "</DIDL-Lite>"
             
