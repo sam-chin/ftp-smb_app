@@ -172,12 +172,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
             val connected = smbClient?.connect(host, connectShare, username, password, domain) ?: false
             
             if (!connected) {
-                val availableShares = smbClient?.getAvailableShares() ?: emptyList()
-                if (availableShares.isNotEmpty()) {
-                    log("[Controller] === Share enumeration successful ===")
-                    log("[Controller] Available shares: ${availableShares.joinToString(", ")}")
-                    return Pair(false, "SHARES:${availableShares.joinToString(",")}")
-                }
                 log("[Controller] === SMB connection failed ===")
                 return Pair(false, "Failed to connect to SMB server (network/auth error)")
             }
@@ -191,6 +185,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 if (shares.isNotEmpty()) {
                     val sharesList = shares.joinToString(", ")
                     log("[Controller] Available shares: $sharesList")
+                    // 返回成功，让MainActivity显示共享目录列表
                     Pair(true, "Connected! Available shares: $sharesList")
                 } else {
                     log("[Controller] No shares found")

@@ -491,21 +491,51 @@ fun MainScreen(
                 showFileMenu = true
             },
             onBackClick = {
-                if (!isAtSmbRoot && selectedProtocol is NetworkProtocol.SMB) {
-                    isAtSmbRoot = true
-                    currentPath = "/"
-                    browserTitle = "选择共享目录"
-                    files = availableShares.map { shareName ->
-                        MediaFile(
-                            name = shareName,
-                            path = "/$shareName",
-                            size = 0,
-                            isDirectory = true,
-                            protocol = NetworkProtocol.SMB
-                        )
+                if (selectedProtocol is NetworkProtocol.SMB) {
+                    // SMB协议的返回逻辑
+                    if (currentPath == "/" || currentPath.matches(Regex("^/[^/]+$"))) {
+                        // 当前在SMB根目录或共享根目录（如/shareName），返回到SMB根目录显示所有共享
+                        if (!isAtSmbRoot) {
+                            isAtSmbRoot = true
+                            currentPath = "/"
+                            browserTitle = "选择共享目录"
+                            files = availableShares.map { shareName ->
+                                MediaFile(
+                                    name = shareName,
+                                    path = "/$shareName",
+                                    size = 0,
+                                    isDirectory = true,
+                                    protocol = NetworkProtocol.SMB
+                                )
+                            }
+                            addLog("Returned to SMB root, showing ${files.size} shares")
+                        }
+                    } else {
+                        // 当前在子目录中，返回上级目录
+                        val parentPath = currentPath.substringBeforeLast("/")
+                        currentPath = if (parentPath.isEmpty()) "/" else parentPath
+                        browserTitle = currentPath.substringAfterLast("/")
+                        isLoading = true
+                        coroutineScope.launch {
+                            mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
+                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                    files = loadedFiles
+                                    isLoading = false
+                                    addLog("Loaded ${loadedFiles.size} files in $currentPath")
+                                }
+                                
+                                override fun onError(error: String) {
+                                    errorMessage = error
+                                    isLoading = false
+                                    addLog("Error browsing $currentPath: $error")
+                                }
+                                
+                                override fun onPlaybackStateChanged(state: Int) {}
+                            })
+                        }
                     }
-                    addLog("Returned to SMB root, showing ${files.size} shares")
                 } else if (currentPath != "/") {
+                    // FTP等其他协议的返回逻辑
                     val parentPath = currentPath.substringBeforeLast("/")
                     currentPath = if (parentPath.isEmpty()) "/" else parentPath
                     browserTitle = currentPath
@@ -1204,7 +1234,7 @@ fun ImageViewerScreen(
         return imageIndex / preloadBatchSize
     }
     
-    // 预加载指定批次的图片
+    // 预加载指定批次的图片（带重试机制确保加载成功）
     fun preloadBatch(batchIndex: Int) {
         if (imageFiles.isEmpty()) return
         
@@ -1213,13 +1243,31 @@ fun ImageViewerScreen(
         
         coroutineScope.launch {
             for (index in startIndex..endIndex) {
-                if (!imageCache.containsKey(index)) {
+                // 如果已经缓存成功，跳过
+                if (imageCache.containsKey(index)) continue
+                
+                // 最多重试3次
+                var loaded = false
+                for (attempt in 1..3) {
                     try {
-                        val url = getImageUrl(imageFiles[index].path)
+                        val imagePath = imageFiles[index].path
+                        println("[ImageViewer] Loading image $index: path='$imagePath', protocol=${currentProtocol::class.simpleName}")
+                        val url = getImageUrl(imagePath)
+                        println("[ImageViewer] Generated URL for image $index: $url")
                         imageCache[index] = url
+                        loaded = true
+                        break // 加载成功，跳出重试循环
                     } catch (e: Exception) {
-                        println("Failed to load image at index $index: ${e.message}")
+                        println("Failed to load image at index $index (attempt $attempt): ${e.message}")
+                        e.printStackTrace()
+                        if (attempt < 3) {
+                            kotlinx.coroutines.delay(500) // 等待0.5秒后重试
+                        }
                     }
+                }
+                
+                if (!loaded) {
+                    println("Failed to load image at index $index after 3 attempts")
                 }
             }
         }
@@ -1282,7 +1330,7 @@ fun ImageViewerScreen(
             }
         }
         
-        // 确保当前页面及附近几张立即加载（紧急加载）
+        // 确保当前页面及附近几张立即加载（紧急加载，带重试）
         val urgentIndices = listOf(
             currentPage,
             currentPage + 1,
@@ -1293,11 +1341,24 @@ fun ImageViewerScreen(
         
         urgentIndices.forEach { index ->
             coroutineScope.launch {
-                try {
-                    val url = getImageUrl(imageFiles[index].path)
-                    imageCache[index] = url
-                } catch (e: Exception) {
-                    println("Failed to urgently load image at index $index: ${e.message}")
+                // 再次检查是否已被其他协程加载成功
+                if (imageCache.containsKey(index)) return@launch
+                
+                // 最多重试2次
+                for (attempt in 1..2) {
+                    // 每次重试前都检查是否已被加载
+                    if (imageCache.containsKey(index)) break
+                    
+                    try {
+                        val url = getImageUrl(imageFiles[index].path)
+                        imageCache[index] = url
+                        break // 加载成功
+                    } catch (e: Exception) {
+                        println("Failed to urgently load image at index $index (attempt $attempt): ${e.message}")
+                        if (attempt < 2) {
+                            kotlinx.coroutines.delay(300) // 等待0.3秒后重试
+                        }
+                    }
                 }
             }
         }
@@ -1318,10 +1379,19 @@ fun ImageViewerScreen(
     // 保持屏幕常亮，防止播放幻灯片时锁屏
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
+        // 设置全屏，隐藏状态栏和导航栏
+        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
         window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window?.decorView?.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+            or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        )
         
         onDispose {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window?.decorView?.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
         }
     }
     
@@ -1355,13 +1425,26 @@ fun ImageViewerScreen(
                     ) {
                         CircularProgressIndicator(color = Color.White)
                     }
-                    // 异步加载当前图片
+                    // 异步加载当前图片（带重试）
                     LaunchedEffect(page) {
-                        try {
-                            val url = getImageUrl(imageFiles[page].path)
-                            imageCache[page] = url
-                        } catch (e: Exception) {
-                            println("Failed to load image on demand at index $page: ${e.message}")
+                        // 再次检查是否已被其他协程加载成功
+                        if (imageCache.containsKey(page)) return@LaunchedEffect
+                        
+                        // 最多重试2次
+                        for (attempt in 1..2) {
+                            // 每次重试前都检查是否已被加载
+                            if (imageCache.containsKey(page)) break
+                            
+                            try {
+                                val url = getImageUrl(imageFiles[page].path)
+                                imageCache[page] = url
+                                break // 加载成功
+                            } catch (e: Exception) {
+                                println("Failed to load image on demand at index $page (attempt $attempt): ${e.message}")
+                                if (attempt < 2) {
+                                    kotlinx.coroutines.delay(500) // 等待0.5秒后重试
+                                }
+                            }
                         }
                     }
                 }

@@ -281,7 +281,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileStream(remotePath: String, startOffset: Long = 0): InputStream? = withContext(Dispatchers.IO) {
         commandMutex.withLock {
             try {
-                log("[FTP] Opening stream for: $remotePath (offset: $startOffset)")
+                log("[FTP] === getFileStream START ===")
+                log("[FTP] Opening stream for: '$remotePath' (offset: $startOffset)")
                 
                 // Clear any pending responses before sending new commands
                 clearPendingResponses()
@@ -334,6 +335,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 }
                 
                 sendCommand("RETR $remotePath")
+                log("[FTP] Sent RETR command with path: '$remotePath'")
                 // Read response and verify it's for RETR command (code 1xx)
                 var retrResponse: FtpResponse?
                 do {
@@ -345,7 +347,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 } while (retrResponse != null)
                 
                 if (retrResponse?.code !in 100..199) {
-                    log("[FTP] RETR failed: ${retrResponse?.code}")
+                    log("[FTP] RETR failed: ${retrResponse?.code} ${retrResponse?.message}")
                     closeDataConnection()
                     return@withContext null
                 }
@@ -367,12 +369,14 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         commandMutex.withLock {
             try {
+                log("[FTP] === getFileSize START ===")
                 log("[FTP] Getting file size for: '$remotePath'")
                 
                 // Clear any pending responses before sending new commands
                 clearPendingResponses()
                 
                 sendCommand("SIZE $remotePath")
+                log("[FTP] Sent SIZE command with path: '$remotePath'")
                 
                 // Read responses until we get the SIZE response (code 213)
                 var response: FtpResponse?
@@ -380,14 +384,14 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                     response = readResponse()
                     if (response.code == 213) {
                         val fileSize = response.message.trim().toLongOrNull() ?: 0L
-                        log("[FTP] File size: $fileSize bytes")
+                        log("[FTP] File size result: $fileSize bytes")
                         return@withContext fileSize
                     }
                     // If we get a different response, it might be from a previous command
                     log("[FTP] Ignoring unexpected response for SIZE: ${response.code} ${response.message}")
                 } while (response != null)
                 
-                log("[FTP] SIZE command failed - no valid response")
+                log("[FTP] SIZE command failed, no valid response received")
                 0L
             } catch (e: Exception) {
                 log("[FTP] Error getting file size: ${e.message}")
