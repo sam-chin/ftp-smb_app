@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 允许共享cache目录下的文件 -->
+    <cache-path
+        name="cache"
+        path="." />
+    
+    <!-- 允许共享files目录下的文件 -->
+    <files-path
+        name="files"
+        path="." />
+    
+    <!-- 允许共享外部缓存目录下的文件 -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+    
+    <!-- 允许共享外部files目录下的文件（用于系统应用打开） -->
+    <external-files-path
+        name="external_files"
+        path="." />
+</paths>

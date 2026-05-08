@@ -35,6 +35,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var currentMediaFile: MediaFile? = null
     private var currentVideoUrl: String = ""
     
+    // SMB共享目录缓存：key=host, value=shares list
+    private val smbSharesCache = mutableMapOf<String, List<String>>()
+    
     private val connectionScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var browseScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
@@ -126,7 +129,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
     }
     
-    suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = ""): Pair<Boolean, String> {
+    suspend fun connectToSmb(host: String, share: String, username: String, password: String, domain: String = "", forceRefresh: Boolean = false): Pair<Boolean, String> {
         return try {
             log("[Controller] === Protocol Switch: Connecting to SMB ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
@@ -158,6 +161,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller]   Username: '$username' (length: ${username.length})")
             log("[Controller]   Password length: ${password.length}")
             log("[Controller]   Domain: '$domain'")
+            log("[Controller]   Force Refresh: $forceRefresh")
             
             if (username.isEmpty()) {
                 log("[Controller] WARNING: Username is empty!")
@@ -182,15 +186,31 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // If no share was specified, list available shares
             if (share.isEmpty()) {
                 log("[Controller] No share specified, listing available shares...")
-                val shares = smbClient?.listShares() ?: emptyList()
-                if (shares.isNotEmpty()) {
-                    val sharesList = shares.joinToString(", ")
-                    log("[Controller] Available shares: $sharesList")
-                    // 返回成功，让MainActivity显示共享目录列表
-                    Pair(true, "Connected! Available shares: $sharesList")
+                
+                // 检查是否有缓存且不需要强制刷新
+                val cachedShares = smbSharesCache[host]
+                if (cachedShares != null && !forceRefresh) {
+                    log("[Controller] Using cached shares for host: $host")
+                    log("[Controller] Cached shares: ${cachedShares.joinToString(", ")}")
+                    // 使用缓存的共享列表
+                    smbClient?.setAvailableShares(cachedShares)
+                    val sharesList = cachedShares.joinToString(", ")
+                    Pair(true, "Connected! Available shares: $sharesList (cached)")
                 } else {
-                    log("[Controller] No shares found")
-                    Pair(true, "Connected but no shares found")
+                    // 重新获取共享列表
+                    log("[Controller] Fetching fresh shares list...")
+                    val shares = smbClient?.listShares() ?: emptyList()
+                    if (shares.isNotEmpty()) {
+                        // 更新缓存
+                        smbSharesCache[host] = shares
+                        log("[Controller] Cached ${shares.size} shares for host: $host")
+                        val sharesList = shares.joinToString(", ")
+                        log("[Controller] Available shares: $sharesList")
+                        Pair(true, "Connected! Available shares: $sharesList")
+                    } else {
+                        log("[Controller] No shares found")
+                        Pair(true, "Connected but no shares found")
+                    }
                 }
             } else {
                 log("[Controller] === SMB Connection established to share ===")

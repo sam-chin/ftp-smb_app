@@ -11,6 +11,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +21,9 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
@@ -30,6 +34,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
@@ -38,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -233,8 +239,27 @@ fun MainScreen(
         addLog("Opening with system app: ${file.name}")
         try {
             coroutineScope.launch {
-                val tempDir = context.cacheDir
-                val tempFile = java.io.File(tempDir, file.name)
+                // 使用外部存储目录，让文件持久化保存
+                val externalDir = context.getExternalFilesDir(null)
+                if (externalDir == null) {
+                    onError("External storage not available")
+                    return@launch
+                }
+                
+                // 创建子目录存放下载的文件
+                val downloadDir = java.io.File(externalDir, "downloads")
+                if (!downloadDir.exists()) {
+                    downloadDir.mkdirs()
+                }
+                
+                val destFile = java.io.File(downloadDir, file.name)
+                
+                // 如果文件已存在，先删除
+                if (destFile.exists()) {
+                    destFile.delete()
+                }
+                
+                addLog("Downloading file to: ${destFile.absolutePath}")
                 
                 val inputStream = mediaController.getFileStream(file.path, selectedProtocol)
                 
@@ -243,21 +268,44 @@ fun MainScreen(
                     return@launch
                 }
                 
-                java.io.FileOutputStream(tempFile).use { output ->
+                // 下载文件到外部存储
+                java.io.FileOutputStream(destFile).use { output ->
                     inputStream.use { input ->
                         input.copyTo(output)
                     }
                 }
                 
+                addLog("File downloaded successfully: ${destFile.absolutePath}")
+                addLog("File size: ${destFile.length()} bytes")
+                
                 val mimeType = getMimeType(file.name)
+                
+                // 使用 FileProvider 获取 content:// URI（兼容 Android 7.0+）
+                val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    destFile
+                )
+                
+                addLog("Content URI: $contentUri")
+                
                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                    setDataAndType(android.net.Uri.fromFile(tempFile), mimeType)
+                    setDataAndType(contentUri, mimeType)
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                context.startActivity(intent)
+                
+                try {
+                    context.startActivity(intent)
+                    addLog("System app launched successfully")
+                } catch (e: Exception) {
+                    addLog("No app found to handle this file type: ${e.message}")
+                    onError("No app found to open this file type")
+                }
             }
         } catch (e: Exception) {
             addLog("Open error: ${e.message}")
+            e.printStackTrace()
             onError("Failed to open file: ${e.message}")
         }
     }
@@ -403,6 +451,8 @@ fun MainScreen(
                 is NetworkProtocol.SMB -> !isAtSmbRoot  // SMB: 不在根目录时显示
                 is NetworkProtocol.FTP -> currentPath != "/"  // FTP: 不在根目录时显示
             },
+            isAtSmbRoot = isAtSmbRoot,
+            selectedProtocol = selectedProtocol,
             onFileClick = { file ->
                 if (file.isDirectory) {
                     addLog("Clicking directory: ${file.name}, path: ${file.path}")
@@ -575,6 +625,54 @@ fun MainScreen(
                     }
                 }
             },
+            onRefreshShares = if (selectedProtocol is NetworkProtocol.SMB) {
+                {
+                    addLog("Refreshing SMB shares...")
+                    isLoading = true
+                    coroutineScope.launch {
+                        try {
+                            // 强制刷新共享目录列表
+                            val host = connectionPrefs.getSmbHost()
+                            val port = connectionPrefs.getSmbPort()
+                            val username = connectionPrefs.getSmbUsername()
+                            val password = connectionPrefs.getSmbPassword()
+                            val domain = connectionPrefs.getSmbDomain()
+                            
+                            addLog("Reconnecting to SMB server: $host")
+                            val (success, message) = mediaController.connectToSmb(
+                                host, "", username, password, domain, forceRefresh = true
+                            )
+                            
+                            isLoading = false
+                            addLog(message)
+                            
+                            if (success) {
+                                // 重新获取共享列表
+                                val shares = mediaController.getAvailableShares()
+                                availableShares = shares
+                                isAtSmbRoot = true
+                                browserTitle = "选择共享目录"
+                                files = shares.map { shareName ->
+                                    MediaFile(
+                                        name = shareName,
+                                        path = "/$shareName",
+                                        size = 0,
+                                        isDirectory = true,
+                                        protocol = NetworkProtocol.SMB
+                                    )
+                                }
+                                addLog("Refreshed ${files.size} shares")
+                            } else {
+                                errorMessage = message
+                            }
+                        } catch (e: Exception) {
+                            isLoading = false
+                            errorMessage = "Failed to refresh shares: ${e.message}"
+                            addLog(errorMessage!!)
+                        }
+                    }
+                }
+            } else null,
             onDisconnect = {
                 isAtSmbRoot = false
                 mediaController.release()
@@ -929,9 +1027,12 @@ fun FileBrowserScreen(
     title: String,
     debugLogs: List<String>,
     showBackButton: Boolean,
+    isAtSmbRoot: Boolean,
+    selectedProtocol: NetworkProtocol,
     onFileClick: (MediaFile) -> Unit,
     onFileLongClick: (MediaFile) -> Unit,
     onBackClick: () -> Unit,
+    onRefreshShares: (() -> Unit)? = null,  // SMB根目录时显示刷新按钮
     onDisconnect: () -> Unit,
     isLoading: Boolean
 ) {
@@ -946,6 +1047,17 @@ fun FileBrowserScreen(
                 }
             },
             actions = {
+                // SMB根目录时显示刷新按钮
+                if (isAtSmbRoot && selectedProtocol is NetworkProtocol.SMB && onRefreshShares != null) {
+                    IconButton(onClick = onRefreshShares) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Refresh Shares",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                
                 IconButton(onClick = onDisconnect) {
                     Icon(
                         imageVector = Icons.Default.ArrowBack,
@@ -1102,6 +1214,15 @@ fun PlayerScreen(
 ) {
     val context = LocalContext.current
     var showCastDialog by remember { mutableStateOf(false) }
+    var showControls by remember { mutableStateOf(true) }  // 控制按钮显示状态
+    
+    // 自动隐藏控制按钮：无操作3秒后隐藏
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            kotlinx.coroutines.delay(3000)  // 3秒后隐藏
+            showControls = false
+        }
+    }
     
     DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
@@ -1126,43 +1247,60 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            // 点击屏幕时切换控制按钮显示/隐藏
+            .pointerInput(Unit) {
+                detectTapGestures {
+                    showControls = !showControls
+                }
+            }
     ) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = mediaController.getPlayer()
-                    useController = true
+                    useController = true  // 使用 ExoPlayer 内置控制器（支持进度条拖动）
+                    controllerShowTimeoutMs = 3000  // 控制器3秒后自动隐藏
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
         
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+        // 返回按钮 - 优化样式
+        AnimatedVisibility(
+            visible = showControls,
+            modifier = Modifier.align(Alignment.TopStart)
         ) {
-            IconButton(onClick = onBackClick) {
+            IconButton(
+                onClick = onBackClick,
+                modifier = Modifier
+                    .padding(8.dp)
+                    .size(40.dp)  // 固定大小，更紧凑
+            ) {
                 Icon(
                     Icons.Default.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color.White
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
         
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+        // 投屏按钮 - 优化样式
+        AnimatedVisibility(
+            visible = showControls,
+            modifier = Modifier.align(Alignment.TopEnd)
         ) {
-            IconButton(onClick = { showCastDialog = true }) {
+            IconButton(
+                onClick = { showCastDialog = true },
+                modifier = Modifier
+                    .padding(8.dp)
+                    .size(40.dp)  // 固定大小，更紧凑
+            ) {
                 Icon(
                     Icons.Default.Cast,
                     contentDescription = "Cast",
-                    tint = Color.White
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }

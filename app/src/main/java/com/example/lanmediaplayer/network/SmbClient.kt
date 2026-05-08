@@ -164,6 +164,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     
     fun getAvailableShares(): List<String> = availableShares
     
+    // 设置可用的共享目录列表（用于缓存恢复）
+    fun setAvailableShares(shares: List<String>) {
+        availableShares = shares.toMutableList()
+        log("[SMB-JCIFS] Set available shares from cache: ${shares.joinToString(", ")}")
+    }
+    
     suspend fun selectShare(shareName: String): Boolean = withContext(Dispatchers.IO) {
         if (shareName !in availableShares) {
             log("[SMB-JCIFS] Share '$shareName' not in available shares")
