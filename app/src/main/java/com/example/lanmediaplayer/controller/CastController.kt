@@ -323,6 +323,29 @@ class CastController(private val context: Context, private val logCallback: ((St
             log("=== Preparing SetAVTransportURI ===")
             log("Original videoUrl: $videoUrl")
             
+            // ✅ 测试URL是否可访问
+            try {
+                val testUrl = java.net.URL(videoUrl)
+                val connection = testUrl.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "HEAD"
+                connection.connectTimeout = 2000
+                connection.readTimeout = 2000
+                val responseCode = connection.responseCode
+                log("URL accessibility test: HTTP $responseCode")
+                connection.disconnect()
+                
+                if (responseCode != 200) {
+                    log("WARNING: URL is not accessible! Kodi may not be able to reach this URL.")
+                    log("Please check:")
+                    log("1. Phone IP (${device.ip}) and Kodi device are on the same network")
+                    log("2. No firewall blocking port ${testUrl.port}")
+                    log("3. HTTP proxy is bound to 0.0.0.0")
+                }
+            } catch (e: Exception) {
+                log("URL test failed: ${e.message}")
+                log("This suggests Kodi cannot access the URL!")
+            }
+            
             // ✅ 对URL和标题进行XML转义
             val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             val escapedVideoUrl = videoUrl.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

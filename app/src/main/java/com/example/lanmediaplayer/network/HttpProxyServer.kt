@@ -22,13 +22,16 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
+            // ✅ 显式绑定到 0.0.0.0，允许所有网络接口访问
+            val inetAddress = java.net.InetAddress.getByName("0.0.0.0")
             serverSocket = if (port > 0) {
-                ServerSocket(port)
+                ServerSocket(port, 50, inetAddress)
             } else {
-                ServerSocket(0)
+                ServerSocket(0, 50, inetAddress)
             }
             
             currentPort = serverSocket?.localPort ?: 0
+            log("[HTTP Proxy] Server started on 0.0.0.0:$currentPort (accepting connections from any interface)")
             serverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
             
             serverScope?.launch {
