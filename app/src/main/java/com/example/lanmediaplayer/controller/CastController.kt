@@ -278,16 +278,21 @@ class CastController(private val context: Context, private val logCallback: ((St
     }
     
     // 构建真实的SMB/FTP URL（用于DLNA投屏）
-    fun buildRealMediaUrl(path: String, protocol: com.example.lanmediaplayer.NetworkProtocol, host: String, port: Int, username: String, password: String): String {
-        return when (protocol) {
-            is com.example.lanmediaplayer.NetworkProtocol.SMB -> {
+    fun buildRealMediaUrl(path: String, protocol: Any, host: String, port: Int, username: String, password: String): String {
+        val protocolName = protocol::class.simpleName
+        return when (protocolName) {
+            "SMB" -> {
                 // SMB格式: smb://username:password@host:port/path
                 val cleanPath = if (path.startsWith("/")) path.substring(1) else path
                 "smb://$username:$password@$host:$port/$cleanPath"
             }
-            is com.example.lanmediaplayer.NetworkProtocol.FTP -> {
+            "FTP" -> {
                 // FTP格式: ftp://username:password@host:port/path
                 "ftp://$username:$password@$host:$port$path"
+            }
+            else -> {
+                // 默认返回原始路径
+                path
             }
         }
     }

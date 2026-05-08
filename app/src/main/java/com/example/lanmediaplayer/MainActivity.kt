@@ -694,17 +694,22 @@ fun MainScreen(
         Screen.Player -> PlayerScreen(
             mediaController = mediaController,
             castController = castController,
+            connectionPrefs = connectionPrefs,
             onBackClick = {
                 mediaController.stopPlayback()
                 currentScreen = Screen.FileBrowser
             },
-            onError = onError
+            onError = onError,
+            addLog = { message ->
+                debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+            }
         )
         
         Screen.ImageViewer -> ImageViewerScreen(
             imageFiles = imageFiles,
             initialIndex = initialImageIndex,
             currentProtocol = selectedProtocol,
+            connectionPrefs = connectionPrefs,
             getImageUrl = { path -> mediaController.getImageUrl(path, selectedProtocol) },
             castController = castController,
             onBackClick = {
@@ -1256,8 +1261,10 @@ fun FileListItem(
 fun PlayerScreen(
     mediaController: MediaController,
     castController: CastController,
+    connectionPrefs: ConnectionPreferences,
     onBackClick: () -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    addLog: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showCastDialog by remember { mutableStateOf(false) }
@@ -1519,6 +1526,7 @@ fun ImageViewerScreen(
     imageFiles: List<MediaFile>,
     initialIndex: Int,
     currentProtocol: NetworkProtocol,
+    connectionPrefs: ConnectionPreferences,
     getImageUrl: (String) -> String,
     castController: CastController,
     onBackClick: () -> Unit,
