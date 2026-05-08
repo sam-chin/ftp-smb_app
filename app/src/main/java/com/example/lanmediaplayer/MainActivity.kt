@@ -399,7 +399,10 @@ fun MainScreen(
             currentPath = currentPath,
             title = browserTitle,
             debugLogs = debugLogs,
-            showBackButton = selectedProtocol is NetworkProtocol.SMB && !isAtSmbRoot,
+            showBackButton = when (selectedProtocol) {
+                is NetworkProtocol.SMB -> !isAtSmbRoot  // SMB: 不在根目录时显示
+                is NetworkProtocol.FTP -> currentPath != "/"  // FTP: 不在根目录时显示
+            },
             onFileClick = { file ->
                 if (file.isDirectory) {
                     addLog("Clicking directory: ${file.name}, path: ${file.path}")
@@ -1288,6 +1291,35 @@ fun ImageViewerScreen(
         }
     }
     
+    // 快速预加载：优先加载当前页及附近几张（并行加载）
+    fun quickPreload(currentIndex: Int) {
+        if (imageFiles.isEmpty()) return
+        
+        // 需要立即加载的索引：当前页、前一页、后一页、前两页、后两页
+        val urgentIndices = listOf(
+            currentIndex,
+            currentIndex + 1,
+            currentIndex - 1,
+            currentIndex + 2,
+            currentIndex - 2
+        ).filter { it in 0 until imageFiles.size && !imageCache.containsKey(it) }
+        
+        // 并行加载这些图片
+        urgentIndices.forEach { index ->
+            coroutineScope.launch {
+                try {
+                    val imagePath = imageFiles[index].path
+                    println("[ImageViewer] Quick loading image $index")
+                    val url = getImageUrl(imagePath)
+                    imageCache[index] = url
+                    println("[ImageViewer] Quick loaded image $index successfully")
+                } catch (e: Exception) {
+                    println("Failed to quick load image at index $index: ${e.message}")
+                }
+            }
+        }
+    }
+    
     // 清理旧批次缓存（保留当前批次和前一批次）
     fun cleanupOldBatches(currentBatch: Int) {
         val indicesToRemove = imageCache.keys.filter { index ->
@@ -1305,10 +1337,15 @@ fun ImageViewerScreen(
         }
     }
     
-    // 初始加载第一批（包含初始页面的批次）
+    // 初始加载：优先快速加载当前页及附近图片
     LaunchedEffect(Unit) {
         val initialBatch = getBatchIndex(initialPage)
         currentBatchIndex = initialBatch
+        
+        // 第一步：快速并行加载当前页及附近5张图片（优先级最高）
+        quickPreload(initialPage)
+        
+        // 第二步：后台顺序加载整个批次（补充剩余图片）
         preloadBatch(initialBatch)
         
         // 如果初始页面不是批次的第一张，也预加载下一批
@@ -1325,11 +1362,14 @@ fun ImageViewerScreen(
         val totalImages = imageFiles.size
         val pageBatch = getBatchIndex(currentPage)
         
+        // 第一步：立即并行加载当前页及附近图片（最高优先级）
+        quickPreload(currentPage)
+        
         // 如果进入了新的批次
         if (pageBatch != currentBatchIndex) {
             currentBatchIndex = pageBatch
             
-            // 加载当前批次
+            // 第二步：后台顺序加载整个批次（补充剩余图片）
             preloadBatch(pageBatch)
             
             // 预加载下一批次（如果存在）
@@ -1342,39 +1382,6 @@ fun ImageViewerScreen(
             // 清理旧批次缓存（当加载第3批及以后时，清理第1批）
             if (pageBatch >= 2) {
                 cleanupOldBatches(pageBatch)
-            }
-        }
-        
-        // 确保当前页面及附近几张立即加载（紧急加载，带重试）
-        val urgentIndices = listOf(
-            currentPage,
-            currentPage + 1,
-            currentPage - 1,
-            currentPage + 2,
-            currentPage - 2
-        ).filter { it in 0 until totalImages && !imageCache.containsKey(it) }
-        
-        urgentIndices.forEach { index ->
-            coroutineScope.launch {
-                // 再次检查是否已被其他协程加载成功
-                if (imageCache.containsKey(index)) return@launch
-                
-                // 最多重试2次
-                for (attempt in 1..2) {
-                    // 每次重试前都检查是否已被加载
-                    if (imageCache.containsKey(index)) break
-                    
-                    try {
-                        val url = getImageUrl(imageFiles[index].path)
-                        imageCache[index] = url
-                        break // 加载成功
-                    } catch (e: Exception) {
-                        println("Failed to urgently load image at index $index (attempt $attempt): ${e.message}")
-                        if (attempt < 2) {
-                            kotlinx.coroutines.delay(300) // 等待0.3秒后重试
-                        }
-                    }
-                }
             }
         }
     }
