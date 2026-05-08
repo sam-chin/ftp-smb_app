@@ -554,7 +554,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         return "http://127.0.0.1:$port/$encodedPath"
     }
     
-    fun getVideoUrl(): String = currentVideoUrl
+    fun getVideoUrl(): String {
+        // ✅ 将127.0.0.1替换为局域网IP，以便DLNA设备可以访问
+        return currentVideoUrl.replace("127.0.0.1", localIpAddress)
+    }
     
     // 获取当前媒体的真实路径（用于DLNA投屏）
     fun getCurrentMediaPath(): String? {
