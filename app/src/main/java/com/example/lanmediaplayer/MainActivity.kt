@@ -133,8 +133,6 @@ fun MainScreen(
     var isLoading by remember { mutableStateOf(false) }
     
     var availableShares by remember { mutableStateOf<List<String>>(emptyList()) }
-    var pendingShareSelection by remember { mutableStateOf(false) }
-    var pendingSmbParams by remember { mutableStateOf<Triple<String, String, String>?>(null) }
     var isAtSmbRoot by remember { mutableStateOf(false) }
     var browserTitle by remember { mutableStateOf("/") }
     
@@ -339,10 +337,13 @@ fun MainScreen(
                         addLog("Display currentPath: '$currentPath'")
                         
                         if (protocol is NetworkProtocol.SMB) {
+                            // 获取可用共享目录
                             availableShares = mediaController.getAvailableShares()
                             isAtSmbRoot = true
                             browserTitle = "选择共享目录"
+                            
                             if (availableShares.isNotEmpty()) {
+                                // 在根目录显示所有共享目录为文件夹列表
                                 files = availableShares.map { shareName ->
                                     MediaFile(
                                         name = shareName,
@@ -354,6 +355,7 @@ fun MainScreen(
                                 }
                                 addLog("Showing ${files.size} shares at SMB root")
                             } else {
+                                // 如果没有共享目录，尝试浏览根目录
                                 isAtSmbRoot = false
                                 browserTitle = "/"
                                 mediaController.browseFiles("", protocol, object : MediaController.MediaCallback {
@@ -383,14 +385,6 @@ fun MainScreen(
                                 override fun onPlaybackStateChanged(state: Int) {}
                             })
                         }
-                    } else if (message.startsWith("SHARES:")) {
-                        val shares = message.substringAfter("SHARES:").split(",")
-                        addLog("Shares found: ${shares.joinToString(", ")}")
-                        availableShares = shares
-                        isAtSmbRoot = true
-                        browserTitle = "选择共享目录"
-                        pendingShareSelection = true
-                        pendingSmbParams = Triple(host, "$username:$password", domain)
                     } else {
                         addLog("Connection failed: $message")
                         errorMessage = message
@@ -628,77 +622,6 @@ fun MainScreen(
             confirmButton = {
                 TextButton(onClick = { errorMessage = null }) {
                     Text("OK")
-                }
-            }
-        )
-    }
-    
-    if (pendingShareSelection && availableShares.isNotEmpty()) {
-        AlertDialog(
-            onDismissRequest = {
-                pendingShareSelection = false
-                isAtSmbRoot = true
-                currentPath = "/"
-                browserTitle = "选择共享目录"
-                files = availableShares.map { shareName ->
-                    MediaFile(
-                        name = shareName,
-                        path = "/$shareName",
-                        size = 0,
-                        isDirectory = true,
-                        protocol = NetworkProtocol.SMB
-                    )
-                }
-            },
-            title = { Text("选择共享目录") },
-            text = {
-                Column {
-                    Text("服务器上的共享目录：")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    availableShares.forEach { shareName ->
-                        TextButton(
-                            onClick = {
-                                pendingShareSelection = false
-                                isAtSmbRoot = true
-                                currentPath = "/"
-                                browserTitle = "选择共享目录"
-                                files = availableShares.map { s ->
-                                    MediaFile(
-                                        name = s,
-                                        path = "/$s",
-                                        size = 0,
-                                        isDirectory = true,
-                                        protocol = NetworkProtocol.SMB
-                                    )
-                                }
-                                addLog("Showing all shares at SMB root")
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(shareName)
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = {
-                    pendingShareSelection = false
-                    isAtSmbRoot = true
-                    currentPath = "/"
-                    browserTitle = "选择共享目录"
-                    files = availableShares.map { shareName ->
-                        MediaFile(
-                            name = shareName,
-                            path = "/$shareName",
-                            size = 0,
-                            isDirectory = true,
-                            protocol = NetworkProtocol.SMB
-                        )
-                    }
-                    pendingSmbParams = null
-                }) {
-                    Text("取消")
                 }
             }
         )
@@ -1261,24 +1184,113 @@ fun ImageViewerScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showCastDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     
+    // 使用 LinkedHashMap 保持插入顺序，便于管理缓存
     val imageCache = remember { mutableStateMapOf<Int, String>() }
+    val preloadBatchSize = 10 // 每批预加载10张图片
+    var currentBatchIndex by remember { mutableStateOf(0) } // 当前批次索引（0=第1批，1=第2批...）
     
+    // 计算某张图片属于哪个批次
+    fun getBatchIndex(imageIndex: Int): Int {
+        return imageIndex / preloadBatchSize
+    }
+    
+    // 预加载指定批次的图片
+    fun preloadBatch(batchIndex: Int) {
+        if (imageFiles.isEmpty()) return
+        
+        val startIndex = batchIndex * preloadBatchSize
+        val endIndex = minOf(imageFiles.size - 1, startIndex + preloadBatchSize - 1)
+        
+        coroutineScope.launch {
+            for (index in startIndex..endIndex) {
+                if (!imageCache.containsKey(index)) {
+                    try {
+                        val url = getImageUrl(imageFiles[index].path)
+                        imageCache[index] = url
+                    } catch (e: Exception) {
+                        println("Failed to load image at index $index: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+    
+    // 清理旧批次缓存（保留当前批次和前一批次）
+    fun cleanupOldBatches(currentBatch: Int) {
+        val indicesToRemove = imageCache.keys.filter { index ->
+            val batchIndex = getBatchIndex(index)
+            // 删除距离当前批次超过1的批次（即保留当前批次和前一批次）
+            batchIndex < currentBatch - 1
+        }
+        
+        indicesToRemove.forEach { index ->
+            imageCache.remove(index)
+        }
+        
+        if (indicesToRemove.isNotEmpty()) {
+            println("Cleaned up ${indicesToRemove.size} old cached images")
+        }
+    }
+    
+    // 初始加载第一批（包含初始页面的批次）
+    LaunchedEffect(Unit) {
+        val initialBatch = getBatchIndex(initialPage)
+        currentBatchIndex = initialBatch
+        preloadBatch(initialBatch)
+        
+        // 如果初始页面不是批次的第一张，也预加载下一批
+        if (initialPage % preloadBatchSize > preloadBatchSize / 2 && initialBatch + 1 < (imageFiles.size + preloadBatchSize - 1) / preloadBatchSize) {
+            preloadBatch(initialBatch + 1)
+        }
+    }
+    
+    // 当页面改变时，检查是否需要加载新批次
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
-        val indicesToLoad = listOf(
-            pagerState.currentPage,
-            pagerState.currentPage + 1,
-            pagerState.currentPage + 2,
-            pagerState.currentPage - 1,
-            pagerState.currentPage - 2
-        ).filter { it in 0 until imageFiles.size }
+        val currentPage = pagerState.currentPage
+        val totalImages = imageFiles.size
+        val pageBatch = getBatchIndex(currentPage)
         
-        indicesToLoad.forEach { index ->
-            if (!imageCache.containsKey(index)) {
-                val url = getImageUrl(imageFiles[index].path)
-                imageCache[index] = url
+        // 如果进入了新的批次
+        if (pageBatch != currentBatchIndex) {
+            currentBatchIndex = pageBatch
+            
+            // 加载当前批次
+            preloadBatch(pageBatch)
+            
+            // 预加载下一批次（如果存在）
+            val nextBatch = pageBatch + 1
+            val totalBatches = (totalImages + preloadBatchSize - 1) / preloadBatchSize
+            if (nextBatch < totalBatches) {
+                preloadBatch(nextBatch)
+            }
+            
+            // 清理旧批次缓存（当加载第3批及以后时，清理第1批）
+            if (pageBatch >= 2) {
+                cleanupOldBatches(pageBatch)
+            }
+        }
+        
+        // 确保当前页面及附近几张立即加载（紧急加载）
+        val urgentIndices = listOf(
+            currentPage,
+            currentPage + 1,
+            currentPage - 1,
+            currentPage + 2,
+            currentPage - 2
+        ).filter { it in 0 until totalImages && !imageCache.containsKey(it) }
+        
+        urgentIndices.forEach { index ->
+            coroutineScope.launch {
+                try {
+                    val url = getImageUrl(imageFiles[index].path)
+                    imageCache[index] = url
+                } catch (e: Exception) {
+                    println("Failed to urgently load image at index $index: ${e.message}")
+                }
             }
         }
     }
@@ -1314,14 +1326,21 @@ fun ImageViewerScreen(
                         contentDescription = imageFiles[page].name
                     )
                 } else {
+                    // 如果缓存中没有，立即加载并显示加载中
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(color = Color.White)
                     }
+                    // 异步加载当前图片
                     LaunchedEffect(page) {
-                        imageCache[page] = getImageUrl(imageFiles[page].path)
+                        try {
+                            val url = getImageUrl(imageFiles[page].path)
+                            imageCache[page] = url
+                        } catch (e: Exception) {
+                            println("Failed to load image on demand at index $page: ${e.message}")
+                        }
                     }
                 }
             }
