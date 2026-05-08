@@ -135,6 +135,8 @@ fun MainScreen(
     var availableShares by remember { mutableStateOf<List<String>>(emptyList()) }
     var pendingShareSelection by remember { mutableStateOf(false) }
     var pendingSmbParams by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+    var isAtSmbRoot by remember { mutableStateOf(false) }
+    var browserTitle by remember { mutableStateOf("/") }
     
     var imageFiles by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var initialImageIndex by remember { mutableStateOf(0) }
@@ -293,6 +295,7 @@ fun MainScreen(
                 selectedProtocol = protocol
                 isLoading = true
                 errorMessage = null
+                isAtSmbRoot = false
                 // Don't clear debug logs, keep them for troubleshooting
                 
                 // Log connection parameters (hide password)
@@ -332,40 +335,60 @@ fun MainScreen(
                         files = emptyList()
                         addLog("Files cleared: ${files.size}")
                         
-                        val rootPath = if (protocol is NetworkProtocol.SMB) "" else "/"
                         currentPath = "/"
-                        
-                        addLog("Root path for browseFiles: '$rootPath' (length: ${rootPath.length})")
                         addLog("Display currentPath: '$currentPath'")
-                        addLog("Calling browseFiles...")
                         
-                        mediaController.browseFiles(rootPath, protocol, object : MediaController.MediaCallback {
-                            override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                addLog("=== BrowseFiles Callback ===")
-                                addLog("Received ${loadedFiles.size} files")
-                                if (loadedFiles.isNotEmpty()) {
-                                    addLog("First file: ${loadedFiles[0].name}, path: ${loadedFiles[0].path}")
-                                    addLog("Protocol: ${loadedFiles[0].protocol::class.simpleName}")
+                        if (protocol is NetworkProtocol.SMB) {
+                            availableShares = mediaController.getAvailableShares()
+                            isAtSmbRoot = true
+                            browserTitle = "选择共享目录"
+                            if (availableShares.isNotEmpty()) {
+                                files = availableShares.map { shareName ->
+                                    MediaFile(
+                                        name = shareName,
+                                        path = "/$shareName",
+                                        size = 0,
+                                        isDirectory = true,
+                                        protocol = NetworkProtocol.SMB
+                                    )
                                 }
-                                files = loadedFiles
-                                addLog("Files updated: ${files.size}")
-                                if (loadedFiles.isEmpty()) {
-                                    addLog("WARNING: Directory is empty!")
+                                addLog("Showing ${files.size} shares at SMB root")
+                            } else {
+                                isAtSmbRoot = false
+                                browserTitle = "/"
+                                mediaController.browseFiles("", protocol, object : MediaController.MediaCallback {
+                                    override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                        files = loadedFiles
+                                        addLog("Loaded ${loadedFiles.size} files")
+                                    }
+                                    override fun onError(error: String) {
+                                        errorMessage = error
+                                        addLog("Error: $error")
+                                    }
+                                    override fun onPlaybackStateChanged(state: Int) {}
+                                })
+                            }
+                        } else {
+                            isAtSmbRoot = false
+                            browserTitle = "/"
+                            mediaController.browseFiles("/", protocol, object : MediaController.MediaCallback {
+                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                    files = loadedFiles
+                                    addLog("Loaded ${loadedFiles.size} files")
                                 }
-                                addLog("=== Protocol Switch Complete ===")
-                            }
-                            
-                            override fun onError(error: String) {
-                                errorMessage = error
-                                addLog("Error: $error")
-                            }
-                            
-                            override fun onPlaybackStateChanged(state: Int) {}
-                        })
+                                override fun onError(error: String) {
+                                    errorMessage = error
+                                    addLog("Error: $error")
+                                }
+                                override fun onPlaybackStateChanged(state: Int) {}
+                            })
+                        }
                     } else if (message.startsWith("SHARES:")) {
                         val shares = message.substringAfter("SHARES:").split(",")
                         addLog("Shares found: ${shares.joinToString(", ")}")
                         availableShares = shares
+                        isAtSmbRoot = true
+                        browserTitle = "选择共享目录"
                         pendingShareSelection = true
                         pendingSmbParams = Triple(host, "$username:$password", domain)
                     } else {
@@ -380,7 +403,9 @@ fun MainScreen(
         Screen.FileBrowser -> FileBrowserScreen(
             files = files,
             currentPath = currentPath,
+            title = browserTitle,
             debugLogs = debugLogs,
+            showBackButton = selectedProtocol is NetworkProtocol.SMB && !isAtSmbRoot,
             onFileClick = { file ->
                 if (file.isDirectory) {
                     addLog("Clicking directory: ${file.name}, path: ${file.path}")
@@ -389,21 +414,51 @@ fun MainScreen(
                     addLog("Starting to browse: ${file.path}")
                     coroutineScope.launch {
                         try {
-                            mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
-                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                    addLog("Browse completed: ${loadedFiles.size} files loaded")
-                                    files = loadedFiles
+                            if (isAtSmbRoot && selectedProtocol is NetworkProtocol.SMB) {
+                                val shareName = file.name
+                                addLog("Selecting SMB share: $shareName")
+                                val success = mediaController.selectShare(shareName)
+                                if (success) {
+                                    isAtSmbRoot = false
+                                    browserTitle = shareName
+                                    mediaController.browseFiles("", selectedProtocol, object : MediaController.MediaCallback {
+                                        override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                            addLog("Browse completed: ${loadedFiles.size} files loaded")
+                                            files = loadedFiles
+                                            isLoading = false
+                                        }
+                                        
+                                        override fun onError(error: String) {
+                                            addLog("Browse error: $error")
+                                            errorMessage = error
+                                            isLoading = false
+                                        }
+                                        
+                                        override fun onPlaybackStateChanged(state: Int) {}
+                                    })
+                                } else {
+                                    addLog("Failed to select share: $shareName")
+                                    errorMessage = "Failed to access share: $shareName"
                                     isLoading = false
                                 }
-                                
-                                override fun onError(error: String) {
-                                    addLog("Browse error: $error")
-                                    errorMessage = error
-                                    isLoading = false
-                                }
-                                
-                                override fun onPlaybackStateChanged(state: Int) {}
-                            })
+                            } else {
+                                mediaController.browseFiles(file.path, selectedProtocol, object : MediaController.MediaCallback {
+                                    override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                        addLog("Browse completed: ${loadedFiles.size} files loaded")
+                                        files = loadedFiles
+                                        browserTitle = file.name
+                                        isLoading = false
+                                    }
+                                    
+                                    override fun onError(error: String) {
+                                        addLog("Browse error: $error")
+                                        errorMessage = error
+                                        isLoading = false
+                                    }
+                                    
+                                    override fun onPlaybackStateChanged(state: Int) {}
+                                })
+                            }
                         } catch (e: Exception) {
                             addLog("Exception in browseFiles: ${e.message}")
                             e.printStackTrace()
@@ -442,9 +497,24 @@ fun MainScreen(
                 showFileMenu = true
             },
             onBackClick = {
-                if (currentPath != "/") {
+                if (!isAtSmbRoot && selectedProtocol is NetworkProtocol.SMB) {
+                    isAtSmbRoot = true
+                    currentPath = "/"
+                    browserTitle = "选择共享目录"
+                    files = availableShares.map { shareName ->
+                        MediaFile(
+                            name = shareName,
+                            path = "/$shareName",
+                            size = 0,
+                            isDirectory = true,
+                            protocol = NetworkProtocol.SMB
+                        )
+                    }
+                    addLog("Returned to SMB root, showing ${files.size} shares")
+                } else if (currentPath != "/") {
                     val parentPath = currentPath.substringBeforeLast("/")
                     currentPath = if (parentPath.isEmpty()) "/" else parentPath
+                    browserTitle = currentPath
                     isLoading = true
                     coroutineScope.launch {
                         mediaController.browseFiles(currentPath, selectedProtocol, object : MediaController.MediaCallback {
@@ -464,6 +534,7 @@ fun MainScreen(
                 }
             },
             onDisconnect = {
+                isAtSmbRoot = false
                 mediaController.release()
                 mediaController.initializePlayer()
                 currentScreen = Screen.Connection
@@ -564,40 +635,43 @@ fun MainScreen(
     
     if (pendingShareSelection && availableShares.isNotEmpty()) {
         AlertDialog(
-            onDismissRequest = { },
-            title = { Text("Select Share") },
+            onDismissRequest = {
+                pendingShareSelection = false
+                isAtSmbRoot = true
+                currentPath = "/"
+                browserTitle = "选择共享目录"
+                files = availableShares.map { shareName ->
+                    MediaFile(
+                        name = shareName,
+                        path = "/$shareName",
+                        size = 0,
+                        isDirectory = true,
+                        protocol = NetworkProtocol.SMB
+                    )
+                }
+            },
+            title = { Text("选择共享目录") },
             text = {
                 Column {
-                    Text("Available shares on server:")
+                    Text("服务器上的共享目录：")
                     Spacer(modifier = Modifier.height(8.dp))
                     availableShares.forEach { shareName ->
                         TextButton(
                             onClick = {
                                 pendingShareSelection = false
-                                isLoading = true
-                                pendingSmbParams?.let { (host, credentials, domain) ->
-                                    val (username, password) = credentials.split(":", limit = 2)
-                                    coroutineScope.launch {
-                                        val success = mediaController.selectShare(shareName)
-                                        if (success) {
-                                            currentScreen = Screen.FileBrowser
-                                            files = emptyList()
-                                            currentPath = "/"
-                                            mediaController.browseFiles("", NetworkProtocol.SMB, object : MediaController.MediaCallback {
-                                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                                    files = loadedFiles
-                                                }
-                                                override fun onError(error: String) {
-                                                    errorMessage = error
-                                                }
-                                                override fun onPlaybackStateChanged(state: Int) {}
-                                            })
-                                        } else {
-                                            errorMessage = "Failed to access share: $shareName"
-                                        }
-                                        isLoading = false
-                                    }
+                                isAtSmbRoot = true
+                                currentPath = "/"
+                                browserTitle = "选择共享目录"
+                                files = availableShares.map { s ->
+                                    MediaFile(
+                                        name = s,
+                                        path = "/$s",
+                                        size = 0,
+                                        isDirectory = true,
+                                        protocol = NetworkProtocol.SMB
+                                    )
                                 }
+                                addLog("Showing all shares at SMB root")
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -610,10 +684,21 @@ fun MainScreen(
             dismissButton = {
                 TextButton(onClick = {
                     pendingShareSelection = false
-                    availableShares = emptyList()
+                    isAtSmbRoot = true
+                    currentPath = "/"
+                    browserTitle = "选择共享目录"
+                    files = availableShares.map { shareName ->
+                        MediaFile(
+                            name = shareName,
+                            path = "/$shareName",
+                            size = 0,
+                            isDirectory = true,
+                            protocol = NetworkProtocol.SMB
+                        )
+                    }
                     pendingSmbParams = null
                 }) {
-                    Text("Cancel")
+                    Text("取消")
                 }
             }
         )
@@ -870,7 +955,9 @@ fun ConnectionScreen(
 fun FileBrowserScreen(
     files: List<MediaFile>,
     currentPath: String,
+    title: String,
     debugLogs: List<String>,
+    showBackButton: Boolean,
     onFileClick: (MediaFile) -> Unit,
     onFileLongClick: (MediaFile) -> Unit,
     onBackClick: () -> Unit,
@@ -879,9 +966,9 @@ fun FileBrowserScreen(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text(currentPath) },
+            title = { Text(title) },
             navigationIcon = {
-                if (currentPath != "/") {
+                if (showBackButton) {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }

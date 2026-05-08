@@ -216,6 +216,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Selecting share: $shareName")
         return smbClient?.selectShare(shareName) ?: false
     }
+
+    suspend fun getSharesList(): List<MediaFile> {
+        val shares = smbClient?.getAvailableShares() ?: emptyList()
+        return shares.map { shareName ->
+            MediaFile(
+                name = shareName,
+                path = "/$shareName",
+                size = 0,
+                isDirectory = true,
+                protocol = NetworkProtocol.SMB
+            )
+        }
+    }
+
+    fun getAvailableShares(): List<String> {
+        return smbClient?.getAvailableShares() ?: emptyList()
+    }
     
     suspend fun browseFiles(path: String = "/", protocol: NetworkProtocol, callback: MediaCallback) {
         log("[Controller] === BrowseFiles START ===")
