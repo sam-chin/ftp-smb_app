@@ -122,8 +122,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     }
                 } else {
                     log("[SMB-JCIFS] Auto-detecting available shares...")
-                    availableShares = listShares()
-                    log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
+                    // 只在没有缓存时才重新扫描
+                    if (availableShares.isEmpty()) {
+                        availableShares = listShares()
+                        log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
+                    } else {
+                        log("[SMB-JCIFS] Using cached shares: ${availableShares.size} shares")
+                    }
                 }
             }
             

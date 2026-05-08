@@ -1327,6 +1327,8 @@ fun PlayerScreen(
                             android.view.MotionEvent.ACTION_DOWN -> {
                                 isDragging = false
                                 showControls = true
+                                // 强制显示 ExoPlayer 控制器
+                                showController()
                                 true
                             }
                             android.view.MotionEvent.ACTION_MOVE -> {
@@ -1345,8 +1347,8 @@ fun PlayerScreen(
                                             val currentPosition = player.currentPosition
                                             val duration = player.duration
                                             
-                                            // 计算进度调整量：每像素调整5毫秒
-                                            val adjustMs = (deltaX * 5).toLong()
+                                            // 计算进度调整量：每像素调整15毫秒（更灵敏）
+                                            val adjustMs = (deltaX * 15).toLong()
                                             val newPosition = (currentPosition + adjustMs).coerceIn(0, duration)
                                             
                                             player.seekTo(newPosition)
