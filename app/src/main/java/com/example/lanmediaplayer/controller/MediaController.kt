@@ -546,6 +546,16 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     fun getVideoUrl(): String = currentVideoUrl
     
+    // 获取当前媒体的真实路径（用于DLNA投屏）
+    fun getCurrentMediaPath(): String? {
+        return currentMediaFile?.path
+    }
+    
+    // 获取当前协议
+    fun getCurrentProtocol(): NetworkProtocol? {
+        return currentMediaFile?.protocol
+    }
+    
     fun release() {
         connectionScope.cancel()
         browseScope.cancel()

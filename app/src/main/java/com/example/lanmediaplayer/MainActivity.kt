@@ -1441,9 +1441,32 @@ fun PlayerScreen(
                 onDismiss = { showCastDialog = false },
                 onDeviceSelected = { device: CastDevice ->
                     showCastDialog = false
-                    val videoUrl = mediaController.getVideoUrl()
-                    if (videoUrl.isNotEmpty()) {
-                        castController.castVideo(device, videoUrl, "Video") { success, message ->
+                    
+                    // 获取当前媒体的真实路径和协议
+                    val mediaPath = mediaController.getCurrentMediaPath()
+                    val protocol = mediaController.getCurrentProtocol()
+                    
+                    if (mediaPath != null && protocol != null) {
+                        // 构建真实的SMB/FTP URL（DLNA设备可以直接访问）
+                        val realUrl = when (protocol) {
+                            is NetworkProtocol.SMB -> {
+                                val host = connectionPrefs.getSmbHost()
+                                val port = connectionPrefs.getSmbPort()
+                                val username = connectionPrefs.getSmbUsername()
+                                val password = connectionPrefs.getSmbPassword()
+                                castController.buildRealMediaUrl(mediaPath, protocol, host, port, username, password)
+                            }
+                            is NetworkProtocol.FTP -> {
+                                val host = connectionPrefs.getFtpHost()
+                                val port = connectionPrefs.getFtpPort()
+                                val username = connectionPrefs.getFtpUsername()
+                                val password = connectionPrefs.getFtpPassword()
+                                castController.buildRealMediaUrl(mediaPath, protocol, host, port, username, password)
+                            }
+                        }
+                        
+                        addLog("Casting with real URL: $realUrl")
+                        castController.castVideo(device, realUrl, "Video") { success, message ->
                             if (success) {
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                             } else {
@@ -1451,7 +1474,7 @@ fun PlayerScreen(
                             }
                         }
                     } else {
-                        onError("No video URL available")
+                        onError("No media playing")
                     }
                 }
             )
@@ -1823,8 +1846,26 @@ fun ImageViewerScreen(
             onDeviceSelected = { device: CastDevice ->
                 showCastDialog = false
                 val currentImage = imageFiles[pagerState.currentPage]
-                val imageUrl = getImageUrl(currentImage.path)
-                castController.castImage(device, imageUrl, currentImage.name) { success, message ->
+                
+                // 构建真实的SMB/FTP URL（DLNA设备可以直接访问）
+                val realImageUrl = when (currentProtocol) {
+                    is NetworkProtocol.SMB -> {
+                        val host = connectionPrefs.getSmbHost()
+                        val port = connectionPrefs.getSmbPort()
+                        val username = connectionPrefs.getSmbUsername()
+                        val password = connectionPrefs.getSmbPassword()
+                        castController.buildRealMediaUrl(currentImage.path, currentProtocol, host, port, username, password)
+                    }
+                    is NetworkProtocol.FTP -> {
+                        val host = connectionPrefs.getFtpHost()
+                        val port = connectionPrefs.getFtpPort()
+                        val username = connectionPrefs.getFtpUsername()
+                        val password = connectionPrefs.getFtpPassword()
+                        castController.buildRealMediaUrl(currentImage.path, currentProtocol, host, port, username, password)
+                    }
+                }
+                
+                castController.castImage(device, realImageUrl, currentImage.name) { success, message ->
                     if (success) {
                         Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                     } else {
