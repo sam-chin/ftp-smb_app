@@ -31,7 +31,13 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             }
             
             currentPort = serverSocket?.localPort ?: 0
-            log("[HTTP Proxy] Server started on 0.0.0.0:$currentPort (accepting connections from any interface)")
+            val localAddr = serverSocket?.inetAddress?.hostAddress
+            log("[HTTP Proxy] ===== SERVER STARTED =====")
+            log("[HTTP Proxy] Bound to: $localAddr:$currentPort")
+            log("[HTTP Proxy] Accepting connections from: ALL interfaces (0.0.0.0)")
+            log("[HTTP Proxy] Localhost URL: http://127.0.0.1:$currentPort/")
+            log("[HTTP Proxy] Network URL: http://<phone-ip>:$currentPort/")
+            log("[HTTP Proxy] ===========================")
             serverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
             
             serverScope?.launch {
@@ -39,7 +45,11 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                     try {
                         val clientSocket = serverSocket?.accept() ?: break
                         val remoteAddress = clientSocket.remoteSocketAddress
-                        log("[HTTP Proxy] New connection from: $remoteAddress")
+                        val localAddress = clientSocket.localSocketAddress
+                        log("[HTTP Proxy] ===== NEW CONNECTION =====")
+                        log("[HTTP Proxy] Remote: $remoteAddress")
+                        log("[HTTP Proxy] Local: $localAddress")
+                        log("[HTTP Proxy] ==========================")
                         launch {
                             handleClient(clientSocket, fileProvider)
                         }

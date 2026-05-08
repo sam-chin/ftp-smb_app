@@ -264,6 +264,23 @@ class CastController(private val context: Context, private val logCallback: ((St
                 log("Device Port: ${device.port}")
                 log("Control URL: ${device.controlUrl}")
                 log("Video URL: $videoUrl")
+                log("")
+                            
+                // 从 videoUrl 中提取手机IP和端口
+                val phoneIpAndPort = try {
+                    val url = java.net.URL(videoUrl)
+                    "${url.host}:${url.port}"
+                } catch (e: Exception) {
+                    "unknown"
+                }
+                            
+                log("⚠️ IMPORTANT: Kodi device at ${device.ip} must be able to access:")
+                log("   $videoUrl")
+                log("   Please ensure:")
+                log("   1. Phone ($phoneIpAndPort) and Kodi (${device.ip}) are on the same network")
+                log("   2. No firewall blocking port ${videoUrl.split(":")[2].split("/")[0]}")
+                log("   3. Android allows external connections to HTTP proxy")
+                log("")
                 
                 // 首先设置URI
                 val setUriSuccess = sendSetAVTransportURI(device, videoUrl, title)
@@ -331,27 +348,31 @@ class CastController(private val context: Context, private val logCallback: ((St
             log("Original videoUrl: $videoUrl")
             
             // ✅ 测试URL是否可访问（使用GET方法）
+            // 注意：这里只是测试HTTP代理是否工作，不代表Kodi能访问
             try {
                 val testUrl = java.net.URL(videoUrl)
+                log("Testing URL accessibility from local device...")
                 val connection = testUrl.openConnection() as java.net.HttpURLConnection
-                connection.requestMethod = "GET"  // ✅ 使用GET而不是HEAD
+                connection.requestMethod = "GET"
                 connection.connectTimeout = 2000
                 connection.readTimeout = 2000
                 
                 // 只读取响应头，不读取body
                 val responseCode = connection.responseCode
-                log("URL accessibility test: HTTP $responseCode")
+                log("Local URL test result: HTTP $responseCode")
                 
                 if (responseCode == 200 || responseCode == 206) {
-                    log("✅ URL is accessible! Kodi should be able to reach this URL.")
+                    log("✅ HTTP proxy is working locally")
+                    log("⚠️ Note: This doesn't guarantee Kodi can access the URL")
+                    log("   Kodi must be able to reach: $videoUrl")
                 } else {
-                    log("WARNING: URL returned HTTP $responseCode")
+                    log("❌ WARNING: HTTP proxy returned HTTP $responseCode")
                 }
                 
                 connection.disconnect()
             } catch (e: Exception) {
-                log("URL test failed: ${e.message}")
-                log("This suggests Kodi cannot access the URL!")
+                log("❌ Local URL test failed: ${e.message}")
+                log("This suggests HTTP proxy may not be working correctly")
             }
             
             // ✅ 对URL和标题进行XML转义
@@ -444,6 +465,7 @@ class CastController(private val context: Context, private val logCallback: ((St
                             "SOAPACTION: \"$soapAction\"\r\n" +
                             "Content-Length: $contentLength\r\n" +
                             "Connection: close\r\n" +
+                            "User-Agent: DLNA/1.50 UPnP/1.0 LanMediaPlayer/1.0\r\n" +  // ✅ 添加User-Agent
                             "\r\n"
                     
                     log("Request headers length: ${request.length} bytes")
