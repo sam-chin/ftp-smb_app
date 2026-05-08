@@ -130,10 +130,10 @@ class CastController(private val context: Context, private val logCallback: ((St
                 val deviceName = server ?: "DLNA Device"
                 val existingDevice = devices.find { it.ip == ip }
                 if (existingDevice == null) {
-                    // 从 location URL 中解析控制URL
-                    val controlUrl = extractControlUrl(location)
-                    log("Found DLNA device: $deviceName at $ip, Location: $location, ControlURL: $controlUrl")
-                    devices.add(CastDevice(deviceName, ip, port, "DLNA", controlUrl))
+                    // ✅ 从 location URL 中解析正确的控制URL和端口
+                    val (controlUrl, httpPort) = extractControlInfo(location)
+                    log("Found DLNA device: $deviceName at $ip:$httpPort, Location: $location, ControlURL: $controlUrl")
+                    devices.add(CastDevice(deviceName, ip, httpPort, "DLNA", controlUrl))
                 }
             }
         } catch (e: Exception) {
@@ -142,28 +142,42 @@ class CastController(private val context: Context, private val logCallback: ((St
         }
     }
     
-    private fun extractControlUrl(location: String): String? {
+    private fun extractControlInfo(location: String): Pair<String?, Int> {
         return try {
-            // 从 location URL 获取设备描述XML的基URL
-            val baseUrl = if (location.contains("://")) {
+            // 从 location URL 提取主机和端口
+            if (location.contains("://")) {
                 val urlParts = location.split("://")
                 if (urlParts.size >= 2) {
                     val hostAndPath = urlParts[1].split("/", limit = 2)
-                    if (hostAndPath.size >= 2) {
-                        "http://${hostAndPath[0]}/${hostAndPath[1]}"
+                    if (hostAndPath.isNotEmpty()) {
+                        val hostPart = hostAndPath[0]
+                        // 解析端口
+                        val port = if (hostPart.contains(":")) {
+                            hostPart.split(":")[1].toIntOrNull() ?: 80
+                        } else {
+                            80  // 默认HTTP端口
+                        }
+                        
+                        // 构建基URL
+                        val baseUrl = if (hostAndPath.size >= 2) {
+                            "http://$hostPart/${hostAndPath[1]}"
+                        } else {
+                            "http://$hostPart/"
+                        }
+                        
+                        Pair(baseUrl, port)
                     } else {
-                        location
+                        Pair(location, 80)
                     }
                 } else {
-                    location
+                    Pair(location, 80)
                 }
             } else {
-                location
+                Pair(location, 80)
             }
-            baseUrl
         } catch (e: Exception) {
-            log("Extract control URL error: ${e.message}")
-            null
+            log("Extract control info error: ${e.message}")
+            Pair(null, 80)
         }
     }
     
