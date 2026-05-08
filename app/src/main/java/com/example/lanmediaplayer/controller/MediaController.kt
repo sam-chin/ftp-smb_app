@@ -34,6 +34,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var smbClient: SmbClient? = null
     private var currentMediaFile: MediaFile? = null
     private var currentVideoUrl: String = ""
+    private var currentSmbShare: String = ""  // ✅ 保存当前SMB共享目录
     
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
@@ -205,6 +206,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
             }
             
             smbClient = SmbClient(logCallback)
+            
+            // 保存当前共享目录（用于DLNA投屏）
+            currentSmbShare = share
+            log("[Controller] Saved current SMB share: '$share'")
             
             // Connect without share first if share is empty
             val connectShare = if (share.isEmpty()) "" else share
@@ -554,6 +559,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // 获取当前协议
     fun getCurrentProtocol(): NetworkProtocol? {
         return currentMediaFile?.protocol
+    }
+    
+    // 获取当前SMB共享目录（用于DLNA投屏）
+    fun getCurrentSmbShare(): String {
+        return currentSmbShare
     }
     
     fun release() {
