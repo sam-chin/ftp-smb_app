@@ -517,7 +517,7 @@ class CastController(private val context: Context, private val logCallback: ((St
                         log("Full response: $response")
                         log("")
                         log("❌ DLNA投屏失败！可能的原因：")
-                        log("1. Kodi无法访问HTTP代理URL: $videoUrl")
+                        log("1. Kodi无法访问HTTP代理URL")
                         log("   - 请确认Kodi设备和手机在同一局域网")
                         log("   - 请检查Android防火墙是否阻止了外部访问")
                         log("   - 尝试在Kodi设备上用浏览器访问该URL")
