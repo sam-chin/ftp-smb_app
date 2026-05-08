@@ -37,24 +37,22 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
-    private val prefs = context.getSharedPreferences("smb_cache", Context.MODE_PRIVATE)
+    private val connectionPrefs = com.example.lanmediaplayer.ConnectionPreferences(context)
     
     init {
-        // 从 SharedPreferences 加载缓存
+        // 从 ConnectionPreferences 加载缓存的共享目录列表
         loadSmbSharesCache()
     }
     
     private fun loadSmbSharesCache() {
         try {
-            val allEntries = prefs.all
-            for ((key, value) in allEntries) {
-                if (value is String) {
-                    // 解析逗号分隔的共享列表
-                    val shares = value.split(",").filter { it.isNotBlank() }
-                    if (shares.isNotEmpty()) {
-                        smbSharesCache[key] = shares
-                        log("[Controller] Loaded cached shares for $key: ${shares.joinToString(", ")}")
-                    }
+            val cachedShares = connectionPrefs.getSmbSharesCache()
+            if (cachedShares.isNotEmpty()) {
+                // 使用主机名作为 key（从保存的连接信息中获取）
+                val host = connectionPrefs.getSmbHost()
+                if (host.isNotEmpty()) {
+                    smbSharesCache[host] = cachedShares
+                    log("[Controller] Loaded cached shares from preferences: ${cachedShares.joinToString(", ")}")
                 }
             }
         } catch (e: Exception) {
@@ -64,9 +62,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     private fun saveSmbSharesCache(host: String, shares: List<String>) {
         try {
-            val sharesStr = shares.joinToString(",")
-            prefs.edit().putString(host, sharesStr).apply()
-            log("[Controller] Saved cached shares for $host: ${shares.joinToString(", ")}")
+            // 更新内存缓存
+            smbSharesCache[host] = shares
+            // ✅ 保存到 ConnectionPreferences（持久化）
+            connectionPrefs.saveSmbSharesCache(shares)
+            log("[Controller] Saved cached shares to preferences: ${shares.joinToString(", ")}")
         } catch (e: Exception) {
             log("[Controller] Error saving SMB cache: ${e.message}")
         }

@@ -1216,6 +1216,18 @@ fun PlayerScreen(
     var showCastDialog by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }  // 控制按钮显示状态
     
+    // 添加状态用于显示拖动进度提示
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPositionText by remember { mutableStateOf("") }
+    
+    // 格式化时间为 mm:ss 格式
+    fun formatTime(ms: Long): String {
+        val totalSeconds = ms / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d", minutes, seconds)
+    }
+    
     // 自动隐藏控制按钮：无操作3秒后隐藏
     LaunchedEffect(showControls) {
         if (showControls) {
@@ -1261,6 +1273,57 @@ fun PlayerScreen(
                             showControls = (visibility == android.view.View.VISIBLE)
                         }
                     })
+                    
+                    // 在 PlayerView 上添加触摸监听，实现全局滑动手势
+                    setOnTouchListener { v, event ->
+                        when (event.action) {
+                            android.view.MotionEvent.ACTION_DOWN -> {
+                                isDragging = false
+                                showControls = true
+                                true
+                            }
+                            android.view.MotionEvent.ACTION_MOVE -> {
+                                val player = getPlayer()
+                                if (player != null && player.duration > 0) {
+                                    // 检测水平滑动
+                                    val historySize = event.historySize
+                                    if (historySize > 0) {
+                                        val currentX = event.x
+                                        val previousX = event.getHistoricalX(0)
+                                        val deltaX = currentX - previousX
+                                        
+                                        // 只有当水平移动距离足够大时才调整进度
+                                        if (Math.abs(deltaX) > 5) {
+                                            isDragging = true
+                                            val currentPosition = player.currentPosition
+                                            val duration = player.duration
+                                            
+                                            // 计算进度调整量：每像素调整5毫秒
+                                            val adjustMs = (deltaX * 5).toLong()
+                                            val newPosition = (currentPosition + adjustMs).coerceIn(0, duration)
+                                            
+                                            player.seekTo(newPosition)
+                                            
+                                            // 更新拖动提示文字
+                                            val newTime = formatTime(newPosition)
+                                            val totalTime = formatTime(duration)
+                                            dragPositionText = "$newTime / $totalTime"
+                                        }
+                                    }
+                                }
+                                true
+                            }
+                            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                                if (isDragging) {
+                                    isDragging = false
+                                    dragPositionText = ""
+                                    // 拖动结束后启动自动隐藏计时器
+                                }
+                                true
+                            }
+                            else -> false
+                        }
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize()
@@ -1302,6 +1365,23 @@ fun PlayerScreen(
                     contentDescription = "Cast",
                     tint = Color.White,
                     modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+        
+        // 显示拖动进度提示（在屏幕中央）
+        if (isDragging && dragPositionText.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = dragPositionText,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }

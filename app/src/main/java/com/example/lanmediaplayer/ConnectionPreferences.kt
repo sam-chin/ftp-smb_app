@@ -20,6 +20,7 @@ class ConnectionPreferences(context: Context) {
         const val KEY_SMB_PASSWORD = "smb_password"
         const val KEY_SMB_SHARE = "smb_share"
         const val KEY_SMB_DOMAIN = "smb_domain"
+        const val KEY_SMB_SHARES_CACHE = "smb_shares_cache"  // 缓存的共享目录列表
     }
     
     fun saveFtpConnection(
@@ -53,6 +54,22 @@ class ConnectionPreferences(context: Context) {
             putString(KEY_SMB_SHARE, share)
             putString(KEY_SMB_DOMAIN, domain)
             apply()
+        }
+    }
+    
+    // 保存 SMB 共享目录缓存
+    fun saveSmbSharesCache(shares: List<String>) {
+        val sharesStr = shares.joinToString(",")
+        prefs.edit().putString(KEY_SMB_SHARES_CACHE, sharesStr).apply()
+    }
+    
+    // 获取 SMB 共享目录缓存
+    fun getSmbSharesCache(): List<String> {
+        val sharesStr = prefs.getString(KEY_SMB_SHARES_CACHE, "") ?: ""
+        return if (sharesStr.isNotEmpty()) {
+            sharesStr.split(",").filter { it.isNotBlank() }
+        } else {
+            emptyList()
         }
     }
     
