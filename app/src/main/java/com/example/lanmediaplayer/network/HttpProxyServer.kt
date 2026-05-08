@@ -24,9 +24,16 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         return try {
             // ✅ 显式绑定到 0.0.0.0，允许所有网络接口访问
             val inetAddress = java.net.InetAddress.getByName("0.0.0.0")
-            serverSocket = if (port > 0) {
-                ServerSocket(port, 50, inetAddress)
-            } else {
+            
+            // ✅ 如果指定端口失败，尝试随机端口
+            serverSocket = try {
+                if (port > 0) {
+                    ServerSocket(port, 50, inetAddress)
+                } else {
+                    ServerSocket(0, 50, inetAddress)
+                }
+            } catch (e: java.net.BindException) {
+                log("[HTTP Proxy] Port $port is in use, trying random port...")
                 ServerSocket(0, 50, inetAddress)
             }
             

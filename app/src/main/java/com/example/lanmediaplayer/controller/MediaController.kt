@@ -519,8 +519,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
         
         // 只在第一次调用时启动代理服务器，后续调用复用同一个实例
         val port = if (currentPort <= 0) {
-            // 首次启动，传入 FileProvider
-            val newPort = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
+            // ✅ 尝试使用固定端口8080，更容易被外部设备访问
+            // 如果8080被占用，则使用随机端口（0）
+            val preferredPort = 8080
+            log("[Controller] Attempting to start HTTP proxy on port $preferredPort...")
+            
+            val newPort = httpProxy?.start(preferredPort, object : HttpProxyServer.FileProvider {
                 override suspend fun getFileStream(filePath: String, startOffset: Long): InputStream? {
                     return when (currentProtocol) {
                         is NetworkProtocol.FTP -> ftpRef?.getFileStream(filePath, startOffset)

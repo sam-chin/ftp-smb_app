@@ -390,14 +390,15 @@ class CastController(private val context: Context, private val logCallback: ((St
             
             log("DIDL-Lite metadata (encoded): ${didlLite.take(200)}...")
             
-            // ✅ 尝试发送有效的CurrentURIMetaData（根据UPnP标准）
+            // ✅ 关键修改：完全不发送CurrentURIMetaData
+            // 根据UPnP规范，这个字段是可选的
+            // Kodi等某些设备在没有元数据时反而能正常工作
             val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$escapedVideoUrl</CurrentURI>
-<CurrentURIMetaData>$didlLite</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
@@ -514,6 +515,19 @@ class CastController(private val context: Context, private val logCallback: ((St
                     // ✅ 打印完整响应以便调试
                     if (!response.contains("200 OK")) {
                         log("Full response: $response")
+                        log("")
+                        log("❌ DLNA投屏失败！可能的原因：")
+                        log("1. Kodi无法访问HTTP代理URL: $videoUrl")
+                        log("   - 请确认Kodi设备和手机在同一局域网")
+                        log("   - 请检查Android防火墙是否阻止了外部访问")
+                        log("   - 尝试在Kodi设备上用浏览器访问该URL")
+                        log("2. Kodi的DLNA渲染器配置问题")
+                        log("   - 打开Kodi → 设置 → 服务 → 控制")
+                        log("   - 确保'允许通过UPnP远程控制'已启用")
+                        log("3. SOAP请求格式问题")
+                        log("   - 已尝试简化SOAP请求（移除CurrentURIMetaData）")
+                        log("   - 如果仍然失败，可能需要抓包分析B站App的请求")
+                        log("")
                     }
                     
                     socket.close()
