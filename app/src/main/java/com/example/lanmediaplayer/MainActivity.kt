@@ -1247,12 +1247,6 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            // 点击屏幕时切换控制按钮显示/隐藏
-            .pointerInput(Unit) {
-                detectTapGestures {
-                    showControls = !showControls
-                }
-            }
     ) {
         AndroidView(
             factory = { ctx ->
@@ -1260,6 +1254,13 @@ fun PlayerScreen(
                     player = mediaController.getPlayer()
                     useController = true  // 使用 ExoPlayer 内置控制器（支持进度条拖动）
                     controllerShowTimeoutMs = 3000  // 控制器3秒后自动隐藏
+                    
+                    // 监听控制器可见性变化，同步自定义按钮的显示状态
+                    setControllerVisibilityListener(object : androidx.media3.ui.PlayerControlView.VisibilityListener {
+                        override fun onVisibilityChange(visibility: Int) {
+                            showControls = (visibility == android.view.View.VISIBLE)
+                        }
+                    })
                 }
             },
             modifier = Modifier.fillMaxSize()

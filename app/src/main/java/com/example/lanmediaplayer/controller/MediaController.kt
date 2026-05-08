@@ -37,6 +37,40 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
+    private val prefs = context.getSharedPreferences("smb_cache", Context.MODE_PRIVATE)
+    
+    init {
+        // 从 SharedPreferences 加载缓存
+        loadSmbSharesCache()
+    }
+    
+    private fun loadSmbSharesCache() {
+        try {
+            val allEntries = prefs.all
+            for ((key, value) in allEntries) {
+                if (value is String) {
+                    // 解析逗号分隔的共享列表
+                    val shares = value.split(",").filter { it.isNotBlank() }
+                    if (shares.isNotEmpty()) {
+                        smbSharesCache[key] = shares
+                        log("[Controller] Loaded cached shares for $key: ${shares.joinToString(", ")}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log("[Controller] Error loading SMB cache: ${e.message}")
+        }
+    }
+    
+    private fun saveSmbSharesCache(host: String, shares: List<String>) {
+        try {
+            val sharesStr = shares.joinToString(",")
+            prefs.edit().putString(host, sharesStr).apply()
+            log("[Controller] Saved cached shares for $host: ${shares.joinToString(", ")}")
+        } catch (e: Exception) {
+            log("[Controller] Error saving SMB cache: ${e.message}")
+        }
+    }
     
     private val connectionScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var browseScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -201,8 +235,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     log("[Controller] Fetching fresh shares list...")
                     val shares = smbClient?.listShares() ?: emptyList()
                     if (shares.isNotEmpty()) {
-                        // 更新缓存
+                        // 更新内存缓存
                         smbSharesCache[host] = shares
+                        // ✅ 保存到 SharedPreferences（持久化）
+                        saveSmbSharesCache(host, shares)
                         log("[Controller] Cached ${shares.size} shares for host: $host")
                         val sharesList = shares.joinToString(", ")
                         log("[Controller] Available shares: $sharesList")
