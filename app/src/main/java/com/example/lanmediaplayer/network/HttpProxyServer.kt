@@ -384,15 +384,9 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         // Remove leading slash from path to avoid double slashes
         val cleanPath = if (path.startsWith("/")) path.substring(1) else path
         
-        // URL encode the path to handle special characters
-        val encodedPath = try {
-            java.net.URLEncoder.encode(cleanPath, "UTF-8")
-                .replace("+", "%20") // URLEncoder encodes spaces as +, but we need %20
-        } catch (e: Exception) {
-            cleanPath // Fallback to original if encoding fails
-        }
-        
-        val url = "http://127.0.0.1:$currentPort/$encodedPath"
+        // ✅ 不进行URL编码，让Kodi直接访问原始路径
+        // HTTP代理会自动处理路径解析
+        val url = "http://127.0.0.1:$currentPort/$cleanPath"
         log("[HTTP Proxy] Generated URL: $url")
         return url
     }

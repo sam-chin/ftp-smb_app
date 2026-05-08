@@ -369,14 +369,14 @@ class CastController(private val context: Context, private val logCallback: ((St
             
             log("DIDL-Lite metadata (encoded): ${didlLite.take(200)}...")
             
-            // ✅ 尝试不发送CurrentURIMetaData（某些设备如Kodi可能更喜欢这样）
+            // ✅ 尝试发送有效的CurrentURIMetaData（根据UPnP标准）
             val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$escapedVideoUrl</CurrentURI>
-<CurrentURIMetaData></CurrentURIMetaData>
+<CurrentURIMetaData>$didlLite</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
@@ -434,22 +434,35 @@ class CastController(private val context: Context, private val logCallback: ((St
                     
                     log("Control path: $controlPath")
                     
-                    val contentLength = body.toByteArray(Charsets.UTF_8).size
+                    // ✅ 计算body的字节长度（不是整个request）
+                    val bodyBytes = body.toByteArray(Charsets.UTF_8)
+                    val contentLength = bodyBytes.size
+                    
                     val request = "POST /$controlPath HTTP/1.1\r\n" +
                             "Host: ${device.ip}:${device.port}\r\n" +
                             "Content-Type: text/xml; charset=\"utf-8\"\r\n" +
                             "SOAPACTION: \"$soapAction\"\r\n" +
                             "Content-Length: $contentLength\r\n" +
                             "Connection: close\r\n" +
-                            "\r\n" +
-                            body
+                            "\r\n"
                     
-                    log("Request length: ${request.length} bytes")
+                    log("Request headers length: ${request.length} bytes")
+                    log("Body length: $contentLength bytes")
                     log("Request preview: ${request.take(300)}...")
+                    
+                    // ✅ 打印完整的SOAP body用于调试
+                    if (soapAction.contains("SetAVTransportURI")) {
+                        log("=== Full SOAP Body ===")
+                        log(body)
+                        log("=== End of SOAP Body ===")
+                    }
                     
                     socket = java.net.Socket(device.ip, device.port)
                     socket.soTimeout = 5000
+                    
+                    // ✅ 先发送headers，再发送body
                     socket.outputStream.write(request.toByteArray(Charsets.UTF_8))
+                    socket.outputStream.write(bodyBytes)
                     socket.outputStream.flush()
                     
                     log("Request sent, waiting for response...")
@@ -475,6 +488,11 @@ class CastController(private val context: Context, private val logCallback: ((St
                     }
                     
                     log("Response received ($totalBytes bytes): ${response.take(200)}...")
+                    
+                    // ✅ 打印完整响应以便调试
+                    if (!response.contains("200 OK")) {
+                        log("Full response: $response")
+                    }
                     
                     socket.close()
                     
