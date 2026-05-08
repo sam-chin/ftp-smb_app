@@ -12,6 +12,7 @@ import com.example.lanmediaplayer.network.SmbClient
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.InputStream
+import java.net.NetworkInterface
 
 sealed class NetworkProtocol {
     object FTP : NetworkProtocol()
@@ -36,6 +37,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var currentVideoUrl: String = ""
     private var currentSmbShare: String = ""  // ✅ 保存当前SMB共享目录
     private var currentSmbBaseUrl: String = ""  // ✅ 保存SMB baseUrl（完整URL前缀）
+    private var localIpAddress: String = "127.0.0.1"  // ✅ 保存局域网IP地址
     
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
@@ -432,6 +434,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 
                 log("[Controller] HTTP Proxy started on port: $port")
                 
+                // ✅ 获取并保存局域网IP地址
+                localIpAddress = getLocalIpAddress()
+                log("[Controller] Local IP address: $localIpAddress, Proxy port: $port")
+                
                 if (port <= 0) {
                     log("[Controller] ERROR: Failed to start proxy server")
                     withContext(Dispatchers.Main) {
@@ -539,6 +545,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
             }) ?: -1
             currentPort = newPort
             log("[Controller] HTTP Proxy started on port: $currentPort")
+            
+            // ✅ 获取并保存局域网IP地址
+            localIpAddress = getLocalIpAddress()
+            log("[Controller] Local IP address: $localIpAddress, Proxy port: $currentPort")
+            
             newPort
         } else {
             // 已经启动，直接返回端口号
@@ -632,5 +643,32 @@ class MediaController(private val context: Context, private val logCallback: ((S
             is NetworkProtocol.FTP -> ftpClient?.getFileStream(path, 0)
             is NetworkProtocol.SMB -> smbClient?.getFileStream(path, 0)
         }
+    }
+    
+    // ✅ 获取手机的局域网IP地址
+    private fun getLocalIpAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                // 跳过回环接口和未启用的接口
+                if (networkInterface.isLoopback || !networkInterface.isUp) continue
+                
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    // 查找IPv4地址且不是回环地址
+                    if (address is java.net.Inet4Address && !address.isLoopbackAddress) {
+                        val ip = address.hostAddress
+                        log("[Controller] Found local IP: $ip")
+                        return ip
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log("[Controller] Error getting local IP: ${e.message}")
+            e.printStackTrace()
+        }
+        return "127.0.0.1"  // fallback
     }
 }
