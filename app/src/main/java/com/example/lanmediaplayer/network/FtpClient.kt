@@ -76,7 +76,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
     // ✅ 检查连接是否仍然有效
     fun isConnected(): Boolean {
         return try {
-            ftpClient?.isConnected == true && ftpClient?.isLoggedIn == true
+            controlSocket?.isConnected == true && !controlSocket?.isClosed!!
         } catch (e: Exception) {
             false
         }
