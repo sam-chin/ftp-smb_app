@@ -72,7 +72,11 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             
             // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
             log("[FTP] Creating socket with default configuration...")
+            
+            // ✅ 关键修复：创建Socket并绑定到IPv4地址
+            val localAddress = java.net.InetAddress.getByName("0.0.0.0")
             controlSocket = Socket()
+            controlSocket?.bind(java.net.InetSocketAddress(localAddress, 0))
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
