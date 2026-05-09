@@ -421,21 +421,53 @@ class CastController(private val context: Context, private val logCallback: ((St
                 log("=== Casting image to ${device.name} ===")
                 log("Device IP: ${device.ip}")
                 log("Device Port: ${device.port}")
+                log("Control URL: ${device.controlUrl}")
                 log("Image URL: $imageUrl")
                 
+                // ✅ 对URL和标题进行XML转义（和视频投屏保持一致）
+                val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                val escapedImageUrl = imageUrl.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                
+                // ✅ 根据文件扩展名确定MIME类型
+                val mimeType = when {
+                    imageUrl.endsWith(".jpg", ignoreCase = true) || imageUrl.endsWith(".jpeg", ignoreCase = true) -> "image/jpeg"
+                    imageUrl.endsWith(".png", ignoreCase = true) -> "image/png"
+                    imageUrl.endsWith(".gif", ignoreCase = true) -> "image/gif"
+                    imageUrl.endsWith(".bmp", ignoreCase = true) -> "image/bmp"
+                    imageUrl.endsWith(".webp", ignoreCase = true) -> "image/webp"
+                    else -> "image/jpeg"  // 默认JPEG
+                }
+                
+                log("Image MIME type: $mimeType")
+                
+                // ✅ 构建DIDL-Lite元数据（和视频格式一致）
+                val didlLite = "&lt;DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\"&gt;" +
+                        "&lt;item id=\"1\" parentID=\"0\" restricted=\"1\"&gt;" +
+                        "&lt;dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\"&gt;$escapedTitle&lt;/dc:title&gt;" +
+                        "&lt;upnp:class xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"&gt;object.item.imageItem&lt;/upnp:class&gt;" +
+                        "&lt;res protocolInfo=\"http-get:*:$mimeType:*\"&gt;$escapedImageUrl&lt;/res&gt;" +
+                        "&lt;/item&gt;" +
+                        "&lt;/DIDL-Lite&gt;"
+                
+                log("DIDL-Lite metadata (encoded): ${didlLite.take(200)}...")
+                
+                // ✅ 完整的SOAP请求（包含CurrentURIMetaData）
                 val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
-<CurrentURI>$imageUrl</CurrentURI>
-<CurrentURIMetaData>&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata:1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata:1-0/upnp/"&gt;&lt;item id="1" parentID="0" restricted="1"&gt;&lt;dc:title&gt;$title&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.imageItem&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:image/jpeg:*"&gt;$imageUrl&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
+<CurrentURI>$escapedImageUrl</CurrentURI>
+<CurrentURIMetaData>$didlLite</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
                 
+                log("SOAP request length: ${soapBody.length} bytes")
+                
                 val setUriSuccess = sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI", soapBody)
                 if (!setUriSuccess) {
+                    log("Failed to set image URI")
                     mainHandler.post {
                         onResult(false, "Failed to set image URI")
                     }
@@ -448,8 +480,10 @@ class CastController(private val context: Context, private val logCallback: ((St
                 
                 mainHandler.post {
                     if (playSuccess) {
-                        onResult(true, "Image sent to ${device.name}")
+                        log("Image casting successful!")
+                        onResult(true, "Image displayed on ${device.name}")
                     } else {
+                        log("Failed to display image")
                         onResult(false, "Failed to display image")
                     }
                 }
