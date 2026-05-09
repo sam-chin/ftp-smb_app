@@ -22,58 +22,41 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
-            // ✅ 尝试绑定到所有网络接口
-            // 首先尝试 0.0.0.0，如果失败则尝试具体IP
-            var inetAddress: java.net.InetAddress? = null
+            // ✅ 关键修复：强制使用IPv4地址绑定（解决小米澎湃OS问题）
+            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
             
-            try {
-                inetAddress = java.net.InetAddress.getByName("0.0.0.0")
-                log("[HTTP Proxy] Attempting to bind to 0.0.0.0 (all interfaces)")
-            } catch (e: Exception) {
-                log("[HTTP Proxy] Failed to get 0.0.0.0, trying to find local IP...")
-                // 回退：查找本地IP
-                val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
-                while (interfaces.hasMoreElements()) {
-                    val networkInterface = interfaces.nextElement()
-                    if (networkInterface.isLoopback || !networkInterface.isUp) continue
-                    
-                    val addresses = networkInterface.inetAddresses
-                    while (addresses.hasMoreElements()) {
-                        val address = addresses.nextElement()
-                        if (address is java.net.Inet4Address && !address.isLoopbackAddress) {
-                            inetAddress = address
-                            log("[HTTP Proxy] Found local IP: ${address.hostAddress}")
-                            break
-                        }
-                    }
-                    if (inetAddress != null) break
-                }
-            }
+            // ✅ 显式获取本地IPv4地址
+            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList()
+                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                ?.find { 
+                    it is java.net.Inet4Address && 
+                    !it.isLoopbackAddress && 
+                    !it.isAnyLocalAddress &&
+                    it.hostAddress.startsWith("192.168.")  // 优先选择局域网IP
+                } ?: java.net.InetAddress.getByName("0.0.0.0")
             
-            if (inetAddress == null) {
-                log("[HTTP Proxy] WARNING: Could not find suitable network interface!")
-                inetAddress = java.net.InetAddress.getByName("0.0.0.0")
-            }
+            log("[HTTP Proxy] Binding to IPv4 address: ${localIpv4Address.hostAddress}")
             
             // ✅ 如果指定端口失败，尝试随机端口
             serverSocket = try {
                 if (port > 0) {
-                    ServerSocket(port, 50, inetAddress)
+                    ServerSocket(port, 50, localIpv4Address)
                 } else {
-                    ServerSocket(0, 50, inetAddress)
+                    ServerSocket(0, 50, localIpv4Address)
                 }
             } catch (e: java.net.BindException) {
                 log("[HTTP Proxy] Port $port is in use, trying random port...")
-                ServerSocket(0, 50, inetAddress)
+                ServerSocket(0, 50, localIpv4Address)
             }
             
             currentPort = serverSocket?.localPort ?: 0
             val localAddr = serverSocket?.inetAddress?.hostAddress
             log("[HTTP Proxy] ===== SERVER STARTED =====")
-            log("[HTTP Proxy] Bound to: $localAddr:$currentPort")
-            log("[HTTP Proxy] Accepting connections from: ALL interfaces (0.0.0.0)")
+            log("[HTTP Proxy] Bound to: $localAddr:$currentPort (IPv4)")
+            log("[HTTP Proxy] Accepting connections from: ALL interfaces")
             log("[HTTP Proxy] Localhost URL: http://127.0.0.1:$currentPort/")
-            log("[HTTP Proxy] Network URL: http://<phone-ip>:$currentPort/")
+            log("[HTTP Proxy] Network URL: http://$localAddr:$currentPort/")
             log("[HTTP Proxy] ===========================")
             log("[HTTP Proxy]")
             log("[HTTP Proxy] ⚠️ IMPORTANT: If external devices cannot connect:")

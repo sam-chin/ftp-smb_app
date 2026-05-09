@@ -2047,90 +2047,132 @@ fun CastDeviceDialog(
         }
     }
     
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { 
-            Text(
-                "投屏设备",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
+    // ✅ 使用Dialog代替AlertDialog，以便更好地控制尺寸
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .widthIn(min = 400.dp, max = 600.dp)
+                .heightIn(min = 300.dp, max = 600.dp),  // ✅ 增加最大高度到600dp
+            shape = MaterialTheme.shapes.large,
+            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
             Column(
                 modifier = Modifier
-                    .widthIn(min = 400.dp)  // ✅ 设置最小宽度
-                    .heightIn(max = 500.dp)  // ✅ 增加最大高度到500dp
-                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth()
+                    .padding(24.dp)
             ) {
-                if (isSearching) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text("搜索设备中...")
-                    }
-                } else if (devices.isEmpty()) {
-                    Text(
-                        text = "未找到可投屏设备\n请确保电视或设备在同一局域网",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                } else {
-                    Text(
-                        text = "找到 ${devices.size} 个设备",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    devices.forEach { device: CastDevice ->
-                        Card(
+                // 标题
+                Text(
+                    text = "投屏设备",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                // 内容区域 - 可滚动
+                Column(
+                    modifier = Modifier
+                        .weight(1f)  // ✅ 占据剩余空间
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (isSearching) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp)  // ✅ 增加垂直间距到8dp
-                                .clickable { onDeviceSelected(device) },
-                            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                .padding(vertical = 32.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
+                            CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text("搜索设备中...", style = MaterialTheme.typography.bodyLarge)
+                        }
+                    } else if (devices.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.Cast,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "未找到可投屏设备",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "请确保电视或设备在同一局域网",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "找到 ${devices.size} 个设备",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        devices.forEach { device: CastDevice ->
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(20.dp),  // ✅ 增加内边距到20dp
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(vertical = 6.dp)
+                                    .clickable { onDeviceSelected(device) },
+                                elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
-                                Icon(
-                                    Icons.Default.Cast,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(36.dp)  // ✅ 增大图标到36dp
-                                )
-                                Spacer(modifier = Modifier.width(20.dp))  // ✅ 增加间距到20dp
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = device.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 18.sp  // ✅ 增大字体
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Cast,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(32.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(6.dp))  // ✅ 增加行间距
-                                    Text(
-                                        text = device.ip,
-                                        style = MaterialTheme.typography.bodyMedium,  // ✅ 增大IP字体
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 14.sp
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = device.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = device.ip,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.Default.ArrowForward,
+                                        contentDescription = "选择",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
-                                Icon(
-                                    Icons.Default.ArrowForward,
-                                    contentDescription = "选择",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)  // ✅ 增大箭头图标
-                                )
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
+                }
+                
+                // 底部按钮
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
                     TextButton(
                         onClick = {
                             isSearching = true
@@ -2138,22 +2180,20 @@ fun CastDeviceDialog(
                                 devices = foundDevices
                                 isSearching = false
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                        }
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("刷新设备")
+                        Text("刷新")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(onClick = onDismiss) {
+                        Text("取消")
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
         }
-    )
+    }
 }
 
 @Composable
