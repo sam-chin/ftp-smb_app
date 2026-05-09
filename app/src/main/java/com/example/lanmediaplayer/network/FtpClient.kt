@@ -116,10 +116,6 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 // ✅ 不使用任何超时参数，让系统决定
                 controlSocket?.connect(java.net.InetSocketAddress(address, port))
                 
-                // 连接成功后再设置超时
-                controlSocket?.soTimeout = 30000
-                controlSocket?.keepAlive = true
-                
                 log("[FTP] ✅ Connection established successfully!")
                 log("[FTP] Local address: ${controlSocket?.localAddress}")
                 log("[FTP] Remote address: ${controlSocket?.remoteSocketAddress}")
