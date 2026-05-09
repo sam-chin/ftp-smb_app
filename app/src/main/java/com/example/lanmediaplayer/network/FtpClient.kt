@@ -78,29 +78,10 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP]    - Check if server firewall allows connections from 192.168.11.6")
             log("[FTP]    - Verify router has no 'AP Isolation' enabled")
             
-            // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
+            // ✅ 使用最简单的socket配置（完全模仿ES文件浏览器）
             log("[FTP] Creating socket...")
             
-            // ✅ 关键修复：显式获取本地IPv4地址并绑定，避免使用IPv6接口
-            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
-                ?.toList()
-                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
-                ?.find { 
-                    it is java.net.Inet4Address && 
-                    !it.isLoopbackAddress && 
-                    !it.isAnyLocalAddress
-                }
-            
-            if (localIpv4Address != null) {
-                log("[FTP] Found local IPv4: ${localIpv4Address.hostAddress}")
-                controlSocket = Socket()
-                controlSocket?.bind(java.net.InetSocketAddress(localIpv4Address, 0))
-                log("[FTP] Bound to: ${controlSocket?.localAddress}")
-            } else {
-                log("[FTP] WARNING: Could not find local IPv4 address, using default")
-                controlSocket = Socket()
-            }
-            
+            controlSocket = Socket()
             controlSocket?.soTimeout = 30000
             controlSocket?.keepAlive = true
             
@@ -124,6 +105,14 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             } catch (e: Exception) {
                 log("[FTP] ❌ Connection failed: ${e.javaClass.simpleName}")
                 log("[FTP] Error: ${e.message}")
+                log("[FTP]")
+                log("[FTP] ⚠️ IMPORTANT: This is likely a Xiaomi HyperOS firewall issue!")
+                log("[FTP] Please try these steps:")
+                log("[FTP] 1. Close ES File Explorer or other FTP clients")
+                log("[FTP] 2. Settings → Apps → LAN Media → Battery Saver → No restrictions")
+                log("[FTP] 3. Security App → Network Assistant → Allow LAN access")
+                log("[FTP] 4. Settings → Connection & Sharing → Private DNS → Off")
+                log("[FTP] 5. Try restarting your phone")
                 throw e
             }
             

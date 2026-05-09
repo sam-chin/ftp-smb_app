@@ -77,6 +77,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // ✅ 关键修复：在应用启动时就强制使用IPv4（解决小米澎湃OS问题）
+        try {
+            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            android.util.Log.d("LAN Media", "Set preferIPv4Stack=true")
+        } catch (e: Exception) {
+            android.util.Log.e("LAN Media", "Failed to set preferIPv4Stack", e)
+        }
+        
         // ✅ 检查网络状态（针对小米澎湃OS优化）
         checkNetworkStatus()
         
