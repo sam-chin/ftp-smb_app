@@ -84,7 +84,22 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             
             // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
             log("[FTP] Creating socket with IPv4-only mode...")
+            
+            // ✅ 关键修复：显式获取本地IPv4地址并绑定
+            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList()
+                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                ?.find { 
+                    it is java.net.Inet4Address && 
+                    !it.isLoopbackAddress && 
+                    !it.isAnyLocalAddress &&
+                    it.hostAddress.startsWith("192.168.")  // 优先选择局域网IP
+                } ?: java.net.InetAddress.getByName("0.0.0.0")
+            
+            log("[FTP] Binding to local IPv4: ${localIpv4Address.hostAddress}")
+            
             controlSocket = Socket()
+            controlSocket?.bind(java.net.InetSocketAddress(localIpv4Address, 0))
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
