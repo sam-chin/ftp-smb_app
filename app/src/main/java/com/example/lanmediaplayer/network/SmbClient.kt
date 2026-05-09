@@ -65,6 +65,18 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Username: '$username'")
             log("[SMB-JCIFS] Domain: '$domain' (empty means auto-detect)")
             
+            // ✅ 智能检测IP类型，决定使用IPv4还是IPv6
+            val isIPv6 = host.contains(":") && !host.contains(".")
+            val preferIPv4 = !isIPv6
+            
+            if (preferIPv4) {
+                log("[SMB-JCIFS] Detected IPv4 address, forcing IPv4 stack...")
+                java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            } else {
+                log("[SMB-JCIFS] Detected IPv6 address, allowing IPv6 stack...")
+                java.lang.System.setProperty("java.net.preferIPv4Stack", "false")
+            }
+            
             // ✅ 小米澎湃OS诊断提示
             log("[SMB-JCIFS] 💡 If connection fails on Xiaomi HyperOS, please check:")
             log("[SMB-JCIFS]    1. Settings → Apps → LAN Media → Battery Saver → No restrictions")

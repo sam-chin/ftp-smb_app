@@ -49,11 +49,20 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         this@FtpClient.port = port
         
         return@withContext try {
-            // ✅ 关键修复：在连接前强制禁用IPv6
-            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
-            
             log("[FTP] === Starting connection ===")
             log("[FTP] Target: $host:$port")
+            
+            // ✅ 智能检测IP类型，决定使用IPv4还是IPv6
+            val isIPv6 = host.contains(":") && !host.contains(".")
+            val preferIPv4 = !isIPv6
+            
+            if (preferIPv4) {
+                log("[FTP] Detected IPv4 address, forcing IPv4 stack...")
+                java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            } else {
+                log("[FTP] Detected IPv6 address, allowing IPv6 stack...")
+                java.lang.System.setProperty("java.net.preferIPv4Stack", "false")
+            }
             
             // ✅ 小米澎湃OS诊断提示
             log("[FTP] 💡 If connection fails on Xiaomi HyperOS, please check:")
