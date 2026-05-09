@@ -5,11 +5,15 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
+import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.MulticastSocket
+import java.net.URL
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -172,37 +176,198 @@ class CastController(private val context: Context, private val logCallback: ((St
                 val deviceName = server ?: "DLNA Device"
                 val existingDevice = devices.find { it.ip == ip }
                 if (existingDevice == null) {
-                    // ✅ 从 location URL 中解析正确的控制URL和端口
-                    val (controlUrl, httpPort) = extractControlInfo(location)
+                    // ✅ 标准DLNA流程：拉取设备描述XML并解析controlURL
+                    log("📡 Found device: $deviceName at $ip")
+                    log("📍 Location URL: $location")
                     
-                    // ✅ 对于Kodi设备，尝试多个常见的control URL路径
-                    var finalControlUrl = controlUrl
-                    if (deviceName.contains("Kodi", ignoreCase = true)) {
-                        // Kodi可能使用这些路径之一
-                        val kodiPaths = listOf(
-                            "upnp/control/avtransport",
-                            "AVTransport/control",
-                            "MediaRenderer/AVTransport/Control",
-                            "ctl/AVTransport",
-                            "control/AVTransport"
-                        )
-                        
-                        // 尝试第一个路径，如果失败可以在日志中看到并手动切换
-                        finalControlUrl = "http://$ip:$httpPort/${kodiPaths[0]}"
-                        log("Kodi device detected")
-                        log("Trying control URL: $finalControlUrl")
-                        log("Alternative paths: ${kodiPaths.drop(1).joinToString(", ")}")
+                    scope.launch {
+                        try {
+                            // 第3步：拉取设备描述XML
+                            val xmlContent = fetchDeviceDescription(location)
+                            if (xmlContent != null) {
+                                // 第4步：解析XML获取AVTransport controlURL
+                                val controlUrl = parseAvTransportControlUrl(xmlContent, location)
+                                
+                                if (controlUrl != null) {
+                                    // 第5步：使用解析出的controlURL
+                                    log("✅ AVTransport controlURL: $controlUrl")
+                                    
+                                    // 从controlURL中提取端口（如果需要）
+                                    val finalPort = extractPortFromUrl(controlUrl) ?: port
+                                    
+                                    mainHandler.post {
+                                        devices.add(CastDevice(deviceName, ip, finalPort, "DLNA", controlUrl))
+                                        log("🎉 Device added with dynamic controlURL")
+                                    }
+                                } else {
+                                    log("⚠️ Failed to parse AVTransport controlURL from XML")
+                                    // 降级方案：使用默认路径
+                                    fallbackAddDevice(deviceName, ip, port, location)
+                                }
+                            } else {
+                                log("⚠️ Failed to fetch device description XML")
+                                // 降级方案：使用默认路径
+                                fallbackAddDevice(deviceName, ip, port, location)
+                            }
+                        } catch (e: Exception) {
+                            log("❌ Error processing device: ${e.message}")
+                            e.printStackTrace()
+                            // 降级方案
+                            fallbackAddDevice(deviceName, ip, port, location)
+                        }
                     }
-                    
-                    log("Found DLNA device: $deviceName at $ip:$httpPort")
-                    log("Location: $location")
-                    log("ControlURL: $finalControlUrl")
-                    devices.add(CastDevice(deviceName, ip, httpPort, "DLNA", finalControlUrl))
                 }
             }
         } catch (e: Exception) {
             log("Parse error: ${e.message}")
             e.printStackTrace()
+        }
+    }
+    
+    // ✅ 降级方案：当无法获取XML时使用默认路径
+    private fun fallbackAddDevice(deviceName: String, ip: String, port: Int, location: String?) {
+        val defaultPaths = listOf(
+            "upnp/control/AVTransport",
+            "upnp/control/avtransport",
+            "AVTransport/control",
+            "MediaRenderer/AVTransport/Control"
+        )
+        
+        val controlUrl = location?.let {
+            val baseUrl = it.substringBeforeLast("/")
+            "$baseUrl/${defaultPaths[0]}"
+        } ?: "http://$ip:$port/${defaultPaths[0]}"
+        
+        log("⚠️ Using fallback controlURL: $controlUrl")
+        devices.add(CastDevice(deviceName, ip, port, "DLNA", controlUrl))
+    }
+    
+    // ✅ 第3步：拉取设备描述XML文件
+    private suspend fun fetchDeviceDescription(locationUrl: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                log("📥 Fetching device description from: $locationUrl")
+                val url = URL(locationUrl)
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 3000
+                connection.readTimeout = 3000
+                
+                val responseCode = connection.responseCode
+                if (responseCode == 200) {
+                    val content = connection.inputStream.bufferedReader().use { it.readText() }
+                    log("✅ Device description fetched (${content.length} bytes)")
+                    content
+                } else {
+                    log("❌ Failed to fetch XML: HTTP $responseCode")
+                    null
+                }
+            } catch (e: Exception) {
+                log("❌ Fetch error: ${e.message}")
+                null
+            }
+        }
+    }
+    
+    // ✅ 第4步：解析XML获取AVTransport controlURL
+    private fun parseAvTransportControlUrl(xmlContent: String, baseUrl: String): String? {
+        return try {
+            log("🔍 Parsing device description XML...")
+            
+            val factory = XmlPullParserFactory.newInstance()
+            val parser = factory.newPullParser()
+            parser.setInput(StringReader(xmlContent))
+            
+            var eventType = parser.eventType
+            var inServiceList = false
+            var inService = false
+            var serviceType = ""
+            var controlUrlPath = ""
+            
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                when (eventType) {
+                    XmlPullParser.START_TAG -> {
+                        val tagName = parser.name
+                        
+                        if (tagName == "serviceList") {
+                            inServiceList = true
+                        } else if (inServiceList && tagName == "service") {
+                            inService = true
+                            serviceType = ""
+                            controlUrlPath = ""
+                        } else if (inService && tagName == "serviceType") {
+                            serviceType = parser.nextText()
+                        } else if (inService && tagName == "controlURL") {
+                            controlUrlPath = parser.nextText()
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        val tagName = parser.name
+                        
+                        if (tagName == "service" && inService) {
+                            // 检查是否是AVTransport服务
+                            if (serviceType.contains("AVTransport", ignoreCase = true)) {
+                                log("✅ Found AVTransport service")
+                                log("   Service Type: $serviceType")
+                                log("   Control URL Path: $controlUrlPath")
+                                
+                                // 构建完整的controlURL
+                                val fullControlUrl = buildAbsoluteUrl(baseUrl, controlUrlPath)
+                                log("   Full Control URL: $fullControlUrl")
+                                
+                                return fullControlUrl
+                            }
+                            inService = false
+                        } else if (tagName == "serviceList") {
+                            inServiceList = false
+                        }
+                    }
+                }
+                eventType = parser.next()
+            }
+            
+            log("⚠️ AVTransport service not found in XML")
+            null
+        } catch (e: Exception) {
+            log("❌ XML parsing error: ${e.message}")
+            e.printStackTrace()
+            null
+        }
+    }
+    
+    // 构建绝对URL（处理相对路径）
+    private fun buildAbsoluteUrl(baseUrl: String, relativePath: String): String {
+        return try {
+            if (relativePath.startsWith("http://") || relativePath.startsWith("https://")) {
+                // 已经是绝对URL
+                relativePath
+            } else {
+                // 相对路径，需要拼接
+                val base = baseUrl.substringBeforeLast("/")
+                val path = if (relativePath.startsWith("/")) {
+                    relativePath
+                } else {
+                    "/$relativePath"
+                }
+                "$base$path"
+            }
+        } catch (e: Exception) {
+            log("Build URL error: ${e.message}")
+            relativePath
+        }
+    }
+    
+    // 从URL中提取端口
+    private fun extractPortFromUrl(url: String): Int? {
+        return try {
+            if (url.contains("://")) {
+                val hostPart = url.split("://")[1].split(":")[1].split("/")[0]
+                hostPart.toIntOrNull()
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
         }
     }
     
