@@ -571,7 +571,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         } catch (e: Exception) {
             cleanPath
         }
-        return "http://127.0.0.1:$port/$encodedPath"
+        // ✅ 使用局域网IP而不是127.0.0.1，避免某些设备无法访问
+        return "http://$localIpAddress:$port/$encodedPath"
     }
     
     fun getVideoUrl(): String {
