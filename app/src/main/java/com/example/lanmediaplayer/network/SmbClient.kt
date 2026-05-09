@@ -433,10 +433,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 val filePath: String
                 if (normalizedPath.isEmpty()) {
-                    // 共享根目录下的文件：/fileName
+                    // 共享根目录下的文件：/fileName（不包含共享名）
                     filePath = "/$fileName"
                 } else {
-                    // 子目录下的文件：/folder/subfolder/fileName
+                    // 子目录下的文件：/folder/subfolder/fileName（不包含共享名）
                     filePath = "/$normalizedPath/$fileName"
                 }
                 

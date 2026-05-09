@@ -619,56 +619,61 @@ fun MainScreen(
                     addLog("Current path: '$currentPath'")
                     addLog("isAtSmbRoot: $isAtSmbRoot")
                     
-                    if (currentPath == "/" || currentPath.matches(Regex("^/[^/]+$"))) {
-                        // 当前在SMB根目录("/")或共享根目录("/shareName")，返回到SMB根目录显示所有共享
-                        if (!isAtSmbRoot) {
-                            addLog("Returning to SMB root from share: $currentPath")
-                            isAtSmbRoot = true
-                            currentPath = "/"
-                            browserTitle = "选择共享目录"
-                            files = availableShares.map { shareName ->
-                                MediaFile(
-                                    name = shareName,
-                                    path = "/$shareName",
-                                    size = 0,
-                                    isDirectory = true,
-                                    protocol = NetworkProtocol.SMB
-                                )
-                            }
-                            addLog("Returned to SMB root, showing ${files.size} shares")
-                        } else {
-                            addLog("Already at SMB root, ignoring back click")
-                        }
+                    if (currentPath == "/") {
+                        // 当前在SMB根目录("/")，已经在共享列表页面，忽略返回
+                        addLog("Already at SMB root, ignoring back click")
                     } else {
-                        // 当前在子目录中，返回上级目录
+                        // 当前在共享目录或子目录中，返回上级目录
                         val parentPath = currentPath.substringBeforeLast("/")
                         val newPath = if (parentPath.isEmpty()) "/" else parentPath
-                        addLog("Navigating to parent directory: '$newPath'")
+                        addLog("Navigating to parent directory: '$currentPath' -> '$newPath'")
                         
-                        currentPath = newPath
-                        browserTitle = if (newPath == "/") {
-                            "选择共享目录"
+                        if (newPath == "/") {
+                            // 返回到共享根目录，显示该共享下的文件
+                            addLog("Returning to share root: $newPath")
+                            currentPath = newPath
+                            browserTitle = "选择共享目录"
+                            isLoading = true
+                            coroutineScope.launch {
+                                mediaController.browseFiles(newPath, selectedProtocol, object : MediaController.MediaCallback {
+                                    override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                        files = loadedFiles
+                                        isLoading = false
+                                        addLog("Loaded ${loadedFiles.size} files in share root")
+                                    }
+                                    
+                                    override fun onError(error: String) {
+                                        errorMessage = error
+                                        isLoading = false
+                                        addLog("Error browsing share root: $error")
+                                    }
+                                    
+                                    override fun onPlaybackStateChanged(state: Int) {}
+                                })
+                            }
                         } else {
-                            newPath.substringAfterLast("/")
-                        }
-                        
-                        isLoading = true
-                        coroutineScope.launch {
-                            mediaController.browseFiles(newPath, selectedProtocol, object : MediaController.MediaCallback {
-                                override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
-                                    files = loadedFiles
-                                    isLoading = false
-                                    addLog("Loaded ${loadedFiles.size} files in $newPath")
-                                }
-                                
-                                override fun onError(error: String) {
-                                    errorMessage = error
-                                    isLoading = false
-                                    addLog("Error browsing $newPath: $error")
-                                }
-                                
-                                override fun onPlaybackStateChanged(state: Int) {}
-                            })
+                            // 返回到子目录的父目录
+                            currentPath = newPath
+                            browserTitle = newPath.substringAfterLast("/")
+                            
+                            isLoading = true
+                            coroutineScope.launch {
+                                mediaController.browseFiles(newPath, selectedProtocol, object : MediaController.MediaCallback {
+                                    override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
+                                        files = loadedFiles
+                                        isLoading = false
+                                        addLog("Loaded ${loadedFiles.size} files in $newPath")
+                                    }
+                                    
+                                    override fun onError(error: String) {
+                                        errorMessage = error
+                                        isLoading = false
+                                        addLog("Error browsing $newPath: $error")
+                                    }
+                                    
+                                    override fun onPlaybackStateChanged(state: Int) {}
+                                })
+                            }
                         }
                     }
                 } else if (currentPath != "/") {
