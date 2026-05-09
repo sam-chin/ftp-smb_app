@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URLDecoder
 import java.io.File
 import java.io.FileOutputStream
@@ -182,10 +183,28 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     log("[SMB-JCIFS] Auto-detecting available shares...")
                     // 只在没有缓存时才重新扫描
                     if (availableShares.isEmpty()) {
-                        log("[SMB-JCIFS] ⚠️ Share enumeration may be blocked by Xiaomi firewall")
-                        log("[SMB-JCIFS] If this fails, please specify the share name directly")
-                        availableShares = listShares()
-                        log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
+                        log("[SMB-JCIFS] ⚠️ Share enumeration may be slow on Windows servers")
+                        log("[SMB-JCIFS] If this takes too long, please specify the share name directly")
+                        
+                        // ✅ 添加超时保护，最多等待8秒
+                        val shares = try {
+                            withTimeoutOrNull(8000) {
+                                listShares()
+                            }
+                        } catch (e: Exception) {
+                            log("[SMB-JCIFS] Share enumeration error: ${e.message}")
+                            null
+                        }
+                        
+                        if (shares != null && shares.isNotEmpty()) {
+                            availableShares = shares
+                            log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
+                        } else {
+                            log("[SMB-JCIFS] ⚠️ Share enumeration timed out or failed")
+                            log("[SMB-JCIFS] Please reconnect and specify the share name manually")
+                            log("[SMB-JCIFS] Common shares: gx, share, public, media")
+                            // 不设置connected = true，让用户重新连接并指定共享名
+                        }
                     } else {
                         log("[SMB-JCIFS] Using cached shares: ${availableShares.size} shares")
                     }
@@ -297,8 +316,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             var shareEnumContext: CIFSContext? = null
             try {
                 val props = Properties()
-                props.setProperty("jcifs.smb.client.responseTimeout", "30000")
-                props.setProperty("jcifs.smb.client.soTimeout", "30000")
+                // ✅ 缩短超时时间，避免长时间等待
+                props.setProperty("jcifs.smb.client.responseTimeout", "5000")  // 5秒
+                props.setProperty("jcifs.smb.client.soTimeout", "5000")  // 5秒
+                props.setProperty("jcifs.smb.client.connTimeout", "3000")  // 3秒
                 props.setProperty("jcifs.smb.client.username", username)
                 props.setProperty("jcifs.smb.client.password", password)
                 if (domain.isNotEmpty()) {

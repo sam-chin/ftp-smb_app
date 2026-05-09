@@ -583,6 +583,39 @@ class MediaController(private val context: Context, private val logCallback: ((S
         return urlWithLocalIp
     }
     
+    // ✅ 获取图片的HTTP代理URL（用于DLNA投屏）
+    suspend fun getImageUrl(imageFile: MediaFile, callback: MediaCallback): String? {
+        return try {
+            log("[Controller] === Getting Image URL for DLNA ===")
+            log("[Controller] Image path: ${imageFile.path}")
+            log("[Controller] Protocol: ${imageFile.protocol}")
+            
+            // 启动HTTP代理（如果还没启动）
+            val port = ensureHttpProxyStarted(imageFile, object : MediaCallback {
+                override fun onFilesLoaded(files: List<MediaFile>) {}
+                override fun onError(error: String) {
+                    log("[Controller] HTTP proxy error: $error")
+                }
+                override fun onPlaybackStateChanged(state: Int) {}
+            })
+            
+            if (port <= 0) {
+                log("[Controller] ERROR: Failed to start HTTP proxy")
+                return null
+            }
+            
+            // 生成HTTP代理URL
+            val imageUrl = httpProxy?.getUrl(imageFile.path)
+            log("[Controller] Image HTTP URL: $imageUrl")
+            
+            imageUrl
+        } catch (e: Exception) {
+            log("[Controller] Error getting image URL: ${e.message}")
+            e.printStackTrace()
+            null
+        }
+    }
+    
     // 获取当前媒体的真实路径（用于DLNA投屏）
     fun getCurrentMediaPath(): String? {
         return currentMediaFile?.path

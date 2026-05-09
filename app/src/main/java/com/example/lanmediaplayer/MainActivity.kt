@@ -630,12 +630,12 @@ fun MainScreen(
                         
                         if (newPath == "/") {
                             // 返回到共享根目录，显示该共享下的文件
-                            addLog("Returning to share root: $newPath")
-                            currentPath = newPath
+                            addLog("Returning to share root")
+                            currentPath = ""  // ✅ 使用空字符串而不是"/"
                             browserTitle = "选择共享目录"
                             isLoading = true
                             coroutineScope.launch {
-                                mediaController.browseFiles(newPath, selectedProtocol, object : MediaController.MediaCallback {
+                                mediaController.browseFiles("", selectedProtocol, object : MediaController.MediaCallback {
                                     override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
                                         files = loadedFiles
                                         isLoading = false
@@ -1907,28 +1907,40 @@ fun ImageViewerScreen(
                 showCastDialog = false
                 val currentImage = imageFiles[pagerState.currentPage]
                 
-                // 构建真实的SMB/FTP URL（DLNA设备可以直接访问）
-                val realImageUrl = when (currentProtocol) {
-                    is NetworkProtocol.SMB -> {
-                        val username = connectionPrefs.getSmbUsername()
-                        val password = connectionPrefs.getSmbPassword()
-                        // ✅ 使用 MediaController 的 getSmbFullUrl 方法构建完整URL
-                        mediaController.getSmbFullUrl(currentImage.path, username, password)
-                    }
-                    is NetworkProtocol.FTP -> {
-                        val host = connectionPrefs.getFtpHost()
-                        val port = connectionPrefs.getFtpPort()
-                        val username = connectionPrefs.getFtpUsername()
-                        val password = connectionPrefs.getFtpPassword()
-                        castController.buildRealMediaUrl(currentImage.path, currentProtocol, host, port, username, password)
-                    }
-                }
+                addLog("=== Casting image to DLNA ===")
+                addLog("Image path: ${currentImage.path}")
+                addLog("Protocol: $currentProtocol")
                 
-                castController.castImage(device, realImageUrl, currentImage.name) { success, message ->
-                    if (success) {
-                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                    } else {
-                        onError(message)
+                // ✅ 启动HTTP代理并获取HTTP URL（DLNA设备通过HTTP访问）
+                coroutineScope.launch {
+                    try {
+                        val imageUrl = mediaController.getImageUrl(currentImage, object : MediaController.MediaCallback {
+                            override fun onFilesLoaded(files: List<MediaFile>) {}
+                            
+                            override fun onError(error: String) {
+                                addLog("Failed to get image URL: $error")
+                                onError(error)
+                            }
+                            
+                            override fun onPlaybackStateChanged(state: Int) {}
+                        })
+                        
+                        if (imageUrl != null && imageUrl.isNotEmpty()) {
+                            addLog("Casting with HTTP URL: $imageUrl")
+                            castController.castImage(device, imageUrl, currentImage.name) { success, message ->
+                                if (success) {
+                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                } else {
+                                    onError(message)
+                                }
+                            }
+                        } else {
+                            onError("Failed to start HTTP proxy for image")
+                        }
+                    } catch (e: Exception) {
+                        addLog("Error casting image: ${e.message}")
+                        e.printStackTrace()
+                        onError("Error: ${e.message}")
                     }
                 }
             }

@@ -432,15 +432,15 @@ class CastController(private val context: Context, private val logCallback: ((St
             
             log("DIDL-Lite metadata (encoded): ${didlLite.take(200)}...")
             
-            // ✅ 关键修改：完全不发送CurrentURIMetaData
-            // 根据UPnP规范，这个字段是可选的
-            // Kodi等某些设备在没有元数据时反而能正常工作
+            // ✅ 关键修复：必须包含CurrentURIMetaData字段
+            // Kodi需要这个字段才能正确解析和播放媒体
             val soapBody = """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
 <s:Body>
 <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
 <InstanceID>0</InstanceID>
 <CurrentURI>$escapedVideoUrl</CurrentURI>
+<CurrentURIMetaData>$didlLite</CurrentURIMetaData>
 </u:SetAVTransportURI>
 </s:Body>
 </s:Envelope>"""
