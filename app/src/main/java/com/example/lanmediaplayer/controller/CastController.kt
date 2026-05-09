@@ -43,12 +43,18 @@ class CastController(private val context: Context, private val logCallback: ((St
         
         searchJob = scope.launch {
             try {
-                searchSsdpDevices()
+                // ✅ 发送多次SSDP请求，提高发现成功率
+                for (i in 1..3) {
+                    log("Sending SSDP search request ${i}/3...")
+                    searchSsdpDevices()
+                    if (i < 3) delay(2000)  // 每次搜索间隔2秒
+                }
                 
-                delay(5000)
+                delay(2000)  // 最后等待2秒接收响应
                 
                 mainHandler.post {
                     isSearching = false
+                    log("Search completed, found ${devices.size} devices")
                     onDevicesFound(devices.toList())
                 }
             } catch (e: Exception) {
@@ -79,14 +85,14 @@ class CastController(private val context: Context, private val logCallback: ((St
                     val packet = DatagramPacket(searchBytes, searchBytes.size, multicastAddress, 1900)
                     
                     val socket = DatagramSocket()
-                    socket.soTimeout = 3000
+                    socket.soTimeout = 5000  // ✅ 增加超时时间到5秒
                     socket.send(packet)
                     
                     val buffer = ByteArray(4096)
                     val responsePacket = DatagramPacket(buffer, buffer.size)
                     
                     var foundCount = 0
-                    val endTime = System.currentTimeMillis() + 5000
+                    val endTime = System.currentTimeMillis() + 8000  // ✅ 增加搜索时间到8秒
                     
                     while (System.currentTimeMillis() < endTime && foundCount < 20) {
                         try {
@@ -519,7 +525,11 @@ class CastController(private val context: Context, private val logCallback: ((St
                         log("❌ DLNA投屏失败！可能的原因：")
                         log("1. Kodi无法访问HTTP代理URL")
                         log("   - 请确认Kodi设备和手机在同一局域网")
-                        log("   - 请检查Android防火墙是否阻止了外部访问")
+                        log("   - ⚠️ 小米澎湃OS用户请特别注意：")
+                        log("     a. 设置 → 更多设置 → 开发者选项 → 关闭'MIUI优化'")
+                        log("     b. 设置 → 应用设置 → 应用管理 → 本应用 → 省电策略 → 无限制")
+                        log("     c. 设置 → 连接与共享 → 私人DNS → 关闭")
+                        log("     d. 手机管家 → 网络助手 → 允许局域网访问")
                         log("   - 尝试在Kodi设备上用浏览器访问该URL")
                         log("2. Kodi的DLNA渲染器配置问题")
                         log("   - 打开Kodi → 设置 → 服务 → 控制")

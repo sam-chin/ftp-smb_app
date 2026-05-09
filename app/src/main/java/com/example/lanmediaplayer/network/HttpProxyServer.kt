@@ -22,8 +22,38 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
-            // ✅ 显式绑定到 0.0.0.0，允许所有网络接口访问
-            val inetAddress = java.net.InetAddress.getByName("0.0.0.0")
+            // ✅ 尝试绑定到所有网络接口
+            // 首先尝试 0.0.0.0，如果失败则尝试具体IP
+            var inetAddress: java.net.InetAddress? = null
+            
+            try {
+                inetAddress = java.net.InetAddress.getByName("0.0.0.0")
+                log("[HTTP Proxy] Attempting to bind to 0.0.0.0 (all interfaces)")
+            } catch (e: Exception) {
+                log("[HTTP Proxy] Failed to get 0.0.0.0, trying to find local IP...")
+                // 回退：查找本地IP
+                val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+                while (interfaces.hasMoreElements()) {
+                    val networkInterface = interfaces.nextElement()
+                    if (networkInterface.isLoopback || !networkInterface.isUp) continue
+                    
+                    val addresses = networkInterface.inetAddresses
+                    while (addresses.hasMoreElements()) {
+                        val address = addresses.nextElement()
+                        if (address is java.net.Inet4Address && !address.isLoopbackAddress) {
+                            inetAddress = address
+                            log("[HTTP Proxy] Found local IP: ${address.hostAddress}")
+                            break
+                        }
+                    }
+                    if (inetAddress != null) break
+                }
+            }
+            
+            if (inetAddress == null) {
+                log("[HTTP Proxy] WARNING: Could not find suitable network interface!")
+                inetAddress = java.net.InetAddress.getByName("0.0.0.0")
+            }
             
             // ✅ 如果指定端口失败，尝试随机端口
             serverSocket = try {
@@ -45,6 +75,21 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             log("[HTTP Proxy] Localhost URL: http://127.0.0.1:$currentPort/")
             log("[HTTP Proxy] Network URL: http://<phone-ip>:$currentPort/")
             log("[HTTP Proxy] ===========================")
+            log("[HTTP Proxy]")
+            log("[HTTP Proxy] ⚠️ IMPORTANT: If external devices cannot connect:")
+            log("[HTTP Proxy] For Xiaomi HyperOS/MIUI users:")
+            log("[HTTP Proxy] 1. Settings → Additional Settings → Developer Options → Disable 'MIUI Optimization'")
+            log("[HTTP Proxy] 2. Settings → Apps → Manage Apps → Your App → Battery Saver → No restrictions")
+            log("[HTTP Proxy] 3. Settings → Connection & Sharing → Private DNS → Off")
+            log("[HTTP Proxy] 4. Security App → Network Assistant → Allow LAN access")
+            log("[HTTP Proxy] 5. WLAN → WLAN Assistant → Disable 'Smart network acceleration'")
+            log("[HTTP Proxy]")
+            log("[HTTP Proxy] For other Android devices:")
+            log("[HTTP Proxy] 1. Check Android firewall settings")
+            log("[HTTP Proxy] 2. Disable Private DNS (Settings → Network → Private DNS → Off)")
+            log("[HTTP Proxy] 3. Check if any third-party firewall app is blocking port $currentPort")
+            log("[HTTP Proxy] 4. Try disabling 'USB debugging network restrictions' in Developer Options")
+            log("[HTTP Proxy]")
             serverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
             
             serverScope?.launch {
@@ -53,9 +98,20 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                         val clientSocket = serverSocket?.accept() ?: break
                         val remoteAddress = clientSocket.remoteSocketAddress
                         val localAddress = clientSocket.localSocketAddress
+                        
+                        // ✅ 检查是否是外部设备连接
+                        val remoteIp = remoteAddress.toString().split(":")[0].substring(1)
+                        val isExternalConnection = !remoteIp.startsWith("127.0.0.1") && !remoteIp.startsWith("::1")
+                        
                         log("[HTTP Proxy] ===== NEW CONNECTION =====")
                         log("[HTTP Proxy] Remote: $remoteAddress")
                         log("[HTTP Proxy] Local: $localAddress")
+                        if (isExternalConnection) {
+                            log("[HTTP Proxy] ✅ EXTERNAL device connected: $remoteIp")
+                            log("[HTTP Proxy] This means HTTP proxy is accessible from network!")
+                        } else {
+                            log("[HTTP Proxy] Local connection (self-test)")
+                        }
                         log("[HTTP Proxy] ==========================")
                         launch {
                             handleClient(clientSocket, fileProvider)

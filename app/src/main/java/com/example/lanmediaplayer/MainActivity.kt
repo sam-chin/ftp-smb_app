@@ -1997,10 +1997,19 @@ fun CastDeviceDialog(
     
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("投屏设备") },
+        title = { 
+            Text(
+                "投屏设备",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
         text = {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState())
+                modifier = Modifier
+                    .widthIn(min = 400.dp)  // ✅ 设置最小宽度
+                    .heightIn(max = 500.dp)  // ✅ 增加最大高度到500dp
+                    .verticalScroll(rememberScrollState())
             ) {
                 if (isSearching) {
                     Row(
@@ -2019,44 +2028,57 @@ fun CastDeviceDialog(
                     )
                 } else {
                     Text(
-                        text = "选择设备",
-                        style = MaterialTheme.typography.titleSmall
+                        text = "找到 ${devices.size} 个设备",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     devices.forEach { device: CastDevice ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable { onDeviceSelected(device) }
+                                .padding(vertical = 8.dp)  // ✅ 增加垂直间距到8dp
+                                .clickable { onDeviceSelected(device) },
+                            elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp)
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(12.dp),
+                                    .padding(20.dp),  // ✅ 增加内边距到20dp
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     Icons.Default.Cast,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(36.dp)  // ✅ 增大图标到36dp
                                 )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
+                                Spacer(modifier = Modifier.width(20.dp))  // ✅ 增加间距到20dp
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = device.name,
-                                        style = MaterialTheme.typography.bodyLarge
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 18.sp  // ✅ 增大字体
                                     )
+                                    Spacer(modifier = Modifier.height(6.dp))  // ✅ 增加行间距
                                     Text(
                                         text = device.ip,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        style = MaterialTheme.typography.bodyMedium,  // ✅ 增大IP字体
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 14.sp
                                     )
                                 }
+                                Icon(
+                                    Icons.Default.ArrowForward,
+                                    contentDescription = "选择",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)  // ✅ 增大箭头图标
+                                )
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     TextButton(
                         onClick = {
                             isSearching = true
@@ -2067,6 +2089,8 @@ fun CastDeviceDialog(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("刷新设备")
                     }
                 }
