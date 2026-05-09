@@ -49,6 +49,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         this@FtpClient.port = port
         
         return@withContext try {
+            // ✅ 关键修复：在连接前强制禁用IPv6
+            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            
             log("[FTP] === Starting connection ===")
             log("[FTP] Target: $host:$port")
             
@@ -71,12 +74,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP]    - Verify router has no 'AP Isolation' enabled")
             
             // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
-            log("[FTP] Creating socket with default configuration...")
-            
-            // ✅ 关键修复：创建Socket并绑定到IPv4地址
-            val localAddress = java.net.InetAddress.getByName("0.0.0.0")
+            log("[FTP] Creating socket with IPv4-only mode...")
             controlSocket = Socket()
-            controlSocket?.bind(java.net.InetSocketAddress(localAddress, 0))
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
@@ -94,6 +93,8 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
                 controlSocket?.keepAlive = true
                 
                 log("[FTP] ✅ Connection established successfully!")
+                log("[FTP] Local address: ${controlSocket?.localAddress}")
+                log("[FTP] Remote address: ${controlSocket?.remoteSocketAddress}")
             } catch (e: Exception) {
                 log("[FTP] ❌ Connection failed: ${e.javaClass.simpleName}")
                 log("[FTP] Error: ${e.message}")
