@@ -75,6 +75,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // ✅ 检查网络状态（针对小米澎湃OS优化）
+        checkNetworkStatus()
+        
         // Create log callback function
         val logCallback: (String) -> Unit = { message ->
             runOnUiThread {
@@ -115,6 +118,27 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 }
+            }
+        }
+    }
+    
+    // ✅ 检查网络状态（针对小米澎湃OS）
+    private fun checkNetworkStatus() {
+        val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        
+        if (capabilities == null) {
+            debugLogs.add("⚠️ No active network connection!")
+            debugLogs.add("Please check WiFi or mobile data is enabled")
+        } else {
+            val hasInternet = capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            val hasValidated = capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            
+            debugLogs.add("Network status: Internet=${hasInternet}, Validated=${hasValidated}")
+            
+            if (!hasInternet) {
+                debugLogs.add("⚠️ Network has no internet capability")
             }
         }
     }

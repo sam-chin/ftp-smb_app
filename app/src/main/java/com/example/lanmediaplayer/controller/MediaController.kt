@@ -104,11 +104,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] === Protocol Switch: Connecting to FTP ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
             
-            // Cancel and recreate browse scope to ensure clean state
-            log("[Controller] Cancelling old browseScope...")
-            browseScope.cancel()
-            browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-            log("[Controller] New browseScope created, isActive: ${browseScope.isActive}")
+            // ✅ 不要cancel browseScope，这会取消正在进行的连接操作
+            // browseScope只用于目录浏览，不应该在连接时取消
             
             // Disconnect any existing connections
             if (smbClient != null) {
@@ -172,11 +169,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] === Protocol Switch: Connecting to SMB ===")
             log("[Controller] Before switch - ftpClient: ${if (ftpClient == null) "null" else "exists"}, smbClient: ${if (smbClient == null) "null" else "exists"}")
             
-            // Cancel and recreate browse scope to ensure clean state
-            log("[Controller] Cancelling old browseScope...")
-            browseScope.cancel()
-            browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-            log("[Controller] New browseScope created, isActive: ${browseScope.isActive}")
+            // ✅ 不要cancel browseScope，这会取消正在进行的连接操作
+            // browseScope只用于目录浏览，不应该在连接时取消
             
             // Disconnect any existing connections
             if (ftpClient != null) {
