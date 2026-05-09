@@ -708,6 +708,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     suspend fun getImageUrl(imageFile: MediaFile, callback: MediaCallback): String? {
         return try {
             log("[Controller] === Getting Image URL for DLNA ===")
+            log("[Controller] Image name: ${imageFile.name}")
             log("[Controller] Image path: ${imageFile.path}")
             log("[Controller] Protocol: ${imageFile.protocol}")
             
@@ -722,12 +723,19 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 val smbRef = smbClient
                 val protocol = imageFile.protocol
                 
+                log("[Controller] Starting HTTP proxy for image casting...")
+                
                 val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
                     override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
+                        log("[Controller] HTTP Proxy requesting file stream: $path")
                         return when (protocol) {
-                            is NetworkProtocol.FTP -> ftpRef?.getFileStream(path, startOffset)
+                            is NetworkProtocol.FTP -> {
+                                log("[Controller] Getting FTP file stream: $path")
+                                ftpRef?.getFileStream(path, startOffset)
+                            }
                             is NetworkProtocol.SMB -> {
                                 val smbPath = if (path.startsWith("/")) path else "/$path"
+                                log("[Controller] Getting SMB file stream: $smbPath")
                                 smbRef?.getFileStream(smbPath, startOffset)
                             }
                             else -> null
@@ -735,10 +743,15 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                     
                     override suspend fun getFileSize(path: String): Long {
+                        log("[Controller] HTTP Proxy requesting file size: $path")
                         return when (protocol) {
-                            is NetworkProtocol.FTP -> ftpRef?.getFileSize(path) ?: 0L
+                            is NetworkProtocol.FTP -> {
+                                log("[Controller] Getting FTP file size: $path")
+                                ftpRef?.getFileSize(path) ?: 0L
+                            }
                             is NetworkProtocol.SMB -> {
                                 val smbPath = if (path.startsWith("/")) path else "/$path"
+                                log("[Controller] Getting SMB file size: $smbPath")
                                 smbRef?.getFileSize(smbPath) ?: 0L
                             }
                             else -> 0L
@@ -749,6 +762,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 currentPort = port
                 localIpAddress = getLocalIpAddress()
                 log("[Controller] HTTP Proxy started on port: $currentPort")
+                log("[Controller] Local IP address: $localIpAddress")
             }
             
             if (currentPort <= 0) {
@@ -759,6 +773,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // 生成HTTP代理URL
             val imageUrl = httpProxy?.getUrl(imageFile.path)
             log("[Controller] Image HTTP URL: $imageUrl")
+            log("[Controller] URL should be accessible from DLNA device")
             
             imageUrl
         } catch (e: Exception) {
