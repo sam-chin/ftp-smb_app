@@ -44,8 +44,10 @@ class CastController(private val context: Context, private val logCallback: ((St
         
         isSearching = true
         devices.clear()
+        discoveredLocations.clear()  // ✅ 清空去重缓存
         
         searchJob = scope.launch {
+            var multicastSocket: MulticastSocket? = null
             try {
                 log("=== Starting DLNA device discovery (optimized) ===")
                 
@@ -53,10 +55,19 @@ class CastController(private val context: Context, private val logCallback: ((St
                 val searchType = "urn:schemas-upnp-org:device:MediaRenderer:1"
                 log("📡 Searching for: $searchType")
                 
+                // ✅ 创建MulticastSocket用于接收响应
+                multicastSocket = MulticastSocket(1900)
+                multicastSocket.soTimeout = 500  // 500ms超时
+                multicastSocket.timeToLive = 4
+                
+                val multicastAddress = InetAddress.getByName("239.255.255.250")
+                multicastSocket.joinGroup(multicastAddress)
+                log("✅ Joined multicast group 239.255.255.250:1900")
+                
                 // ✅ 快速发送3次M-SEARCH广播，间隔100ms
                 for (i in 1..3) {
                     log("Sending M-SEARCH #$i/3...")
-                    sendSsdpBroadcast(searchType)
+                    sendSsdpBroadcast(searchType, multicastSocket)
                     if (i < 3) delay(100)  // 100ms间隔
                 }
                 
@@ -66,8 +77,8 @@ class CastController(private val context: Context, private val logCallback: ((St
                 val receiveTimeout = 2500L  // 2.5秒
                 
                 while (System.currentTimeMillis() - startTime < receiveTimeout && isSearching) {
-                    // 异步接收和解析响应
-                    receiveAndParseResponse(searchType, onDevicesFound)
+                    // 接收和解析响应
+                    receiveAndParseResponse(multicastSocket, onDevicesFound)
                 }
                 
                 log("✅ Search completed in ${System.currentTimeMillis() - startTime}ms")
@@ -83,14 +94,22 @@ class CastController(private val context: Context, private val logCallback: ((St
                     isSearching = false
                     onDevicesFound(devices.toList())
                 }
+            } finally {
+                // ✅ 清理资源
+                try {
+                    multicastSocket?.leaveGroup(InetAddress.getByName("239.255.255.250"))
+                    multicastSocket?.close()
+                    log("🔒 Multicast socket closed")
+                } catch (e: Exception) {
+                    // Ignore
+                }
             }
         }
     }
     
     // ✅ 发送单次M-SEARCH广播
-    private suspend fun sendSsdpBroadcast(searchType: String) {
+    private suspend fun sendSsdpBroadcast(searchType: String, socket: MulticastSocket) {
         withContext(Dispatchers.IO) {
-            var socket: DatagramSocket? = null
             try {
                 val ssdpMessage = 
                     "M-SEARCH * HTTP/1.1\r\n" +
@@ -101,8 +120,6 @@ class CastController(private val context: Context, private val logCallback: ((St
                     "\r\n"
                 
                 val multicastAddress = InetAddress.getByName("239.255.255.250")
-                socket = DatagramSocket()
-                socket.broadcast = true
                 
                 val packet = DatagramPacket(
                     ssdpMessage.toByteArray(Charsets.UTF_8),
@@ -115,21 +132,14 @@ class CastController(private val context: Context, private val logCallback: ((St
                 
             } catch (e: Exception) {
                 log("Send error: ${e.message}")
-            } finally {
-                socket?.close()
             }
         }
     }
     
-    // ✅ 异步接收并解析响应
-    private suspend fun receiveAndParseResponse(searchType: String, onDevicesFound: (List<CastDevice>) -> Unit) {
+    // ✅ 接收并解析响应
+    private suspend fun receiveAndParseResponse(socket: MulticastSocket, onDevicesFound: (List<CastDevice>) -> Unit) {
         withContext(Dispatchers.IO) {
-            var socket: DatagramSocket? = null
             try {
-                socket = DatagramSocket(null)
-                socket.reuseAddress = true
-                socket.soTimeout = 500  // 500ms超时，快速循环
-                
                 val buffer = ByteArray(8192)
                 val packet = DatagramPacket(buffer, buffer.size)
                 
@@ -154,9 +164,7 @@ class CastController(private val context: Context, private val logCallback: ((St
                 }
                 
             } catch (e: Exception) {
-                // 忽略错误，继续尝试
-            } finally {
-                socket?.close()
+                log("Receive error: ${e.message}")
             }
         }
     }
