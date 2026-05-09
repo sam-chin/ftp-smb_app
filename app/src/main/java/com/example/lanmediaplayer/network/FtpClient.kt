@@ -1,4 +1,4 @@
-package com.example.lanmediaplayer.network
+package com.lanmedia.player.network
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +97,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             if (localIpv4Address != null) {
                 log("[FTP] Found local IPv4: ${localIpv4Address.hostAddress}")
                 controlSocket = Socket()
+                // ✅ 设置socket选项，模仿ES文件浏览器
+                controlSocket?.tcpNoDelay = true  // 禁用Nagle算法
+                controlSocket?.reuseAddress = true  // 允许地址重用
                 // 显式绑定到IPv4地址，避免系统自动选择IPv6
                 controlSocket?.bind(java.net.InetSocketAddress(localIpv4Address, 0))
                 log("[FTP] Bound to local IPv4: ${controlSocket?.localAddress}")

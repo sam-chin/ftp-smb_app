@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
-package com.example.lanmediaplayer
+package com.lanmedia.player
 
 import android.app.Activity
 import android.content.pm.PackageManager

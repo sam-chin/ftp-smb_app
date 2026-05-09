@@ -1,4 +1,4 @@
-package com.example.lanmediaplayer.controller
+package com.lanmedia.player.controller
 
 import android.content.Context
 import android.os.Handler

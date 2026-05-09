@@ -1,4 +1,4 @@
-package com.example.lanmediaplayer.ui.theme
+package com.lanmedia.player.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

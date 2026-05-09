@@ -1,4 +1,4 @@
-package com.example.lanmediaplayer
+package com.lanmedia.player
 
 import android.content.Context
 import android.content.SharedPreferences

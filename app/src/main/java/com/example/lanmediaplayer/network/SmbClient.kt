@@ -1,4 +1,4 @@
-package com.example.lanmediaplayer.network
+package com.lanmedia.player.network
 
 import android.util.Log
 import jcifs.CIFSContext

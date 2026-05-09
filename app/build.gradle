@@ -7,7 +7,7 @@ android {
     compileSdk 34
     
     defaultConfig {
-        applicationId "com.example.lanmediaplayer"
+        applicationId "com.lanmedia.player"  // ✅ 新包名，让系统视为全新应用
         minSdk 24
         targetSdk 34
         versionCode 1
