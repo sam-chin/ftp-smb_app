@@ -391,6 +391,14 @@ class CastController(private val context: Context, private val logCallback: ((St
                 log("Device Port: ${device.port}")
                 log("Control URL: ${device.controlUrl}")
                 log("Image URL: $imageUrl")
+                log("")
+                log("⚠️ IMPORTANT: DLNA device at ${device.ip} must be able to access:")
+                log("   $imageUrl")
+                log("   Please ensure:")
+                log("   1. Phone and device are on the same network")
+                log("   2. No firewall blocking port 8080")
+                log("   3. Device supports image casting (some devices only support video/audio)")
+                log("")
                 
                 // ✅ 关键修复：投屏前先停止当前播放（失败不影响后续）
                 log("🛑 Stopping current playback before casting new image...")
@@ -417,12 +425,15 @@ class CastController(private val context: Context, private val logCallback: ((St
                 
                 log("Image MIME type: $mimeType")
                 
-                // ✅ 构建DIDL-Lite元数据（和视频格式一致）
-                val didlLite = "&lt;DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\"&gt;" +
+                // ✅ 构建DIDL-Lite元数据（增强版，添加更多字段）
+                val didlLite = "&lt;DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" " +
+                        "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
+                        "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" " +
+                        "xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\"&gt;" +
                         "&lt;item id=\"1\" parentID=\"0\" restricted=\"1\"&gt;" +
-                        "&lt;dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\"&gt;$escapedTitle&lt;/dc:title&gt;" +
-                        "&lt;upnp:class xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"&gt;object.item.imageItem&lt;/upnp:class&gt;" +
-                        "&lt;res protocolInfo=\"http-get:*:$mimeType:*\"&gt;$escapedImageUrl&lt;/res&gt;" +
+                        "&lt;dc:title&gt;$escapedTitle&lt;/dc:title&gt;" +
+                        "&lt;upnp:class&gt;object.item.imageItem.photo&lt;/upnp:class&gt;" +
+                        "&lt;res protocolInfo=\"http-get:*:$mimeType:DLNA.ORG_PN=JPEG_TN;DLNA.ORG_OP=01;DLNA.ORG_CI=0\"&gt;$escapedImageUrl&lt;/res&gt;" +
                         "&lt;/item&gt;" +
                         "&lt;/DIDL-Lite&gt;"
                 
