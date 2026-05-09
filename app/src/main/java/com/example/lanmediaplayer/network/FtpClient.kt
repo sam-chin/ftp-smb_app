@@ -81,7 +81,26 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
             log("[FTP] Creating socket...")
             
-            controlSocket = Socket()
+            // ✅ 关键修复：显式获取本地IPv4地址并绑定，避免使用IPv6接口
+            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList()
+                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                ?.find { 
+                    it is java.net.Inet4Address && 
+                    !it.isLoopbackAddress && 
+                    !it.isAnyLocalAddress
+                }
+            
+            if (localIpv4Address != null) {
+                log("[FTP] Found local IPv4: ${localIpv4Address.hostAddress}")
+                controlSocket = Socket()
+                controlSocket?.bind(java.net.InetSocketAddress(localIpv4Address, 0))
+                log("[FTP] Bound to: ${controlSocket?.localAddress}")
+            } else {
+                log("[FTP] WARNING: Could not find local IPv4 address, using default")
+                controlSocket = Socket()
+            }
+            
             controlSocket?.soTimeout = 30000
             controlSocket?.keepAlive = true
             
