@@ -65,16 +65,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Username: '$username'")
             log("[SMB-JCIFS] Domain: '$domain' (empty means auto-detect)")
             
-            // ✅ 智能检测IP类型，决定使用IPv4还是IPv6
+            // ✅ 智能检测IP类型（仅用于日志）
             val isIPv6 = host.contains(":") && !host.contains(".")
-            val preferIPv4 = !isIPv6
-            
-            if (preferIPv4) {
-                log("[SMB-JCIFS] Detected IPv4 address, forcing IPv4 stack...")
-                java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            if (isIPv6) {
+                log("[SMB-JCIFS] Detected IPv6 address")
             } else {
-                log("[SMB-JCIFS] Detected IPv6 address, allowing IPv6 stack...")
-                java.lang.System.setProperty("java.net.preferIPv4Stack", "false")
+                log("[SMB-JCIFS] Detected IPv4 address")
             }
             
             // ✅ 小米澎湃OS诊断提示

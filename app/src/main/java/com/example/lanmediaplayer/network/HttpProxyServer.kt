@@ -22,10 +22,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
-            // ✅ 关键修复：强制使用IPv4地址绑定（解决小米澎湃OS问题）
-            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
-            
-            // ✅ 显式获取本地IPv4地址
+            // ✅ 显式获取本地IPv4地址并绑定（解决小米澎湃OS问题）
             val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
                 ?.toList()
                 ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
