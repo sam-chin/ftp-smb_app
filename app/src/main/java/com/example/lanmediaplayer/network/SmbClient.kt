@@ -217,16 +217,32 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Selected share: $shareName")
             log("[SMB-JCIFS] New baseUrl: $baseUrl")
             
+            log("[SMB-JCIFS] Testing share accessibility...")
             val testFile = SmbFile(baseUrl, context)
-            if (testFile.exists() && testFile.isDirectory) {
+            
+            log("[SMB-JCIFS] Checking if share exists...")
+            val exists = testFile.exists()
+            log("[SMB-JCIFS] Share exists: $exists")
+            
+            if (!exists) {
+                log("[SMB-JCIFS] Share is not accessible")
+                return@withContext false
+            }
+            
+            log("[SMB-JCIFS] Checking if share is directory...")
+            val isDir = testFile.isDirectory
+            log("[SMB-JCIFS] Is directory: $isDir")
+            
+            if (isDir) {
                 log("[SMB-JCIFS] Share is accessible")
                 return@withContext true
             } else {
-                log("[SMB-JCIFS] Share is not accessible")
+                log("[SMB-JCIFS] Share is not a directory")
                 return@withContext false
             }
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error selecting share: ${e.message}")
+            e.printStackTrace()
             return@withContext false
         }
     }
@@ -296,6 +312,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] === listFiles START ===")
             log("[SMB-JCIFS] Input remotePath: '$remotePath'")
             log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
+            
+            // ✅ 检查context是否已初始化
+            if (context == null) {
+                log("[SMB-JCIFS] ERROR: context is null! Connection may not be established.")
+                return@withContext emptyList()
+            }
+            
             val files = mutableListOf<SmbFileInfo>()
             
             // 规范化路径：移除开头的斜杠，因为baseUrl已经包含了共享名
@@ -316,20 +339,24 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             }
             log("[SMB-JCIFS] JCIFS fullPath: '$fullPath'")
             
+            log("[SMB-JCIFS] Creating SmbFile object...")
             val smbFile = SmbFile(fullPath, context)
             
+            log("[SMB-JCIFS] Checking if path exists...")
             if (!smbFile.exists()) {
                 log("[SMB-JCIFS] ERROR: Path does not exist")
                 return@withContext emptyList()
             }
             
+            log("[SMB-JCIFS] Checking if path is directory...")
             if (!smbFile.isDirectory) {
                 log("[SMB-JCIFS] ERROR: Path is not a directory")
                 return@withContext emptyList()
             }
             
+            log("[SMB-JCIFS] Calling listFiles() - this may take a while...")
             val fileList = smbFile.listFiles()
-            log("[SMB-JCIFS] Found ${fileList.size} items")
+            log("[SMB-JCIFS] listFiles() returned ${fileList.size} items")
             
             val cleanFullPath = fullPath.trimEnd('/')
             log("[SMB-JCIFS] fullPath: '$fullPath', cleanFullPath: '$cleanFullPath', normalizedPath: '$normalizedPath'")

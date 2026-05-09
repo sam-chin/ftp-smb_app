@@ -304,8 +304,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         browseScope.launch {
             log("[Controller] browseFiles coroutine started")
             try {
-                val files = when (protocol) {
-                    is NetworkProtocol.FTP -> {
+                // ✅ 添加超时保护
+                val files = withTimeoutOrNull(30000) {  // 30秒超时
+                    when (protocol) {
+                        is NetworkProtocol.FTP -> {
                         if (ftpClient == null) {
                             log("[Controller] ERROR: ftpClient is null!")
                             withContext(Dispatchers.Main) {
@@ -358,13 +360,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         } ?: emptyList()
                     }
                 }
+                }  // withTimeoutOrNull end
                 
-                log("[Controller] Loaded ${files.size} files")
-                withContext(Dispatchers.Main) {
-                    callback.onFilesLoaded(files)
+                if (files == null) {
+                    log("[Controller] ERROR: browseFiles timed out after 30 seconds!")
+                    withContext(Dispatchers.Main) {
+                        callback.onError("Operation timed out. Please check network connection.")
+                    }
+                } else {
+                    log("[Controller] Loaded ${files.size} files")
+                    withContext(Dispatchers.Main) {
+                        callback.onFilesLoaded(files)
+                    }
+                    log("[Controller] === BrowseFiles END ===")
                 }
-                log("[Controller] === BrowseFiles END ===")
             } catch (e: Exception) {
+                log("[Controller] ERROR in browseFiles: ${e.message}")
+                e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     callback.onError(e.message ?: "Unknown error")
                 }

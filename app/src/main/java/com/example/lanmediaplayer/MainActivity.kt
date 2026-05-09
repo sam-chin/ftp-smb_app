@@ -65,6 +65,7 @@ import com.example.lanmediaplayer.controller.NetworkProtocol
 import com.example.lanmediaplayer.ui.theme.LanMediaPlayerTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
@@ -514,8 +515,17 @@ fun MainScreen(
                             if (isAtSmbRoot && selectedProtocol is NetworkProtocol.SMB) {
                                 val shareName = file.name
                                 addLog("Selecting SMB share: $shareName")
-                                val success = mediaController.selectShare(shareName)
-                                if (success) {
+                                
+                                // ✅ 添加超时保护
+                                val success = withTimeoutOrNull(15000) {
+                                    mediaController.selectShare(shareName)
+                                }
+                                
+                                if (success == null) {
+                                    addLog("ERROR: selectShare timed out after 15 seconds")
+                                    errorMessage = "Failed to access share: timeout"
+                                    isLoading = false
+                                } else if (success) {
                                     isAtSmbRoot = false
                                     browserTitle = shareName
                                     mediaController.browseFiles("", selectedProtocol, object : MediaController.MediaCallback {
