@@ -57,6 +57,39 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         username: String,
         password: String,
         domain: String = ""  // Empty means try common domains
+    ): Boolean {
+        // ✅ 添加重试机制（最多3次）
+        val maxRetries = 3
+        var lastException: Exception? = null
+        
+        return withContext(Dispatchers.IO) {
+            for (attempt in 1..maxRetries) {
+                try {
+                    if (attempt > 1) {
+                        log("[SMB-JCIFS] Retry attempt $attempt/$maxRetries...")
+                        delay(2000)  // 重试前等待2秒
+                    }
+                    return@withContext connectInternal(host, share, username, password, domain)
+                } catch (e: Exception) {
+                    lastException = e
+                    log("[SMB-JCIFS] Attempt $attempt failed: ${e.message}")
+                    if (attempt < maxRetries) {
+                        log("[SMB-JCIFS] Will retry in 2 seconds...")
+                    }
+                }
+            }
+            
+            log("[SMB-JCIFS] All $maxRetries attempts failed")
+            throw lastException ?: Exception("Connection failed after $maxRetries attempts")
+        }
+    }
+    
+    private suspend fun connectInternal(
+        host: String,
+        share: String,
+        username: String,
+        password: String,
+        domain: String
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             // ✅ 关键修复：强制使用IPv4协议栈（解决澎湃OS问题）
@@ -111,8 +144,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 // Configure JCIFS for file operations (SMB2/3)
                 val properties = Properties()
-                properties.setProperty("jcifs.smb.client.responseTimeout", "30000")
-                properties.setProperty("jcifs.smb.client.soTimeout", "30000")
+                // ✅ 设置合理的超时时间（避免无限等待）
+                properties.setProperty("jcifs.smb.client.responseTimeout", "15000")  // 响应超时15秒
+                properties.setProperty("jcifs.smb.client.soTimeout", "15000")  // Socket超时15秒
+                properties.setProperty("jcifs.smb.client.connTimeout", "10000")  // 连接超时10秒
                 properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
                 if (testDomain.isNotEmpty()) {
                     properties.setProperty("jcifs.smb.client.domain", testDomain)

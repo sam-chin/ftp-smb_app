@@ -3,14 +3,10 @@
 package com.lanmedia.player
 
 import android.app.Activity
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -80,9 +76,6 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // ✅ 请求运行时权限（针对小米澎湃OS优化）
-        requestRuntimePermissions()
         
         // ✅ 关键修复：在应用启动时就强制使用IPv4（解决小米澎湃OS问题）
         try {
@@ -174,69 +167,6 @@ class MainActivity : ComponentActivity() {
                 debugLogs.add("   - Ensure 'Don't keep activities' is OFF")
                 debugLogs.add("   - Try enabling 'USB debugging' (may help with network permissions)")
             }
-        }
-    }
-    
-    // ✅ 请求运行时权限（针对小米澎湃OS）
-    private fun requestRuntimePermissions() {
-        val permissionsToRequest = mutableListOf<String>()
-        
-        // Android 13+ 需要请求细粒度的媒体权限
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // 读取图片权限
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_IMAGES) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            // 读取视频权限
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_VIDEO) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_VIDEO)
-            }
-            // 读取音频权限
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_AUDIO) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_AUDIO)
-            }
-            // Android 13+ 附近WiFi设备权限
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.NEARBY_WIFI_DEVICES) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.NEARBY_WIFI_DEVICES)
-            }
-        } else {
-            // Android 12及以下需要存储权限
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-        }
-        
-        // 位置权限（Android 6.0+ 需要，用于WiFi扫描）
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
-            }
-            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) 
-                != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
-            }
-        }
-        
-        // 如果有需要请求的权限
-        if (permissionsToRequest.isNotEmpty()) {
-            ActivityCompat.requestPermissions(
-                this,
-                permissionsToRequest.toTypedArray(),
-                1001  // 请求码
-            )
-            debugLogs.add("🔑 Requesting runtime permissions...")
-        } else {
-            debugLogs.add("✅ All permissions already granted")
         }
     }
     

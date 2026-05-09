@@ -48,6 +48,31 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         this@FtpClient.host = host
         this@FtpClient.port = port
         
+        // ✅ 添加重试机制（最多3次）
+        val maxRetries = 3
+        var lastException: Exception? = null
+        
+        for (attempt in 1..maxRetries) {
+            try {
+                if (attempt > 1) {
+                    log("[FTP] Retry attempt $attempt/$maxRetries...")
+                    delay(2000)  // 重试前等待2秒
+                }
+                return@withContext connectInternal()
+            } catch (e: Exception) {
+                lastException = e
+                log("[FTP] Attempt $attempt failed: ${e.message}")
+                if (attempt < maxRetries) {
+                    log("[FTP] Will retry in 2 seconds...")
+                }
+            }
+        }
+        
+        log("[FTP] All $maxRetries attempts failed")
+        throw lastException ?: Exception("Connection failed after $maxRetries attempts")
+    }
+    
+    private suspend fun connectInternal(): Boolean = withContext(Dispatchers.IO) {
         return@withContext try {
             // ✅ 关键修复：强制使用IPv4协议栈（解决澎湃OS问题）
             java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
@@ -116,8 +141,13 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP] Resolved host to: ${address.hostAddress} (IPv${if (address is java.net.Inet6Address) "6" else "4"})")
             
             try {
-                // ✅ 不使用任何超时参数，让系统决定
-                controlSocket?.connect(java.net.InetSocketAddress(address, port))
+                // ✅ 设置合理的超时时间（避免无限等待）
+                controlSocket?.soTimeout = 15000  // 读取超时15秒
+                log("[FTP] Socket timeout set to 15s")
+                
+                // ✅ 使用超时参数连接（最多等待10秒）
+                controlSocket?.connect(java.net.InetSocketAddress(address, port), 10000)
+                log("[FTP] Socket connected successfully")
                 
                 log("[FTP] ✅ Connection established successfully!")
                 log("[FTP] Local address: ${controlSocket?.localAddress}")
