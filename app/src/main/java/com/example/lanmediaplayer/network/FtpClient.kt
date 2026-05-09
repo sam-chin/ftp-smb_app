@@ -73,6 +73,15 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         throw lastException ?: Exception("Connection failed after $maxRetries attempts")
     }
     
+    // ✅ 检查连接是否仍然有效
+    fun isConnected(): Boolean {
+        return try {
+            ftpClient?.isConnected == true && ftpClient?.isLoggedIn == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
     private suspend fun connectInternal(): Boolean = withContext(Dispatchers.IO) {
         return@withContext try {
             // ✅ 关键修复：强制使用IPv4协议栈（解决澎湃OS问题）

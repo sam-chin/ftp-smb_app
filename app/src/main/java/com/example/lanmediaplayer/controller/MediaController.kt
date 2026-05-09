@@ -39,6 +39,18 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var currentSmbBaseUrl: String = ""  // ✅ 保存SMB baseUrl（完整URL前缀）
     private var localIpAddress: String = "127.0.0.1"  // ✅ 保存局域网IP地址
     
+    // ✅ 保存连接参数（用于自动重连）
+    private var currentFtpHost: String = ""
+    private var currentFtpPort: Int = 21
+    private var currentFtpUsername: String = ""
+    private var currentFtpPassword: String = ""
+    
+    private var currentSmbHost: String = ""
+    private var currentSmbShareParam: String = ""
+    private var currentSmbUsername: String = ""
+    private var currentSmbPassword: String = ""
+    private var currentSmbDomain: String = ""
+    
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
     private val connectionPrefs = com.lanmedia.player.ConnectionPreferences(context)
@@ -97,6 +109,58 @@ class MediaController(private val context: Context, private val logCallback: ((S
         httpProxy = HttpProxyServer(logCallback)
     }
     
+    // ✅ 清理当前连接状态（用于协议切换）
+    fun clearConnectionState() {
+        log("[Controller] === Clearing connection state ===")
+        
+        // 停止HTTP代理
+        try {
+            httpProxy?.stop()
+            currentPort = 0
+            log("[Controller] HTTP proxy stopped")
+        } catch (e: Exception) {
+            log("[Controller] Error stopping HTTP proxy: ${e.message}")
+        }
+        
+        // 断开FTP连接
+        try {
+            ftpClient?.disconnect()
+            ftpClient = null
+            log("[Controller] FTP disconnected")
+        } catch (e: Exception) {
+            log("[Controller] Error disconnecting FTP: ${e.message}")
+        }
+        
+        // 断开SMB连接
+        try {
+            smbClient?.disconnect()
+            smbClient = null
+            currentSmbShare = ""
+            currentSmbBaseUrl = ""
+            log("[Controller] SMB disconnected")
+        } catch (e: Exception) {
+            log("[Controller] Error disconnecting SMB: ${e.message}")
+        }
+        
+        // 清空当前文件信息
+        currentMediaFile = null
+        currentVideoUrl = ""
+        
+        // ✅ 清空保存的连接参数（避免自动重连到错误的服务器）
+        currentFtpHost = ""
+        currentFtpPort = 21
+        currentFtpUsername = ""
+        currentFtpPassword = ""
+        
+        currentSmbHost = ""
+        currentSmbShareParam = ""
+        currentSmbUsername = ""
+        currentSmbPassword = ""
+        currentSmbDomain = ""
+        
+        log("[Controller] Connection state cleared")
+    }
+    
     fun getPlayer(): ExoPlayer? = exoPlayer
     
     suspend fun connectToFtp(host: String, port: Int, username: String, password: String): Pair<Boolean, String> {
@@ -120,6 +184,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 ftpClient = null
                 log("[Controller] Old FTP client disconnected and set to null")
             }
+            
+            // ✅ 保存连接参数（用于自动重连）
+            currentFtpHost = host
+            currentFtpPort = port
+            currentFtpUsername = username
+            currentFtpPassword = password
             
             log("[Controller] === FTP Connection Start ===")
             log("[Controller] Received parameters:")
@@ -185,6 +255,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 smbClient = null
                 log("[Controller] Old SMB client disconnected and set to null")
             }
+            
+            // ✅ 保存连接参数（用于自动重连）
+            currentSmbHost = host
+            currentSmbShareParam = share
+            currentSmbUsername = username
+            currentSmbPassword = password
+            currentSmbDomain = domain
             
             log("[Controller] === SMB Connection Start ===")
             log("[Controller] Received parameters:")
@@ -304,6 +381,50 @@ class MediaController(private val context: Context, private val logCallback: ((S
         browseScope.launch {
             log("[Controller] browseFiles coroutine started")
             try {
+                // ✅ 检查连接状态，如果断开则自动重连
+                val connectionValid = when (protocol) {
+                    is NetworkProtocol.FTP -> {
+                        val connected = ftpClient?.isConnected() == true
+                        if (!connected && currentFtpHost.isNotEmpty()) {
+                            log("[Controller] ⚠️ FTP connection lost, attempting to reconnect...")
+                            val (success, message) = connectToFtp(currentFtpHost, currentFtpPort, currentFtpUsername, currentFtpPassword)
+                            if (success) {
+                                log("[Controller] ✅ FTP reconnection successful")
+                                true
+                            } else {
+                                log("[Controller] ❌ FTP reconnection failed: $message")
+                                false
+                            }
+                        } else {
+                            connected
+                        }
+                    }
+                    is NetworkProtocol.SMB -> {
+                        val connected = smbClient?.isConnected() == true
+                        if (!connected && currentSmbHost.isNotEmpty()) {
+                            log("[Controller] ⚠️ SMB connection lost, attempting to reconnect...")
+                            val (success, message) = connectToSmb(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+                            if (success) {
+                                log("[Controller] ✅ SMB reconnection successful")
+                                true
+                            } else {
+                                log("[Controller] ❌ SMB reconnection failed: $message")
+                                false
+                            }
+                        } else {
+                            connected
+                        }
+                    }
+                }
+                
+                if (!connectionValid) {
+                    log("[Controller] ❌ Connection not valid, cannot browse files")
+                    withContext(Dispatchers.Main) {
+                        callback.onError("Connection lost. Please reconnect.")
+                    }
+                    return@launch
+                }
+                
                 // ✅ 添加超时保护
                 val files = withTimeoutOrNull(30000) {  // 30秒超时
                     try {

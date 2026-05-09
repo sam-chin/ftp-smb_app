@@ -86,6 +86,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         }
     }
     
+    // ✅ 检查连接是否仍然有效
+    fun isConnected(): Boolean {
+        return try {
+            context != null && baseUrl.isNotEmpty()
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
     private suspend fun connectInternal(
         host: String,
         share: String,

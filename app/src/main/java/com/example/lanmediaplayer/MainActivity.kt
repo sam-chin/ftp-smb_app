@@ -393,10 +393,22 @@ fun MainScreen(
             savedSmbDomain = savedSmbDomain,
             debugLogs = debugLogs,
             onConnect = { protocol, host, port, username, password, share, domain ->
+                // ✅ 切换协议前，先清理之前的连接状态
+                if (selectedProtocol != null && selectedProtocol::class != protocol::class) {
+                    addLog("=== Protocol switch detected ===")
+                    addLog("Switching from ${selectedProtocol::class.simpleName} to ${protocol::class.simpleName}")
+                    mediaController.clearConnectionState()
+                    
+                    // ✅ 清空文件列表和路径
+                    files = emptyList()
+                    currentPath = ""
+                    isAtSmbRoot = false
+                    browserTitle = "选择共享目录"
+                }
+                
                 selectedProtocol = protocol
                 isLoading = true
                 errorMessage = null
-                isAtSmbRoot = false
                 // Don't clear debug logs, keep them for troubleshooting
                 
                 // Log connection parameters (hide password)
