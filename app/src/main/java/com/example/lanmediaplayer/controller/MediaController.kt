@@ -590,16 +590,47 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] Image path: ${imageFile.path}")
             log("[Controller] Protocol: ${imageFile.protocol}")
             
-            // 启动HTTP代理（如果还没启动）
-            val port = ensureHttpProxyStarted(imageFile, object : MediaCallback {
-                override fun onFilesLoaded(files: List<MediaFile>) {}
-                override fun onError(error: String) {
-                    log("[Controller] HTTP proxy error: $error")
-                }
-                override fun onPlaybackStateChanged(state: Int) {}
-            })
+            // 如果HTTP代理还没创建，先创建
+            if (httpProxy == null) {
+                httpProxy = HttpProxyServer(logCallback)
+            }
             
-            if (port <= 0) {
+            // 如果HTTP代理还没启动，启动它
+            if (currentPort <= 0) {
+                val ftpRef = ftpClient
+                val smbRef = smbClient
+                val protocol = imageFile.protocol
+                
+                val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
+                    override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
+                        return when (protocol) {
+                            is NetworkProtocol.FTP -> ftpRef?.getFileStream(path, startOffset)
+                            is NetworkProtocol.SMB -> {
+                                val smbPath = if (path.startsWith("/")) path else "/$path"
+                                smbRef?.getFileStream(smbPath, startOffset)
+                            }
+                            else -> null
+                        }
+                    }
+                    
+                    override suspend fun getFileSize(path: String): Long {
+                        return when (protocol) {
+                            is NetworkProtocol.FTP -> ftpRef?.getFileSize(path) ?: 0L
+                            is NetworkProtocol.SMB -> {
+                                val smbPath = if (path.startsWith("/")) path else "/$path"
+                                smbRef?.getFileSize(smbPath) ?: 0L
+                            }
+                            else -> 0L
+                        }
+                    }
+                }) ?: -1
+                
+                currentPort = port
+                localIpAddress = getLocalIpAddress()
+                log("[Controller] HTTP Proxy started on port: $currentPort")
+            }
+            
+            if (currentPort <= 0) {
                 log("[Controller] ERROR: Failed to start HTTP proxy")
                 return null
             }

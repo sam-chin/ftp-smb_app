@@ -1907,10 +1907,6 @@ fun ImageViewerScreen(
                 showCastDialog = false
                 val currentImage = imageFiles[pagerState.currentPage]
                 
-                addLog("=== Casting image to DLNA ===")
-                addLog("Image path: ${currentImage.path}")
-                addLog("Protocol: $currentProtocol")
-                
                 // ✅ 启动HTTP代理并获取HTTP URL（DLNA设备通过HTTP访问）
                 coroutineScope.launch {
                     try {
@@ -1918,7 +1914,6 @@ fun ImageViewerScreen(
                             override fun onFilesLoaded(files: List<MediaFile>) {}
                             
                             override fun onError(error: String) {
-                                addLog("Failed to get image URL: $error")
                                 onError(error)
                             }
                             
@@ -1926,7 +1921,6 @@ fun ImageViewerScreen(
                         })
                         
                         if (imageUrl != null && imageUrl.isNotEmpty()) {
-                            addLog("Casting with HTTP URL: $imageUrl")
                             castController.castImage(device, imageUrl, currentImage.name) { success, message ->
                                 if (success) {
                                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -1938,7 +1932,6 @@ fun ImageViewerScreen(
                             onError("Failed to start HTTP proxy for image")
                         }
                     } catch (e: Exception) {
-                        addLog("Error casting image: ${e.message}")
                         e.printStackTrace()
                         onError("Error: ${e.message}")
                     }
