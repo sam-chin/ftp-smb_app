@@ -437,9 +437,19 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         // Remove leading slash from path to avoid double slashes
         val cleanPath = if (path.startsWith("/")) path.substring(1) else path
         
-        // ✅ 不进行URL编码，让Kodi直接访问原始路径
-        // HTTP代理会自动处理路径解析
-        val url = "http://127.0.0.1:$currentPort/$cleanPath"
+        // ✅ 获取本地IPv4地址用于生成URL（解决ExoPlayer无法访问127.0.0.1的问题）
+        val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
+            ?.toList()
+            ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+            ?.find { 
+                it is java.net.Inet4Address && 
+                !it.isLoopbackAddress && 
+                !it.isAnyLocalAddress &&
+                it.hostAddress.startsWith("192.168.")
+            }?.hostAddress ?: "127.0.0.1"
+        
+        // ✅ 使用局域网IP而不是127.0.0.1
+        val url = "http://$localIpv4Address:$currentPort/$cleanPath"
         log("[HTTP Proxy] Generated URL: $url")
         return url
     }
