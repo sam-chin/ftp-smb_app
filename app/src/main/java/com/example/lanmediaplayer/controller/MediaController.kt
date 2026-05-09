@@ -306,60 +306,59 @@ class MediaController(private val context: Context, private val logCallback: ((S
             try {
                 // ✅ 添加超时保护
                 val files = withTimeoutOrNull(30000) {  // 30秒超时
-                    when (protocol) {
-                        is NetworkProtocol.FTP -> {
-                        if (ftpClient == null) {
-                            log("[Controller] ERROR: ftpClient is null!")
-                            withContext(Dispatchers.Main) {
-                                callback.onError("FTP client not initialized")
+                    try {
+                        when (protocol) {
+                            is NetworkProtocol.FTP -> {
+                                if (ftpClient == null) {
+                                    log("[Controller] ERROR: ftpClient is null!")
+                                    return@withTimeoutOrNull null
+                                }
+                                log("[Controller] Calling ftpClient.listFiles($path)")
+                                ftpClient?.listFiles(path)?.map { ftpFile ->
+                                    // Build proper path: ensure no double slashes
+                                    val filePath = if (path == "/") {
+                                        "/${ftpFile.name}"
+                                    } else if (path.endsWith("/")) {
+                                        "$path${ftpFile.name}"
+                                    } else {
+                                        "$path/${ftpFile.name}"
+                                    }
+                                    log("[Controller] FTP file: ${ftpFile.name}, path: $filePath")
+                                    MediaFile(
+                                        name = ftpFile.name,
+                                        path = filePath,
+                                        size = ftpFile.size,
+                                        isDirectory = ftpFile.isDirectory,
+                                        protocol = NetworkProtocol.FTP
+                                    )
+                                } ?: emptyList()
                             }
-                            return@launch
+                            is NetworkProtocol.SMB -> {
+                                if (smbClient == null) {
+                                    log("[Controller] ERROR: smbClient is null!")
+                                    return@withTimeoutOrNull null
+                                }
+                                log("[Controller] Calling smbClient.listFiles($path)")
+                                smbClient?.listFiles(path)?.map { smbFile ->
+                                    log("[Controller] SmbFileInfo - name: '${smbFile.name}', path: '${smbFile.path}'")
+                                    MediaFile(
+                                        name = smbFile.name,
+                                        path = smbFile.path,
+                                        size = smbFile.size,
+                                        isDirectory = smbFile.isDirectory,
+                                        protocol = NetworkProtocol.SMB
+                                    )
+                                }?.also { mediaFiles ->
+                                    mediaFiles.forEach { mf ->
+                                        log("[Controller] MediaFile created - name: '${mf.name}', path: '${mf.path}'")
+                                    }
+                                } ?: emptyList()
+                            }
                         }
-                        log("[Controller] Calling ftpClient.listFiles($path)")
-                        ftpClient?.listFiles(path)?.map { ftpFile ->
-                            // Build proper path: ensure no double slashes
-                            val filePath = if (path == "/") {
-                                "/${ftpFile.name}"
-                            } else if (path.endsWith("/")) {
-                                "$path${ftpFile.name}"
-                            } else {
-                                "$path/${ftpFile.name}"
-                            }
-                            log("[Controller] FTP file: ${ftpFile.name}, path: $filePath")
-                            MediaFile(
-                                name = ftpFile.name,
-                                path = filePath,
-                                size = ftpFile.size,
-                                isDirectory = ftpFile.isDirectory,
-                                protocol = NetworkProtocol.FTP
-                            )
-                        } ?: emptyList()
+                    } catch (e: Exception) {
+                        log("[Controller] Error in withTimeoutOrNull: ${e.message}")
+                        null
                     }
-                    is NetworkProtocol.SMB -> {
-                        if (smbClient == null) {
-                            log("[Controller] ERROR: smbClient is null!")
-                            withContext(Dispatchers.Main) {
-                                callback.onError("SMB client not initialized")
-                            }
-                            return@launch
-                        }
-                        log("[Controller] Calling smbClient.listFiles($path)")
-                        smbClient?.listFiles(path)?.map { smbFile ->
-                            log("[Controller] SmbFileInfo - name: '${smbFile.name}', path: '${smbFile.path}'")
-                            MediaFile(
-                                name = smbFile.name,
-                                path = smbFile.path,
-                                size = smbFile.size,
-                                isDirectory = smbFile.isDirectory,
-                                protocol = NetworkProtocol.SMB
-                            )
-                        }?.also { mediaFiles ->
-                            mediaFiles.forEach { mf ->
-                                log("[Controller] MediaFile created - name: '${mf.name}', path: '${mf.path}'")
-                            }
-                        } ?: emptyList()
-                    }
-                }
                 }  // withTimeoutOrNull end
                 
                 if (files == null) {
