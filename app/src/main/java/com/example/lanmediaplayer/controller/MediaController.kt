@@ -6,9 +6,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.example.lanmediaplayer.network.FtpClient
-import com.example.lanmediaplayer.network.HttpProxyServer
-import com.example.lanmediaplayer.network.SmbClient
+import com.lanmedia.player.network.FtpClient
+import com.lanmedia.player.network.HttpProxyServer
+import com.lanmedia.player.network.SmbClient
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.InputStream
@@ -41,7 +41,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     // SMB共享目录缓存：key=host, value=shares list
     private val smbSharesCache = mutableMapOf<String, List<String>>()
-    private val connectionPrefs = com.example.lanmediaplayer.ConnectionPreferences(context)
+    private val connectionPrefs = com.lanmedia.player.ConnectionPreferences(context)
     
     init {
         // 从 ConnectionPreferences 加载缓存的共享目录列表
