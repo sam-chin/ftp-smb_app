@@ -84,10 +84,26 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             // ✅ 使用最简单的socket配置（完全模仿ES文件浏览器）
             log("[FTP] Creating socket...")
             
-            controlSocket = Socket()
-            // ✅ 移除所有socket选项，让系统使用默认配置
-            // controlSocket?.soTimeout = 30000  // 注释掉，连接后再设置
-            // controlSocket?.keepAlive = true   // 注释掉
+            // ✅ 关键修复：显式获取并绑定到本地IPv4地址，强制使用IPv4接口
+            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList()
+                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                ?.find { 
+                    it is java.net.Inet4Address && 
+                    !it.isLoopbackAddress && 
+                    !it.isAnyLocalAddress
+                }
+            
+            if (localIpv4Address != null) {
+                log("[FTP] Found local IPv4: ${localIpv4Address.hostAddress}")
+                controlSocket = Socket()
+                // 显式绑定到IPv4地址，避免系统自动选择IPv6
+                controlSocket?.bind(java.net.InetSocketAddress(localIpv4Address, 0))
+                log("[FTP] Bound to local IPv4: ${controlSocket?.localAddress}")
+            } else {
+                log("[FTP] WARNING: Could not find local IPv4 address, using default socket")
+                controlSocket = Socket()
+            }
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
