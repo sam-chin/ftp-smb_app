@@ -150,6 +150,12 @@ class MainActivity : ComponentActivity() {
                 debugLogs.add("   2. Security App → Network Assistant → Allow LAN access")
                 debugLogs.add("   3. Settings → Connection & Sharing → Private DNS → Off")
                 debugLogs.add("   4. WLAN → WLAN Assistant → Disable 'Smart network acceleration'")
+                debugLogs.add("")
+                debugLogs.add("🔧 Developer Options to check:")
+                debugLogs.add("   - Settings → Additional Settings → Developer Options")
+                debugLogs.add("   - Check 'Background process limit' = 'Standard limit'")
+                debugLogs.add("   - Ensure 'Don't keep activities' is OFF")
+                debugLogs.add("   - Try enabling 'USB debugging' (may help with network permissions)")
             }
         }
     }

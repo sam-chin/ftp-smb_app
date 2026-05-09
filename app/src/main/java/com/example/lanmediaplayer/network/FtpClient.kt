@@ -57,14 +57,44 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP]    1. Settings → Apps → LAN Media → Battery Saver → No restrictions")
             log("[FTP]    2. Security App → Network Assistant → Allow LAN access")
             log("[FTP]    3. Settings → Connection & Sharing → Private DNS → Off")
+            log("[FTP]")
+            log("[FTP]    🔧 Developer Options:")
+            log("[FTP]    - Check 'Background process limit' = 'Standard limit'")
+            log("[FTP]    - Try enabling 'USB debugging' (may help)")
+            log("[FTP]")
+            log("[FTP]    ⚠️ IMPORTANT: ECONNABORTED error means system firewall is blocking!")
+            log("[FTP]    Please open 'Security App' and grant LAN access permission.")
+            log("[FTP]")
+            log("[FTP]    🔍 Additional troubleshooting:")
+            log("[FTP]    - Try installing another FTP client app to test connectivity")
+            log("[FTP]    - Check if server firewall allows connections from 192.168.11.6")
+            log("[FTP]    - Verify router has no 'AP Isolation' enabled")
             
+            // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
+            log("[FTP] Creating socket with default configuration...")
             controlSocket = Socket()
-            controlSocket?.soTimeout = 30000 // 30 seconds timeout
-            controlSocket?.keepAlive = true
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
-            controlSocket?.connect(java.net.InetSocketAddress(host, port), 30000)
+            
+            // ✅ 直接连接，不设置超时（让系统决定）
+            val address = java.net.InetAddress.getByName(host)
+            log("[FTP] Resolved host to: ${address.hostAddress} (IPv${if (address is java.net.Inet6Address) "6" else "4"})")
+            
+            try {
+                // ✅ 不使用timeout参数，让系统使用默认值
+                controlSocket?.connect(java.net.InetSocketAddress(address, port))
+                
+                // 连接成功后再设置超时
+                controlSocket?.soTimeout = 30000
+                controlSocket?.keepAlive = true
+                
+                log("[FTP] ✅ Connection established successfully!")
+            } catch (e: Exception) {
+                log("[FTP] ❌ Connection failed: ${e.javaClass.simpleName}")
+                log("[FTP] Error: ${e.message}")
+                throw e
+            }
             
             log("[FTP] Socket connected successfully")
             log("[FTP] Local address: ${controlSocket?.localAddress}")

@@ -71,6 +71,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS]    2. Security App → Network Assistant → Allow LAN access")
             log("[SMB-JCIFS]    3. Settings → Connection & Sharing → Private DNS → Off")
             log("[SMB-JCIFS]    4. WLAN → WLAN Assistant → Disable 'Smart network acceleration'")
+            log("[SMB-JCIFS]")
+            log("[SMB-JCIFS]    🔧 Developer Options:")
+            log("[SMB-JCIFS]    - Check 'Background process limit' = 'Standard limit'")
+            log("[SMB-JCIFS]    - Try enabling 'USB debugging' (may help)")
             
             this@SmbClient.host = host
             this@SmbClient.username = username
@@ -131,6 +135,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     log("[SMB-JCIFS] Auto-detecting available shares...")
                     // 只在没有缓存时才重新扫描
                     if (availableShares.isEmpty()) {
+                        log("[SMB-JCIFS] ⚠️ Share enumeration may be blocked by Xiaomi firewall")
+                        log("[SMB-JCIFS] If this fails, please specify the share name directly")
                         availableShares = listShares()
                         log("[SMB-JCIFS] Found ${availableShares.size} available shares: ${availableShares.joinToString(", ")}")
                     } else {
