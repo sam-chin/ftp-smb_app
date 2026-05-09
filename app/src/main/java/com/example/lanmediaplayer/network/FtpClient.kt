@@ -49,6 +49,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         this@FtpClient.port = port
         
         return@withContext try {
+            // ✅ 关键修复：强制使用IPv4协议栈（解决澎湃OS问题）
+            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            
             log("[FTP] === Starting connection ===")
             log("[FTP] Target: $host:$port")
             
@@ -82,8 +85,9 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP] Creating socket...")
             
             controlSocket = Socket()
-            controlSocket?.soTimeout = 30000
-            controlSocket?.keepAlive = true
+            // ✅ 移除所有socket选项，让系统使用默认配置
+            // controlSocket?.soTimeout = 30000  // 注释掉，连接后再设置
+            // controlSocket?.keepAlive = true   // 注释掉
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
@@ -93,6 +97,7 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP] Resolved host to: ${address.hostAddress} (IPv${if (address is java.net.Inet6Address) "6" else "4"})")
             
             try {
+                // ✅ 不使用任何超时参数，让系统决定
                 controlSocket?.connect(java.net.InetSocketAddress(address, port))
                 
                 // 连接成功后再设置超时

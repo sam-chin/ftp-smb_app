@@ -59,6 +59,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         domain: String = ""  // Empty means try common domains
     ): Boolean = withContext(Dispatchers.IO) {
         try {
+            // ✅ 关键修复：强制使用IPv4协议栈（解决澎湃OS问题）
+            java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+            
             log("[SMB-JCIFS] === Starting connection ===")
             log("[SMB-JCIFS] Host: $host")
             log("[SMB-JCIFS] Share: '$share' (empty means auto-detect)")
