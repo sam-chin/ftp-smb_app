@@ -113,6 +113,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
     fun clearConnectionState() {
         log("[Controller] === Clearing connection state ===")
         
+        // ✅ 取消并重建browseScope（确保新的浏览操作能正常执行）
+        log("[Controller] Cancelling old browseScope...")
+        browseScope.cancel()
+        browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        log("[Controller] New browseScope created")
+        
         // 停止HTTP代理
         try {
             httpProxy?.stop()
@@ -157,6 +163,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         currentSmbUsername = ""
         currentSmbPassword = ""
         currentSmbDomain = ""
+        
+        // ✅ 清空SMB状态变量（协议切换时必须重置）
+        currentSmbShare = ""
+        currentSmbBaseUrl = ""
         
         log("[Controller] Connection state cleared")
     }
@@ -377,6 +387,14 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] smbClient is null: ${smbClient == null}")
         log("[Controller] BrowseScope isActive: ${browseScope.isActive}")
         log("[Controller] BrowseScope job isCancelled: ${browseScope.coroutineContext[Job]?.isCancelled}")
+        
+        // ✅ 如果browseScope被取消，重新创建
+        if (!browseScope.isActive) {
+            log("[Controller] ⚠️ BrowseScope is not active, recreating...")
+            browseScope.cancel()
+            browseScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+            log("[Controller] ✅ New browseScope created")
+        }
         
         browseScope.launch {
             log("[Controller] browseFiles coroutine started")
