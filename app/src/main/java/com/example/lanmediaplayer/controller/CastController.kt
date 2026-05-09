@@ -653,6 +653,27 @@ class CastController(private val context: Context, private val logCallback: ((St
         }
     }
     
+    // ✅ 内部使用的Stop方法（suspend版本）
+    private suspend fun sendStop(device: CastDevice): Boolean {
+        return try {
+            val soapBody = """<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+<InstanceID>0</InstanceID>
+</u:Stop>
+</s:Body>
+</s:Envelope>"""
+            
+            log("Sending Stop request...")
+            sendSoapRequest(device, "urn:schemas-upnp-org:service:AVTransport:1#Stop", soapBody)
+        } catch (e: Exception) {
+            log("Stop error: ${e.message}")
+            e.printStackTrace()
+            false
+        }
+    }
+    
     private suspend fun sendSoapRequest(device: CastDevice, soapAction: String, body: String): Boolean {
         return suspendCoroutine { continuation ->
             scope.launch {
