@@ -198,6 +198,11 @@ class MainActivity : ComponentActivity() {
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_AUDIO)
             }
+            // Android 13+ 附近WiFi设备权限
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.NEARBY_WIFI_DEVICES) 
+                != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+            }
         } else {
             // Android 12及以下需要存储权限
             if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) 
@@ -207,6 +212,18 @@ class MainActivity : ComponentActivity() {
             if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) 
                 != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        
+        // 位置权限（Android 6.0+ 需要，用于WiFi扫描）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) 
+                != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) 
+                != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
             }
         }
         
