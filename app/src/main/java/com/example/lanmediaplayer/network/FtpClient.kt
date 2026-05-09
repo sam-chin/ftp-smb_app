@@ -79,33 +79,20 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP]    - Verify router has no 'AP Isolation' enabled")
             
             // ✅ 使用最简单的socket配置（模仿ES文件浏览器）
-            log("[FTP] Creating socket with IPv4-only mode...")
-            
-            // ✅ 关键修复：显式获取本地IPv4地址并绑定
-            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
-                ?.toList()
-                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
-                ?.find { 
-                    it is java.net.Inet4Address && 
-                    !it.isLoopbackAddress && 
-                    !it.isAnyLocalAddress &&
-                    it.hostAddress.startsWith("192.168.")  // 优先选择局域网IP
-                } ?: java.net.InetAddress.getByName("0.0.0.0")
-            
-            log("[FTP] Binding to local IPv4: ${localIpv4Address.hostAddress}")
+            log("[FTP] Creating socket...")
             
             controlSocket = Socket()
-            controlSocket?.bind(java.net.InetSocketAddress(localIpv4Address, 0))
+            controlSocket?.soTimeout = 30000
+            controlSocket?.keepAlive = true
             
             log("[FTP] Attempting socket connection...")
             log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
             
-            // ✅ 直接连接，不设置超时（让系统决定）
+            // ✅ 直接连接到目标地址
             val address = java.net.InetAddress.getByName(host)
             log("[FTP] Resolved host to: ${address.hostAddress} (IPv${if (address is java.net.Inet6Address) "6" else "4"})")
             
             try {
-                // ✅ 不使用timeout参数，让系统使用默认值
                 controlSocket?.connect(java.net.InetSocketAddress(address, port))
                 
                 // 连接成功后再设置超时
