@@ -47,40 +47,37 @@ class CastController(private val context: Context, private val logCallback: ((St
         
         searchJob = scope.launch {
             try {
-                log("=== Starting DLNA device discovery ===")
+                log("=== Starting DLNA device discovery (optimized) ===")
                 
-                // ✅ 并行发送多种类型的SSDP请求，提高发现率
-                val searchTypes = listOf(
-                    "urn:schemas-upnp-org:device:MediaRenderer:1",  // 媒体渲染器（电视、音响）
-                    "urn:schemas-upnp-org:device:MediaServer:1",     // 媒体服务器（NAS）
-                    "ssdp:all"                                        // 所有UPnP设备
-                )
+                // ✅ 只搜索MediaRenderer（投屏设备），不搜ssdp:all
+                val searchType = "urn:schemas-upnp-org:device:MediaRenderer:1"
+                log("📡 Searching for: $searchType")
                 
-                // ✅ 快速并行搜索，每种类型发送2次
-                for ((index, st) in searchTypes.withIndex()) {
-                    log("Sending SSDP search for: $st (${index + 1}/${searchTypes.size})")
-                    
-                    // 每种类型发送2次请求，间隔500ms
-                    for (retry in 1..2) {
-                        searchSsdpDevices(st)
-                        if (retry < 2) delay(500)
-                    }
-                    
-                    // 不同类型之间间隔1秒
-                    if (index < searchTypes.size - 1) delay(1000)
+                // ✅ 快速发送3次M-SEARCH广播，间隔100ms
+                for (i in 1..3) {
+                    log("Sending M-SEARCH #$i/3...")
+                    sendSsdpBroadcast(searchType)
+                    if (i < 3) delay(100)  // 100ms间隔
                 }
                 
-                // ✅ 最后等待3秒接收所有响应
-                log("Waiting for final responses...")
-                delay(3000)
+                // ✅ 开启2.5秒限时收包窗口
+                log("⏱️ Starting 2.5s receive window...")
+                val startTime = System.currentTimeMillis()
+                val receiveTimeout = 2500L  // 2.5秒
                 
+                while (System.currentTimeMillis() - startTime < receiveTimeout && isSearching) {
+                    // 异步接收和解析响应
+                    receiveAndParseResponse(searchType, onDevicesFound)
+                }
+                
+                log("✅ Search completed in ${System.currentTimeMillis() - startTime}ms")
                 mainHandler.post {
                     isSearching = false
-                    log("=== Search completed, found ${devices.size} devices ===")
+                    log("🎉 Found ${devices.size} devices")
                     onDevicesFound(devices.toList())
                 }
             } catch (e: Exception) {
-                log("Search error: ${e.message}")
+                log("❌ Search error: ${e.message}")
                 e.printStackTrace()
                 mainHandler.post {
                     isSearching = false
@@ -90,157 +87,173 @@ class CastController(private val context: Context, private val logCallback: ((St
         }
     }
     
-    private suspend fun searchSsdpDevices(searchType: String = "urn:schemas-upnp-org:device:MediaRenderer:1") {
-        return suspendCoroutine { continuation ->
-            scope.launch {
-                var socket: MulticastSocket? = null
-                try {
-                    val ssdpSearch = 
-                        "M-SEARCH * HTTP/1.1\r\n" +
-                        "HOST: 239.255.255.250:1900\r\n" +
-                        "MAN: \"ssdp:discover\"\r\n" +
-                        "MX: 2\r\n" +  // ✅ 减少等待时间到2秒
-                        "ST: $searchType\r\n" +
-                        "\r\n"
-                    
-                    log("SSDP Request:\n$ssdpSearch")
-                    
-                    val searchBytes = ssdpSearch.toByteArray()
-                    
-                    val multicastAddress = InetAddress.getByName("239.255.255.250")
-                    
-                    // ✅ 使用MulticastSocket而不是DatagramSocket
-                    socket = MulticastSocket()
-                    socket.soTimeout = 4000  // ✅ 4秒超时
-                    socket.timeToLive = 4    // ✅ 设置TTL
-                    
-                    val packet = DatagramPacket(searchBytes, searchBytes.size, multicastAddress, 1900)
-                    socket.send(packet)
-                    log("SSDP packet sent successfully")
-                    
-                    val buffer = ByteArray(8192)  // ✅ 增加缓冲区大小
-                    val responsePacket = DatagramPacket(buffer, buffer.size)
-                    
-                    var foundCount = 0
-                    val endTime = System.currentTimeMillis() + 4000  // ✅ 4秒搜索窗口
-                    
-                    while (System.currentTimeMillis() < endTime && foundCount < 30) {
-                        try {
-                            socket.receive(responsePacket)
-                            val response = String(responsePacket.data, 0, responsePacket.length)
-                            val senderIp = responsePacket.address.hostAddress
-                            log("Received SSDP response from: $senderIp")
-                            parseSsdpResponse(response, senderIp, responsePacket.port)
-                            foundCount++
-                        } catch (e: Exception) {
-                            // 超时或其他错误，退出循环
-                            break
-                        }
-                    }
-                    
-                    log("Found $foundCount responses for $searchType")
-                } catch (e: Exception) {
-                    log("SSDP search error for $searchType: ${e.message}")
-                    e.printStackTrace()
-                } finally {
-                    try {
-                        socket?.close()
-                    } catch (e: Exception) {
-                        // Ignore
-                    }
-                }
-                continuation.resume(Unit)
+    // ✅ 发送单次M-SEARCH广播
+    private suspend fun sendSsdpBroadcast(searchType: String) {
+        withContext(Dispatchers.IO) {
+            var socket: DatagramSocket? = null
+            try {
+                val ssdpMessage = 
+                    "M-SEARCH * HTTP/1.1\r\n" +
+                    "HOST: 239.255.255.250:1900\r\n" +
+                    "MAN: \"ssdp:discover\"\r\n" +
+                    "MX: 2\r\n" +  // ✅ MX固定为2秒
+                    "ST: $searchType\r\n" +
+                    "\r\n"
+                
+                val multicastAddress = InetAddress.getByName("239.255.255.250")
+                socket = DatagramSocket()
+                socket.broadcast = true
+                
+                val packet = DatagramPacket(
+                    ssdpMessage.toByteArray(Charsets.UTF_8),
+                    ssdpMessage.length,
+                    multicastAddress,
+                    1900
+                )
+                socket.send(packet)
+                log("✓ Broadcast sent")
+                
+            } catch (e: Exception) {
+                log("Send error: ${e.message}")
+            } finally {
+                socket?.close()
             }
         }
     }
     
-    private fun parseSsdpResponse(response: String, ip: String?, port: Int) {
-        try {
-            val lines = response.split("\r\n", "\n")
-            var location: String? = null
-            var server: String? = null
-            var st: String? = null
-            
-            for (line in lines) {
-                val lowerLine = line.lowercase()
-                if (lowerLine.startsWith("location:")) {
-                    location = line.substringAfter(":").trim()
-                } else if (lowerLine.startsWith("server:")) {
-                    server = line.substringAfter(":").trim()
-                } else if (lowerLine.startsWith("st:") || lowerLine.startsWith("ext:")) {
-                    st = line.substringAfter(":").trim()
-                }
-            }
-            
-            if (location != null && ip != null) {
-                val deviceName = server ?: "DLNA Device"
-                val existingDevice = devices.find { it.ip == ip }
-                if (existingDevice == null) {
-                    // ✅ 标准DLNA流程：拉取设备描述XML并解析controlURL
-                    log("📡 Found device: $deviceName at $ip")
-                    log("📍 Location URL: $location")
+    // ✅ 异步接收并解析响应
+    private suspend fun receiveAndParseResponse(searchType: String, onDevicesFound: (List<CastDevice>) -> Unit) {
+        withContext(Dispatchers.IO) {
+            var socket: DatagramSocket? = null
+            try {
+                socket = DatagramSocket(null)
+                socket.reuseAddress = true
+                socket.soTimeout = 500  // 500ms超时，快速循环
+                
+                val buffer = ByteArray(8192)
+                val packet = DatagramPacket(buffer, buffer.size)
+                
+                try {
+                    socket.receive(packet)
                     
-                    scope.launch {
-                        try {
-                            // 第3步：拉取设备描述XML
-                            val xmlContent = fetchDeviceDescription(location)
-                            if (xmlContent != null) {
-                                // 第4步：解析XML获取AVTransport controlURL
-                                val controlUrl = parseAvTransportControlUrl(xmlContent, location)
-                                
-                                if (controlUrl != null) {
-                                    // 第5步：使用解析出的controlURL
-                                    log("✅ AVTransport controlURL: $controlUrl")
-                                    
-                                    // 从controlURL中提取端口（如果需要）
-                                    val finalPort = extractPortFromUrl(controlUrl) ?: port
-                                    
-                                    mainHandler.post {
-                                        devices.add(CastDevice(deviceName, ip, finalPort, "DLNA", controlUrl))
-                                        log("🎉 Device added with dynamic controlURL")
-                                    }
-                                } else {
-                                    log("⚠️ Failed to parse AVTransport controlURL from XML")
-                                    // 降级方案：使用默认路径
-                                    fallbackAddDevice(deviceName, ip, port, location)
-                                }
-                            } else {
-                                log("⚠️ Failed to fetch device description XML")
-                                // 降级方案：使用默认路径
-                                fallbackAddDevice(deviceName, ip, port, location)
-                            }
-                        } catch (e: Exception) {
-                            log("❌ Error processing device: ${e.message}")
-                            e.printStackTrace()
-                            // 降级方案
-                            fallbackAddDevice(deviceName, ip, port, location)
+                    val response = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                    val senderIp = packet.address.hostAddress
+                    
+                    // ✅ 提取Location并去重
+                    val location = extractLocationFromResponse(response)
+                    if (location != null && !isDuplicateDevice(location)) {
+                        log("📍 New device from: $senderIp")
+                        log("   Location: $location")
+                        
+                        // ✅ 异步获取XML并解析controlURL
+                        processDeviceDiscovery(location, senderIp, onDevicesFound)
+                    }
+                    
+                } catch (e: java.net.SocketTimeoutException) {
+                    // 超时是正常的，继续循环
+                }
+                
+            } catch (e: Exception) {
+                // 忽略错误，继续尝试
+            } finally {
+                socket?.close()
+            }
+        }
+    }
+    
+    // ✅ 从SSDP响应中提取Location
+    private fun extractLocationFromResponse(response: String): String? {
+        val lines = response.split("\r\n", "\n")
+        for (line in lines) {
+            if (line.lowercase().startsWith("location:")) {
+                return line.substringAfter(":").trim()
+            }
+        }
+        return null
+    }
+    
+    // ✅ 设备去重（基于Location）
+    private val discoveredLocations = mutableSetOf<String>()
+    
+    private fun isDuplicateDevice(location: String): Boolean {
+        return !discoveredLocations.add(location)
+    }
+    
+    // ✅ 异步处理设备发现（获取XML + 解析controlURL）
+    private suspend fun processDeviceDiscovery(
+        location: String,
+        senderIp: String?,
+        onDevicesFound: (List<CastDevice>) -> Unit
+    ) {
+        scope.launch {
+            try {
+                // 第3步：拉取设备描述XML
+                val xmlContent = fetchDeviceDescription(location)
+                if (xmlContent != null) {
+                    // 第4步：解析XML获取AVTransport controlURL
+                    val controlUrl = parseAvTransportControlUrl(xmlContent, location)
+                    
+                    if (controlUrl != null) {
+                        // 从controlURL或location提取IP和端口
+                        val (ip, port) = extractIpAndPort(controlUrl)
+                        val deviceName = extractDeviceNameFromXml(xmlContent) ?: "DLNA Device"
+                        
+                        log("✅ Device found: $deviceName")
+                        log("   IP: $ip, Port: $port")
+                        log("   ControlURL: $controlUrl")
+                        
+                        val device = CastDevice(deviceName, ip, port, "DLNA", controlUrl)
+                        
+                        mainHandler.post {
+                            devices.add(device)
+                            // ✅ 实时回调，立即更新UI
+                            onDevicesFound(devices.toList())
                         }
                     }
                 }
+            } catch (e: Exception) {
+                log("Process device error: ${e.message}")
+            }
+        }
+    }
+    
+    // ✅ 从URL提取IP和端口
+    private fun extractIpAndPort(url: String): Pair<String, Int> {
+        return try {
+            if (url.contains("://")) {
+                val hostPart = url.split("://")[1].split(":")[1].split("/")[0]
+                val ip = url.split("://")[1].split(":")[0]
+                val port = hostPart.toIntOrNull() ?: 80
+                Pair(ip, port)
+            } else {
+                Pair("127.0.0.1", 80)
             }
         } catch (e: Exception) {
-            log("Parse error: ${e.message}")
-            e.printStackTrace()
+            Pair("127.0.0.1", 80)
         }
     }
     
-    // ✅ 降级方案：当无法获取XML时使用默认路径
-    private fun fallbackAddDevice(deviceName: String, ip: String, port: Int, location: String?) {
-        val defaultPaths = listOf(
-            "upnp/control/AVTransport",
-            "upnp/control/avtransport",
-            "AVTransport/control",
-            "MediaRenderer/AVTransport/Control"
-        )
-        
-        val controlUrl = location?.let {
-            val baseUrl = it.substringBeforeLast("/")
-            "$baseUrl/${defaultPaths[0]}"
-        } ?: "http://$ip:$port/${defaultPaths[0]}"
-        
-        log("⚠️ Using fallback controlURL: $controlUrl")
-        devices.add(CastDevice(deviceName, ip, port, "DLNA", controlUrl))
+    // ✅ 从XML提取设备名称
+    private fun extractDeviceNameFromXml(xmlContent: String): String? {
+        return try {
+            val factory = XmlPullParserFactory.newInstance()
+            val parser = factory.newPullParser()
+            parser.setInput(StringReader(xmlContent))
+            
+            var eventType = parser.eventType
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                if (eventType == XmlPullParser.START_TAG && parser.name == "friendlyName") {
+                    return parser.nextText()
+                }
+                eventType = parser.next()
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
     }
+
+    
     
     // ✅ 第3步：拉取设备描述XML文件
     private suspend fun fetchDeviceDescription(locationUrl: String): String? {
@@ -354,59 +367,6 @@ class CastController(private val context: Context, private val logCallback: ((St
         } catch (e: Exception) {
             log("Build URL error: ${e.message}")
             relativePath
-        }
-    }
-    
-    // 从URL中提取端口
-    private fun extractPortFromUrl(url: String): Int? {
-        return try {
-            if (url.contains("://")) {
-                val hostPart = url.split("://")[1].split(":")[1].split("/")[0]
-                hostPart.toIntOrNull()
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-    
-    private fun extractControlInfo(location: String): Pair<String?, Int> {
-        return try {
-            // 从 location URL 提取主机和端口
-            if (location.contains("://")) {
-                val urlParts = location.split("://")
-                if (urlParts.size >= 2) {
-                    val hostAndPath = urlParts[1].split("/", limit = 2)
-                    if (hostAndPath.isNotEmpty()) {
-                        val hostPart = hostAndPath[0]
-                        // 解析端口
-                        val port = if (hostPart.contains(":")) {
-                            hostPart.split(":")[1].toIntOrNull() ?: 80
-                        } else {
-                            80  // 默认HTTP端口
-                        }
-                        
-                        // 构建基URL
-                        val baseUrl = if (hostAndPath.size >= 2) {
-                            "http://$hostPart/${hostAndPath[1]}"
-                        } else {
-                            "http://$hostPart/"
-                        }
-                        
-                        Pair(baseUrl, port)
-                    } else {
-                        Pair(location, 80)
-                    }
-                } else {
-                    Pair(location, 80)
-                }
-            } else {
-                Pair(location, 80)
-            }
-        } catch (e: Exception) {
-            log("Extract control info error: ${e.message}")
-            Pair(null, 80)
         }
     }
     
