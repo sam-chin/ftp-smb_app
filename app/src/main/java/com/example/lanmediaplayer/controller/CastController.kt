@@ -43,22 +43,41 @@ class CastController(private val context: Context, private val logCallback: ((St
         
         searchJob = scope.launch {
             try {
-                // ✅ 发送多次SSDP请求，提高发现成功率
-                for (i in 1..3) {
-                    log("Sending SSDP search request ${i}/3...")
-                    searchSsdpDevices()
-                    if (i < 3) delay(2000)  // 每次搜索间隔2秒
+                log("=== Starting DLNA device discovery ===")
+                
+                // ✅ 并行发送多种类型的SSDP请求，提高发现率
+                val searchTypes = listOf(
+                    "urn:schemas-upnp-org:device:MediaRenderer:1",  // 媒体渲染器（电视、音响）
+                    "urn:schemas-upnp-org:device:MediaServer:1",     // 媒体服务器（NAS）
+                    "ssdp:all"                                        // 所有UPnP设备
+                )
+                
+                // ✅ 快速并行搜索，每种类型发送2次
+                for ((index, st) in searchTypes.withIndex()) {
+                    log("Sending SSDP search for: $st (${index + 1}/${searchTypes.size})")
+                    
+                    // 每种类型发送2次请求，间隔500ms
+                    for (retry in 1..2) {
+                        searchSsdpDevices(st)
+                        if (retry < 2) delay(500)
+                    }
+                    
+                    // 不同类型之间间隔1秒
+                    if (index < searchTypes.size - 1) delay(1000)
                 }
                 
-                delay(2000)  // 最后等待2秒接收响应
+                // ✅ 最后等待3秒接收所有响应
+                log("Waiting for final responses...")
+                delay(3000)
                 
                 mainHandler.post {
                     isSearching = false
-                    log("Search completed, found ${devices.size} devices")
+                    log("=== Search completed, found ${devices.size} devices ===")
                     onDevicesFound(devices.toList())
                 }
             } catch (e: Exception) {
                 log("Search error: ${e.message}")
+                e.printStackTrace()
                 mainHandler.post {
                     isSearching = false
                     onDevicesFound(devices.toList())
@@ -67,47 +86,64 @@ class CastController(private val context: Context, private val logCallback: ((St
         }
     }
     
-    private suspend fun searchSsdpDevices() {
-        suspendCoroutine<Unit> { continuation ->
+    private suspend fun searchSsdpDevices(searchType: String = "urn:schemas-upnp-org:device:MediaRenderer:1") {
+        return suspendCoroutine { continuation ->
             scope.launch {
+                var socket: MulticastSocket? = null
                 try {
                     val ssdpSearch = 
                         "M-SEARCH * HTTP/1.1\r\n" +
                         "HOST: 239.255.255.250:1900\r\n" +
                         "MAN: \"ssdp:discover\"\r\n" +
-                        "MX: 3\r\n" +
-                        "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n" +
+                        "MX: 2\r\n" +  // ✅ 减少等待时间到2秒
+                        "ST: $searchType\r\n" +
                         "\r\n"
+                    
+                    log("SSDP Request:\n$ssdpSearch")
                     
                     val searchBytes = ssdpSearch.toByteArray()
                     
                     val multicastAddress = InetAddress.getByName("239.255.255.250")
+                    
+                    // ✅ 使用MulticastSocket而不是DatagramSocket
+                    socket = MulticastSocket()
+                    socket.soTimeout = 4000  // ✅ 4秒超时
+                    socket.timeToLive = 4    // ✅ 设置TTL
+                    
                     val packet = DatagramPacket(searchBytes, searchBytes.size, multicastAddress, 1900)
-                    
-                    val socket = DatagramSocket()
-                    socket.soTimeout = 5000  // ✅ 增加超时时间到5秒
                     socket.send(packet)
+                    log("SSDP packet sent successfully")
                     
-                    val buffer = ByteArray(4096)
+                    val buffer = ByteArray(8192)  // ✅ 增加缓冲区大小
                     val responsePacket = DatagramPacket(buffer, buffer.size)
                     
                     var foundCount = 0
-                    val endTime = System.currentTimeMillis() + 8000  // ✅ 增加搜索时间到8秒
+                    val endTime = System.currentTimeMillis() + 4000  // ✅ 4秒搜索窗口
                     
-                    while (System.currentTimeMillis() < endTime && foundCount < 20) {
+                    while (System.currentTimeMillis() < endTime && foundCount < 30) {
                         try {
                             socket.receive(responsePacket)
                             val response = String(responsePacket.data, 0, responsePacket.length)
-                            parseSsdpResponse(response, responsePacket.address.hostAddress, responsePacket.port)
+                            val senderIp = responsePacket.address.hostAddress
+                            log("Received SSDP response from: $senderIp")
+                            parseSsdpResponse(response, senderIp, responsePacket.port)
                             foundCount++
                         } catch (e: Exception) {
+                            // 超时或其他错误，退出循环
                             break
                         }
                     }
                     
-                    socket.close()
+                    log("Found $foundCount responses for $searchType")
                 } catch (e: Exception) {
-                    log("SSDP search error: ${e.message}")
+                    log("SSDP search error for $searchType: ${e.message}")
+                    e.printStackTrace()
+                } finally {
+                    try {
+                        socket?.close()
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
                 }
                 continuation.resume(Unit)
             }
