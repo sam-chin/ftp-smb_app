@@ -392,6 +392,11 @@ class CastController(private val context: Context, private val logCallback: ((St
                 log("Control URL: ${device.controlUrl}")
                 log("Image URL: $imageUrl")
                 
+                // ✅ 关键修复：投屏前先停止当前播放
+                log("🛑 Stopping current playback before casting new image...")
+                sendStop(device)
+                delay(500)  // 等待停止完成
+                
                 // ✅ 对URL和标题进行XML转义（和视频投屏保持一致）
                 val escapedTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 val escapedImageUrl = imageUrl.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -490,6 +495,11 @@ class CastController(private val context: Context, private val logCallback: ((St
                 log("   2. No firewall blocking port ${videoUrl.split(":")[2].split("/")[0]}")
                 log("   3. Android allows external connections to HTTP proxy")
                 log("")
+                
+                // ✅ 关键修复：投屏前先停止当前播放
+                log("🛑 Stopping current playback before casting new video...")
+                sendStop(device)
+                delay(500)  // 等待停止完成
                 
                 // 首先设置URI
                 val setUriSuccess = sendSetAVTransportURI(device, videoUrl, title)
