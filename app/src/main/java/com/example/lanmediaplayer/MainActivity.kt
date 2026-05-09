@@ -140,6 +140,17 @@ class MainActivity : ComponentActivity() {
             if (!hasInternet) {
                 debugLogs.add("⚠️ Network has no internet capability")
             }
+            
+            // ✅ 小米澎湃OS特殊提示
+            val manufacturer = android.os.Build.MANUFACTURER.lowercase()
+            if (manufacturer.contains("xiaomi") || manufacturer.contains("mi")) {
+                debugLogs.add("")
+                debugLogs.add("📱 Xiaomi HyperOS detected! If FTP/SMB fails:")
+                debugLogs.add("   1. Settings → Apps → LAN Media → Battery Saver → No restrictions")
+                debugLogs.add("   2. Security App → Network Assistant → Allow LAN access")
+                debugLogs.add("   3. Settings → Connection & Sharing → Private DNS → Off")
+                debugLogs.add("   4. WLAN → WLAN Assistant → Disable 'Smart network acceleration'")
+            }
         }
     }
     

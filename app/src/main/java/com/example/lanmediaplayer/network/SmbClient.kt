@@ -65,6 +65,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Username: '$username'")
             log("[SMB-JCIFS] Domain: '$domain' (empty means auto-detect)")
             
+            // ✅ 小米澎湃OS诊断提示
+            log("[SMB-JCIFS] 💡 If connection fails on Xiaomi HyperOS, please check:")
+            log("[SMB-JCIFS]    1. Settings → Apps → LAN Media → Battery Saver → No restrictions")
+            log("[SMB-JCIFS]    2. Security App → Network Assistant → Allow LAN access")
+            log("[SMB-JCIFS]    3. Settings → Connection & Sharing → Private DNS → Off")
+            log("[SMB-JCIFS]    4. WLAN → WLAN Assistant → Disable 'Smart network acceleration'")
+            
             this@SmbClient.host = host
             this@SmbClient.username = username
             this@SmbClient.password = password

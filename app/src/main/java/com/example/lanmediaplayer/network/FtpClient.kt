@@ -52,11 +52,18 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[FTP] === Starting connection ===")
             log("[FTP] Target: $host:$port")
             
+            // ✅ 小米澎湃OS诊断提示
+            log("[FTP] 💡 If connection fails on Xiaomi HyperOS, please check:")
+            log("[FTP]    1. Settings → Apps → LAN Media → Battery Saver → No restrictions")
+            log("[FTP]    2. Security App → Network Assistant → Allow LAN access")
+            log("[FTP]    3. Settings → Connection & Sharing → Private DNS → Off")
+            
             controlSocket = Socket()
             controlSocket?.soTimeout = 30000 // 30 seconds timeout
             controlSocket?.keepAlive = true
             
             log("[FTP] Attempting socket connection...")
+            log("[FTP] Local IP: ${java.net.NetworkInterface.getNetworkInterfaces()?.toList()?.flatMap { it.inetAddresses?.toList() ?: emptyList() }?.find { it is java.net.Inet4Address && !it.isLoopbackAddress && !it.isAnyLocalAddress }?.hostAddress}")
             controlSocket?.connect(java.net.InetSocketAddress(host, port), 30000)
             
             log("[FTP] Socket connected successfully")
