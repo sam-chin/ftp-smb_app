@@ -867,6 +867,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
     }
     
+    /**
+     * ✅ 设置当前媒体文件（用于图片预览）
+     */
+    fun setCurrentMediaFile(mediaFile: MediaFile) {
+        log("[Controller] 📄 setCurrentMediaFile: ${mediaFile.name}")
+        currentMediaFile = mediaFile
+    }
+    
+    /**
+     * 播放媒体文件
+     */
     fun playMedia(mediaFile: MediaFile, callback: MediaCallback) {
         log("[Controller] === PlayMedia START ===")
         log("[Controller] File: ${mediaFile.name}")
@@ -1475,7 +1486,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                     is NetworkProtocol.SMB -> {
                         // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
-                        // 直接使用，不需要额外处理
                         log("[Controller] 📡 SMB getFileStream: $path")
                         smbClient?.getFileStream(path, startOffset)
                     }
@@ -1484,54 +1494,19 @@ class MediaController(private val context: Context, private val logCallback: ((S
             }
             
             override suspend fun getFileSize(path: String): Long {
-                log("[Controller] 📏 getFileSize called for: $path")
-                log("[Controller] currentMediaFile is null: ${currentMediaFile == null}")
-                
-                // ✅ 优先使用 currentMediaFile 的协议
-                val protocol = currentMediaFile?.protocol
-                
-                return when (protocol) {
+                return when (currentMediaFile?.protocol) {
                     is NetworkProtocol.FTP -> {
                         // ✅ FTP 路径处理：确保以 / 开头
                         val ftpPath = if (path.startsWith("/")) path else "/$path"
                         log("[Controller] 📡 FTP getFileSize: $ftpPath")
-                        val size = ftpClient?.getFileSize(ftpPath) ?: 0L
-                        log("[Controller] 📊 FTP file size: $size")
-                        size
+                        ftpClient?.getFileSize(ftpPath) ?: 0L
                     }
                     is NetworkProtocol.SMB -> {
                         // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
                         log("[Controller] 📡 SMB getFileSize: $path")
-                        val size = smbClient?.getFileSize(path) ?: 0L
-                        log("[Controller] 📊 SMB file size: $size")
-                        size
+                        smbClient?.getFileSize(path) ?: 0L
                     }
-                    else -> {
-                        // ✅ 如果 currentMediaFile 为 null，尝试从已连接的客户端获取
-                        log("[Controller] ⚠️ No protocol in currentMediaFile, trying connected clients...")
-                        
-                        // 尝试 FTP
-                        val ftp = ftpClient
-                        if (ftp != null) {
-                            val ftpPath = if (path.startsWith("/")) path else "/$path"
-                            log("[Controller] 📡 FTP getFileSize (fallback): $ftpPath")
-                            val size = ftp.getFileSize(ftpPath)
-                            log("[Controller] 📊 FTP file size (fallback): $size")
-                            return size
-                        }
-                        
-                        // 尝试 SMB
-                        val smb = smbClient
-                        if (smb != null) {
-                            log("[Controller] 📡 SMB getFileSize (fallback): $path")
-                            val size = smb.getFileSize(path)
-                            log("[Controller] 📊 SMB file size (fallback): $size")
-                            return size
-                        }
-                        
-                        log("[Controller] ❌ No connected client, returning 0")
-                        0L
-                    }
+                    else -> 0L
                 }
             }
         }

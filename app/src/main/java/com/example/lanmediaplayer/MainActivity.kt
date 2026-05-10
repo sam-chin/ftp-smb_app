@@ -647,6 +647,11 @@ fun MainScreen(
                         val index = allImageFiles.indexOfFirst { it.path == file.path }
                         imageFiles = allImageFiles
                         initialImageIndex = if (index >= 0) index else 0
+                        
+                        // ✅ 设置 currentMediaFile，让 HTTP 代理能正常工作
+                        mediaController.setCurrentMediaFile(file)
+                        addLog("Set currentMediaFile for image preview: ${file.name}")
+                        
                         currentScreen = Screen.ImageViewer
                     } else {
                         mediaController.playMedia(file, object : MediaController.MediaCallback {
