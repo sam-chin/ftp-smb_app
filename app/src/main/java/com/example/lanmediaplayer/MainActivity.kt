@@ -2021,8 +2021,8 @@ fun ImageViewerScreen(
                         val imageUrl = mediaController.getImageUrl(currentImage, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(files: List<MediaFile>) {}
                             
-                            override fun onError(error: String) {
-                                onError(error)
+                            override fun onError(errorMsg: String) {
+                                println("[ImageViewer] Get image URL error: $errorMsg")
                             }
                             
                             override fun onPlaybackStateChanged(state: Int) {}
@@ -2035,15 +2035,15 @@ fun ImageViewerScreen(
                                     // ✅ 启动前台服务，保持后台运行
                                     mediaController.startDlnaService(currentImage.name)
                                 } else {
-                                    onError(message)
+                                    println("[ImageViewer] Cast failed: $message")
                                 }
                             }
                         } else {
-                            onError("Failed to start HTTP proxy for image")
+                            println("[ImageViewer] Failed to get image URL")
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        onError("Error: ${e.message}")
+                        println("[ImageViewer] Cast error: ${e.message}")
                     }
                 }
             }
