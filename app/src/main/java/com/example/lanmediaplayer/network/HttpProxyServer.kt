@@ -230,7 +230,14 @@ class HttpProxyServer(
         
         // 优先级1：检查外部缓存（预加载的图片）
         val cache = externalImageCacheProvider?.invoke()
-        log("🔍 Cache check: cache=${cache != null}, size=${cache?.size ?: 0}, looking for: $filePath")
+        log("🔍 Cache check: cache=${cache != null}, size=${cache?.size ?: 0}, looking for: '$filePath'")
+        
+        // ✅ 调试：打印缓存中的所有键
+        cache?.keys?.let { keys ->
+            if (keys.isNotEmpty()) {
+                log("🔍 Cache keys sample: ${keys.take(3).joinToString(", ")}")
+            }
+        }
         
         val cachedData = cache?.get(filePath)
         if (cachedData != null) {
@@ -239,6 +246,23 @@ class HttpProxyServer(
             return
         } else {
             log("⚠️ Cache miss: $filePath (cache size: ${cache?.size ?: 0})")
+            
+            // ✅ FTP 友好：如果缓存未命中，等待 500ms 让预加载完成
+            if (filePath.endsWith(".jpg", true) || filePath.endsWith(".jpeg", true) || 
+                filePath.endsWith(".png", true) || filePath.endsWith(".gif", true)) {
+                log("⏳ Waiting 500ms for preload to complete...")
+                kotlinx.coroutines.delay(500)
+                
+                // 再次检查缓存
+                val cacheAfterWait = externalImageCacheProvider?.invoke()
+                val cachedDataAfterWait = cacheAfterWait?.get(filePath)
+                if (cachedDataAfterWait != null) {
+                    log("🚀 Cache hit after wait: $filePath (${cachedDataAfterWait.size / 1024}KB)")
+                    sendCachedData(outputStream, cachedDataAfterWait, contentType)
+                    return
+                }
+                log("⚠️ Still cache miss after wait, falling back to streaming")
+            }
         }
         
         // 优先级2：流式传输（边读边发）
@@ -343,12 +367,21 @@ class HttpProxyServer(
     }
     
     private fun getFileSizeWithCache(filePath: String, fileProvider: FileProvider): Long {
-        // 检查缓存
+        // ✅ 优先级1：检查外部缓存（预加载的图片），直接从缓存获取大小
+        val cache = externalImageCacheProvider?.invoke()
+        cache?.get(filePath)?.let { cachedData ->
+            val size = cachedData.size.toLong()
+            log("📏 Cache size hit: $filePath ($size bytes)")
+            fileSizeCache[filePath] = size  // 也存入文件尺寸缓存
+            return size
+        }
+        
+        // 优先级2：检查文件尺寸缓存
         fileSizeCache[filePath]?.let {
             return it
         }
         
-        // 查询并缓存
+        // 优先级3：查询并缓存
         val size = runBlocking { fileProvider.getFileSize(filePath) }
         if (size > 0) {
             fileSizeCache[filePath] = size
