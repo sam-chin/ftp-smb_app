@@ -148,6 +148,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 lastError = e
                                 log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: ${e.message}")
                                 
+                                // ✅ 如果是协程取消异常，立即退出
+                                if (e is kotlinx.coroutines.CancellationException) {
+                                    log("[Controller] Preload cancelled, stopping...")
+                                    throw e  // 重新抛出取消异常
+                                }
+                                
                                 if (attempt < 3) {
                                     kotlinx.coroutines.delay(500)  // ✅ 重试间隔500ms，平衡速度和稳定性
                                 }
@@ -1118,6 +1124,32 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
     }
     
+    // ✅ 关键修复：停止投屏后切换HTTP代理回本地模式
+    fun switchToLocalMode() {
+        log("[Controller] === Switching HTTP proxy to LOCAL mode ===")
+        
+        if (httpProxy != null && httpProxy!!.isAllowingExternalConnections()) {
+            log("[Controller] Current mode is DLNA, switching to local...")
+            
+            // 停止当前的DLNA模式代理
+            httpProxy?.stop()
+            currentPort = 0
+            
+            // 创建新的本地模式代理（只监听127.0.0.1）
+            httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
+            
+            // ✅ 清空缓存（避免使用DLNA模式的缓存数据）
+            httpProxy?.clearCache()
+            log("[Controller] HTTP proxy switched to LOCAL mode (127.0.0.1 only)")
+            
+            // ✅ 重新设置外部图片缓存提供者
+            httpProxy?.externalImageCacheProvider = { localImageCache }
+            log("[Controller] External image cache provider re-set for local mode")
+        } else {
+            log("[Controller] Already in local mode or proxy not started")
+        }
+    }
+    
     // ✅ 获取图片的HTTP代理URL（用于DLNA投屏）
     suspend fun getImageUrl(imageFile: MediaFile, callback: MediaCallback): String? {
         return try {
@@ -1208,7 +1240,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
             }
             
-            // 如果HTTP代理还没创建，先创建
+            // ✅ 关键修复：DLNA投屏模式，必须允许外部设备连接
             if (httpProxy == null) {
                 // ✅ DLNA投屏模式：允许外部设备连接
                 httpProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
@@ -1218,6 +1250,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 httpProxy?.stop()
                 currentPort = 0
                 httpProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
+                
+                // ✅ 清空HTTP代理的图片缓存（模式切换后缓存失效）
+                httpProxy?.clearCache()
+                log("[Controller] HTTP proxy cache cleared due to mode switch to DLNA")
             }
             
             // 如果HTTP代理还没启动，启动它

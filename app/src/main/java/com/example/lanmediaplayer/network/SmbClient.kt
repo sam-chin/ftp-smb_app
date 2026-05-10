@@ -585,6 +585,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 log("[SMB-JCIFS] Full path: $fullPath")
                 
+                // ✅ 优化：先尝试直接获取文件大小，失败后再用备用方案
                 val smbFile = SmbFile(fullPath, context)
                 
                 if (smbFile.exists() && !smbFile.isDirectory) {
@@ -593,37 +594,44 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     return@withContext size
                 }
                 
-                log("[SMB-JCIFS] File not found, trying alternatives...")
+                log("[SMB-JCIFS] Direct access failed, trying alternative methods...")
                 
+                // ✅ 备用方案1：从父目录列表中查找
                 if (decodedPath.isNotEmpty()) {
                     val parentPath = decodedPath.substringBeforeLast('/', "")
                     val fileName = decodedPath.substringAfterLast('/')
                     
                     if (parentPath.isNotEmpty()) {
                         val parentFullPath = buildFullPath(parentPath)
-                        log("[SMB-JCIFS] Listing parent: $parentFullPath")
+                        log("[SMB-JCIFS] Listing parent directory: $parentFullPath")
                         
                         try {
                             val parentFile = SmbFile(parentFullPath, context)
                             if (parentFile.exists() && parentFile.isDirectory) {
-                                for (f in parentFile.listFiles()) {
+                                val files = parentFile.listFiles()
+                                log("[SMB-JCIFS] Found ${files.size} files in parent directory")
+                                
+                                for (f in files) {
                                     val name = f.name.trimEnd('/')
                                     if (name == fileName && f.isDirectory == false) {
                                         val size = f.length()
-                                        log("[SMB-JCIFS] Found file in parent: $name, size: $size")
+                                        log("[SMB-JCIFS] ✅ Found file in parent list: $name, size: $size")
                                         return@withContext size
                                     }
                                 }
+                                log("[SMB-JCIFS] File not found in parent directory listing")
                             }
                         } catch (e: Exception) {
-                            log("[SMB-JCIFS] Error listing parent: ${e.message}")
+                            log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
                         }
                     }
                 }
                 
+                log("[SMB-JCIFS] ⚠️ Could not determine file size, returning 0")
                 0L
             } catch (e: Exception) {
                 log("[SMB-JCIFS] Error getting file size: ${e.message}")
+                e.printStackTrace()
                 0L
             }
         }

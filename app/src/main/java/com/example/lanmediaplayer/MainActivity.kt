@@ -1821,6 +1821,8 @@ fun ImageViewerScreen(
             window?.decorView?.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
             // ✅ 停止DLNA前台服务
             mediaController.stopDlnaService()
+            // ✅ 关键修复：切换HTTP代理回本地模式（恢复本地预览）
+            mediaController.switchToLocalMode()
             // ✅ 清除投屏设备状态
             castingDevice = null
             // ✅ 清除投屏活跃状态
@@ -1873,10 +1875,11 @@ fun ImageViewerScreen(
                 IconButton(
                     onClick = {
                         isSlideshowPlaying = !isSlideshowPlaying
-                        // ✅ 停止幻灯片时清除投屏设备
+                        // ✅ 停止幻灯片时清除投屏设备并切换回本地模式
                         if (!isSlideshowPlaying) {
                             castingDevice = null
                             mediaController.stopDlnaService()
+                            mediaController.switchToLocalMode()  // ✅ 关键修复：恢复本地预览
                             (context as? MainActivity)?.setCastingState(false)
                         }
                     }

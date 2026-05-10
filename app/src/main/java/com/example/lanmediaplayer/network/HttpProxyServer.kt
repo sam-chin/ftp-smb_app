@@ -13,6 +13,10 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     // ✅ 公开属性，让外部可以检查当前模式
     fun isAllowingExternalConnections(): Boolean = allowExternalConnections
     
+    // ✅ SMB 文件尺寸缓存（避免重复查询）
+    private val fileSizeCache = mutableMapOf<String, Long>()
+    private val fileSizeCacheMutex = kotlinx.coroutines.sync.Mutex()
+    
     // ✅ 图片数据缓存（用于加速重复访问）
     private val imageCache = mutableMapOf<String, ByteArray>()
     private val maxCacheSize = 100 * 1024 * 1024  // ✅ 增加缓存到100MB
@@ -58,6 +62,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     fun clearCache() {
         imageCache.clear()
         currentCacheSize = 0
+        fileSizeCache.clear()  // ✅ 清空文件尺寸缓存
         log("[HTTP Proxy] Cache cleared")
     }
     
@@ -254,8 +259,28 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
             } while (line?.isNotEmpty() == true)
             
             log("[HTTP Proxy] Calling getFileSize for path: '$filePath'")
-            val fileSize = fileProvider.getFileSize(filePath)
-            log("[HTTP Proxy] File size result: $fileSize")
+            
+            // ✅ 先检查文件尺寸缓存
+            val cachedFileSize = fileSizeCacheMutex.withLock {
+                fileSizeCache[filePath]
+            }
+            
+            val fileSize = if (cachedFileSize != null) {
+                log("[HTTP Proxy] ✅ Using cached file size: $cachedFileSize")
+                cachedFileSize
+            } else {
+                // 缓存未命中，查询文件大小
+                val size = fileProvider.getFileSize(filePath)
+                log("[HTTP Proxy] File size result: $size")
+                
+                // ✅ 缓存文件尺寸（避免重复查询）
+                if (size > 0) {
+                    fileSizeCacheMutex.withLock {
+                        fileSizeCache[filePath] = size
+                    }
+                }
+                size
+            }
             
             if (fileSize <= 0) {
                 log("[HTTP Proxy] File not found or size is 0")
