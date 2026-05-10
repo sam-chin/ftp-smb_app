@@ -272,6 +272,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         }
         
         var fileStream: InputStream? = null
+        var totalBytesRead = 0L  // ✅ 在函数开始时声明，供所有分支使用
         try {
             // ✅ 检查缓存（仅对图片）
             val cachedData = if (contentType.startsWith("image/")) getFromCache(filePath) else null
@@ -404,6 +405,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         isHead: Boolean = false  // ✅ 支持HEAD请求
     ) {
         var fileStream: InputStream? = null
+        var totalSent = 0L  // ✅ 在函数开始时声明，供所有分支使用
         try {
             // Parse range: "bytes=start-end" or "bytes=start-"
             val range = rangeHeader.substring(6) // Remove "bytes="

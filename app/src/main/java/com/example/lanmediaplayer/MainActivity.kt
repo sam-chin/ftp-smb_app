@@ -1798,7 +1798,7 @@ fun ImageViewerScreen(
                                 val imageUrl = mediaController.getImageUrl(newImage, object : MediaController.MediaCallback {
                                     override fun onFilesLoaded(files: List<MediaFile>) {}
                                     override fun onError(error: String) {
-                                        addLog("Failed to get image URL for slideshow: $error")
+                                        println("[Slideshow] Failed to get image URL: $error")
                                     }
                                     override fun onPlaybackStateChanged(state: Int) {}
                                 })
@@ -1814,17 +1814,17 @@ fun ImageViewerScreen(
                                                 val nextImage = imageFiles[nextIndex]
                                                 launch {
                                                     try {
-                                                        addLog("Preloading next image for casting: ${nextImage.name}")
+                                                        println("[Slideshow] Preloading next image: ${nextImage.name}")
                                                         mediaController.getImageUrl(nextImage, object : MediaController.MediaCallback {
                                                             override fun onFilesLoaded(files: List<MediaFile>) {}
                                                             override fun onError(error: String) {
-                                                                addLog("Failed to preload next image: $error")
+                                                                println("[Slideshow] Failed to preload: $error")
                                                             }
                                                             override fun onPlaybackStateChanged(state: Int) {}
                                                         })
-                                                        addLog("Next image preloaded successfully")
+                                                        println("[Slideshow] Next image preloaded successfully")
                                                     } catch (e: Exception) {
-                                                        addLog("Preload error: ${e.message}")
+                                                        println("[Slideshow] Preload error: ${e.message}")
                                                     }
                                                 }
                                             } else {
