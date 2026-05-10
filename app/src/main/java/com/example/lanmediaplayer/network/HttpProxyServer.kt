@@ -10,13 +10,13 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     private var serverScope: CoroutineScope? = null
     private var currentPort: Int = 0
     
-    // ✅ 图片数据缓存（可选，用于加速重复访问）
+    // ✅ 图片数据缓存（用于加速重复访问）
     private val imageCache = mutableMapOf<String, ByteArray>()
     private val maxCacheSize = 50 * 1024 * 1024  // 最大缓存50MB
     private var currentCacheSize = 0L
     
-    // ✅ 引用外部图片数据缓存（由MediaController提供）
-    var externalImageDataCacheProvider: (() -> Map<String, ByteArray>)? = null
+    // ✅ 引用外部图片数据缓存（由MediaController提供，用于本地预览）
+    var externalImageCacheProvider: (() -> Map<String, ByteArray>)? = null
     
     private fun log(message: String) {
         println(message)
@@ -138,7 +138,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                         }
                         log("[HTTP Proxy] ==========================")
                         launch {
-                            handleClient(clientSocket, fileProvider)
+                            handleClient(clientSocket, fileProvider, isExternalConnection)
                         }
                     } catch (e: Exception) {
                         if (isActive) {
@@ -156,7 +156,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         }
     }
     
-    private suspend fun handleClient(clientSocket: Socket, fileProvider: FileProvider) {
+    private suspend fun handleClient(clientSocket: Socket, fileProvider: FileProvider, isExternalConnection: Boolean = false) {
         try {
             val inputStream = clientSocket.getInputStream()
             val outputStream = clientSocket.getOutputStream()
@@ -238,7 +238,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                 handleRangeRequest(outputStream, fileProvider, filePath, fileSize, rangeHeader, contentType, isHeadRequest)
             } else {
                 // Handle full file request
-                handleFullRequest(outputStream, fileProvider, filePath, fileSize, contentType, isHeadRequest)
+                handleFullRequest(outputStream, fileProvider, filePath, fileSize, contentType, isHeadRequest, isExternalConnection)
             }
             
             clientSocket.close()
@@ -261,7 +261,8 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         filePath: String,
         fileSize: Long,
         contentType: String,
-        isHead: Boolean = false  // ✅ 支持HEAD请求
+        isHead: Boolean = false,
+        isExternalConnection: Boolean = false  // ✅ 区分本地和外部连接
     ) {
         log("[HTTP Proxy] Handling ${if (isHead) "HEAD" else "full"} request for: $filePath")
         
@@ -281,37 +282,24 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         }
         
         var fileStream: InputStream? = null
-        var totalBytesRead = 0L  // ✅ 在函数开始时声明，供所有分支使用
+        var totalBytesRead = 0L
         try {
-            // ✅ 优先级1：检查外部图片数据缓存（MediaController预加载的）
-            val externalCache = externalImageDataCacheProvider?.invoke()
-            
-            // ✅ 关键修复：尝试两种路径格式（带/和不带/）
-            val pathWithSlash = if (filePath.startsWith("/")) filePath else "/$filePath"
-            val pathWithoutSlash = if (filePath.startsWith("/")) filePath.substring(1) else filePath
-            
+            // ✅ 优先级1：检查外部缓存（MediaController预加载的本地缓存）
+            // ⚠️ 关键修复：只对本地连接使用预加载缓存，避免DLNA设备占用SMB连接
+            val externalCache = if (!isExternalConnection) externalImageCacheProvider?.invoke() else null
             var externalCachedData: ByteArray? = null
+            
             if (contentType.startsWith("image/") && externalCache != null) {
-                // 先尝试原始路径
+                // 尝试两种路径格式（带/和不带/）
                 externalCachedData = externalCache[filePath]
-                // 如果没找到，尝试带/的路径
-                if (externalCachedData == null && pathWithSlash != filePath) {
-                    externalCachedData = externalCache[pathWithSlash]
-                    if (externalCachedData != null) {
-                        log("[HTTP Proxy] Cache hit with path normalization: '$filePath' -> '$pathWithSlash'")
-                    }
-                }
-                // 如果还没找到，尝试不带/的路径
-                if (externalCachedData == null && pathWithoutSlash != filePath) {
-                    externalCachedData = externalCache[pathWithoutSlash]
-                    if (externalCachedData != null) {
-                        log("[HTTP Proxy] Cache hit with path normalization: '$filePath' -> '$pathWithoutSlash'")
-                    }
+                if (externalCachedData == null && filePath.startsWith("/")) {
+                    externalCachedData = externalCache[filePath.substring(1)]
+                } else if (externalCachedData == null && !filePath.startsWith("/")) {
+                    externalCachedData = externalCache["/$filePath"]
                 }
             }
             
             if (externalCachedData != null) {
-                // 从外部缓存发送（最快！）
                 log("[HTTP Proxy] 🚀 Sending from external cache (preloaded): ${externalCachedData.size} bytes")
                 
                 val responseHeader = "HTTP/1.1 200 OK\r\n" +
@@ -329,7 +317,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                 return
             }
             
-            // ✅ 优先级2：检查内部缓存（HTTP代理自己缓存的）
+            // ✅ 优先级2：检查内部缓存
             val cachedData = if (contentType.startsWith("image/")) getFromCache(filePath) else null
             
             if (cachedData != null) {

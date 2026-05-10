@@ -65,21 +65,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ✅ HTTP代理重启回调（通知上层清空URL缓存）
     var onProxyRestarted: (() -> Unit)? = null
     
-    // ✅ 图片数据缓存（key=path, value=图片数据）
-    private val imageDataCache = mutableMapOf<String, ByteArray>()
-    private val maxImageDataCacheSize = 100 * 1024 * 1024  // 最大缓存100MB
-    private var currentImageDataCacheSize = 0L
+    // ✅ 本地预览图片缓存（与DLNA独立，避免冲突）
+    private val localImageCache = mutableMapOf<String, ByteArray>()
+    private val maxLocalCacheSize = 100 * 1024 * 1024  // 最大缓存100MB
+    private var currentLocalCacheSize = 0L
     
-    // ✅ 预加载队列管理
-    private var preloadStartIndex = 0  // 当前预加载起始索引
-    private var preloadBatchSize = 10  // 每批预加载10张
-    
-    // ✅ 预加载图片数据（直接读取到内存，带重试机制，并行加载）
+    // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
     suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
-        log("[Controller] === Preloading image data START ===")
-        log("[Controller] Preloading $count images from index $startIndex (parallel mode)")
+        log("[Controller] === Preloading image data to LOCAL cache ===")
         
         val endIndex = minOf(startIndex + count, imageFiles.size)
+        if (endIndex <= startIndex) {
+            log("[Controller] No images to preload")
+            return
+        }
+        
+        log("[Controller] Preloading $count images from index $startIndex (parallel mode)")
+        
         var successCount = 0
         var failCount = 0
         
@@ -98,26 +100,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         val imageFile = imageFiles[i]
                         val path = imageFile.path
                         
-                        // 如果已经缓存，跳过
-                        if (imageDataCache.containsKey(path)) {
-                            log("[Controller] Image $i already cached: $path")
+                        // 检查是否已缓存
+                        if (localImageCache.containsKey(path)) {
+                            log("[Controller] Image already cached: $path")
                             successCount++
                             return@launch
                         }
                         
-                        // ✅ 最多重试3次
+                        log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex} (attempt 1/3): $path")
+                        
                         var loaded = false
                         var lastError: Exception? = null
                         
+                        // ✅ 重试机制：最多尝试3次
                         for (attempt in 1..3) {
                             try {
-                                log("[Controller] Preloading image $i/$endIndex (attempt $attempt/3): $path")
-                                
-                                // 从FTP/SMB读取完整文件
                                 val fileData = when (imageFile.protocol) {
-                                    is NetworkProtocol.FTP -> {
-                                        ftpClient?.getFileStream(path)?.readBytes()
-                                    }
+                                    is NetworkProtocol.FTP -> ftpClient?.getFileStream(path)?.readBytes()
                                     is NetworkProtocol.SMB -> {
                                         val smbPath = if (path.startsWith("/")) path else "/$path"
                                         smbClient?.getFileStream(smbPath)?.readBytes()
@@ -125,45 +124,40 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 }
                                 
                                 if (fileData != null && fileData.isNotEmpty()) {
-                                    // 检查缓存大小限制
-                                    if (currentImageDataCacheSize + fileData.size > maxImageDataCacheSize) {
-                                        log("[Controller] Cache full (${currentImageDataCacheSize / 1024 / 1024}MB), clearing old data...")
-                                        imageDataCache.clear()
-                                        currentImageDataCacheSize = 0
+                                    // ✅ 检查缓存大小限制
+                                    if (currentLocalCacheSize + fileData.size > maxLocalCacheSize) {
+                                        // 清除最旧的缓存（简单策略：清空一半）
+                                        val keysToRemove = localImageCache.keys.take(localImageCache.size / 2).toList()
+                                        keysToRemove.forEach { key ->
+                                            localImageCache.remove(key)?.let { removedData ->
+                                                currentLocalCacheSize -= removedData.size
+                                            }
+                                        }
+                                        log("[Controller] Cache full, cleared ${keysToRemove.size} old entries")
                                     }
                                     
-                                    // 加入缓存
-                                    imageDataCache[path] = fileData
-                                    currentImageDataCacheSize += fileData.size
-                                    log("[Controller] ✅ Cached image $i: ${fileData.size / 1024}KB, total: ${currentImageDataCacheSize / 1024 / 1024}MB")
-                                    
+                                    // ✅ 存入本地缓存
+                                    localImageCache[path] = fileData
+                                    currentLocalCacheSize += fileData.size
                                     loaded = true
                                     successCount++
-                                    break  // 加载成功，跳出重试循环
-                                } else {
-                                    log("[Controller] ⚠️ Empty data for image $i (attempt $attempt)")
-                                    throw Exception("Empty file data")
+                                    log("[Controller] ✅ Cached image $path (${fileData.size} bytes)")
+                                    break
                                 }
                             } catch (e: Exception) {
                                 lastError = e
-                                log("[Controller] ⚠️ Attempt $attempt failed for image $i: ${e.message}")
+                                log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: ${e.message}")
                                 
                                 if (attempt < 3) {
-                                    // 等待500ms后重试
-                                    kotlinx.coroutines.delay(500)
-                                    log("[Controller] Retrying image $i in 0.5s...")
+                                    kotlinx.coroutines.delay(500)  // 等待500ms后重试
                                 }
                             }
                         }
                         
                         if (!loaded) {
                             failCount++
-                            log("[Controller] ❌ Failed to load image $i after 3 attempts: ${lastError?.message}")
+                            log("[Controller] ❌ Error preloading image ${i - startIndex}: ${lastError?.message}")
                         }
-                    } catch (e: Exception) {
-                        failCount++
-                        log("[Controller] ❌ Error preloading image $i: ${e.message}")
-                        e.printStackTrace()
                     } finally {
                         semaphore.release()
                     }
@@ -171,24 +165,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 jobs.add(job)
             }
             
-            // ✅ 等待所有并行任务完成
+            // ✅ 等待所有协程完成
             jobs.forEach { it.join() }
         }
         
-        log("[Controller] === Preloading image data END ===")
-        log("[Controller] Summary: Success=$successCount, Failed=$failCount, Total=${endIndex - startIndex}")
+        log("[Controller] === Preload Summary: Success=$successCount, Failed=$failCount ===")
     }
     
-    // ✅ 从缓存获取图片数据
-    fun getImageDataFromCache(path: String): ByteArray? {
-        return imageDataCache[path]
+    // ✅ 获取本地缓存的图片数据
+    fun getCachedImageData(path: String): ByteArray? {
+        return localImageCache[path]
     }
     
-    // ✅ 清空图片数据缓存
-    fun clearImageDataCache() {
-        imageDataCache.clear()
-        currentImageDataCacheSize = 0
-        log("[Controller] Image data cache cleared")
+    // ✅ 清空本地缓存
+    fun clearLocalImageCache() {
+        localImageCache.clear()
+        currentLocalCacheSize = 0L
+        log("[Controller] Local image cache cleared")
     }
     
     init {
@@ -875,9 +868,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 httpProxy?.stop()
                 httpProxy = HttpProxyServer(logCallback)
                 
-                // ✅ 设置外部图片数据缓存提供者
-                httpProxy?.externalImageDataCacheProvider = { imageDataCache }
-                
                 currentMediaFile = mediaFile
                 
                 val ftpRef = ftpClient
@@ -1008,6 +998,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
             
             // ✅ 通知上层清空URL缓存（避免使用失效的URL）
             onProxyRestarted?.invoke()
+            
+            // ✅ 重新设置外部图片缓存提供者
+            httpProxy?.externalImageCacheProvider = { localImageCache }
+            log("[Controller] External image cache provider re-set after proxy restart")
         }
         
         // 检查代理服务器是否已经在运行，如果没有则启动
@@ -1047,10 +1041,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
             }) ?: -1
             currentPort = newPort
             
-            // ✅ 设置外部图片数据缓存提供者（让HTTP代理优先使用预加载的缓存）
-            httpProxy?.externalImageDataCacheProvider = { imageDataCache }
-            log("[Controller] External image cache provider set for HTTP proxy")
-            
             // ✅ 记录当前用于代理的客户端实例
             if (protocol is NetworkProtocol.FTP) {
                 lastFtpClientForProxy = ftpClient
@@ -1060,7 +1050,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
             
             log("[Controller] HTTP Proxy started on port: $currentPort")
             
-            // ✅ 获取并保存局域网IP地址
+            // ✅ 设置外部图片缓存提供者（让HTTP代理优先使用预加载的本地缓存）
+            httpProxy?.externalImageCacheProvider = { localImageCache }
+            log("[Controller] External image cache provider set for HTTP proxy")
             localIpAddress = getLocalIpAddress()
             log("[Controller] Local IP address: $localIpAddress, Proxy port: $currentPort")
             
