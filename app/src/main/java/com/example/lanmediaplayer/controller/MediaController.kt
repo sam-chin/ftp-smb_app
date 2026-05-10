@@ -67,7 +67,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     // ✅ 本地预览图片缓存（与DLNA独立，避免冲突）
     private val localImageCache = mutableMapOf<String, ByteArray>()
-    private val maxLocalCacheSize = 100 * 1024 * 1024  // 最大缓存100MB
+    private val maxLocalCacheSize = 200 * 1024 * 1024  // ✅ 增加缓存到200MB
     private var currentLocalCacheSize = 0L
     
     // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
@@ -85,8 +85,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         var successCount = 0
         var failCount = 0
         
-        // ✅ 使用协程并行加载，最多同时1个请求（极低并发，避免与DLNA竞争SMB连接）
-        val maxConcurrent = 1
+        // ✅ 使用协程并行加载，最多同时2个请求（平衡速度和SMB负载）
+        val maxConcurrent = 2
         val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
         
         // ✅ 使用coroutineScope创建协程作用域
@@ -149,7 +149,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: ${e.message}")
                                 
                                 if (attempt < 3) {
-                                    kotlinx.coroutines.delay(1000)  // ✅ 增加重试间隔到1秒，等待SMB连接释放
+                                    kotlinx.coroutines.delay(500)  // ✅ 重试间隔500ms，平衡速度和稳定性
                                 }
                             }
                         }
@@ -866,7 +866,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 exoPlayer?.clearMediaItems()
                 
                 httpProxy?.stop()
-                httpProxy = HttpProxyServer(logCallback)
+                // ✅ 本地播放模式：只监听127.0.0.1
+                httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
                 
                 currentMediaFile = mediaFile
                 
@@ -1070,16 +1071,14 @@ class MediaController(private val context: Context, private val logCallback: ((S
         } catch (e: Exception) {
             cleanPath
         }
-        // ✅ 使用局域网IP而不是127.0.0.1，避免某些设备无法访问
-        return "http://$localIpAddress:$port/$encodedPath"
+        // ✅ 本地预览模式：使用127.0.0.1（因为HTTP代理只监听回环地址）
+        return "http://127.0.0.1:$port/$encodedPath"
     }
     
     fun getVideoUrl(): String {
-        // ✅ 将127.0.0.1替换为局域网IP，以便DLNA设备可以访问
-        val urlWithLocalIp = currentVideoUrl.replace("127.0.0.1", localIpAddress)
-        
-        log("[Controller] getVideoUrl: $urlWithLocalIp")
-        return urlWithLocalIp
+        // ✅ 本地播放模式：直接返回currentVideoUrl（已经是127.0.0.1）
+        log("[Controller] getVideoUrl: $currentVideoUrl")
+        return currentVideoUrl
     }
     
     // ✅ 启动DLNA前台服务（保持后台运行）
@@ -1211,7 +1210,14 @@ class MediaController(private val context: Context, private val logCallback: ((S
             
             // 如果HTTP代理还没创建，先创建
             if (httpProxy == null) {
-                httpProxy = HttpProxyServer(logCallback)
+                // ✅ DLNA投屏模式：允许外部设备连接
+                httpProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
+            } else if (!httpProxy!!.isAllowingExternalConnections()) {
+                // ✅ 如果当前是本地模式，需要重启为DLNA模式
+                log("[Controller] Switching HTTP proxy to DLNA mode (allow external connections)")
+                httpProxy?.stop()
+                currentPort = 0
+                httpProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
             }
             
             // 如果HTTP代理还没启动，启动它

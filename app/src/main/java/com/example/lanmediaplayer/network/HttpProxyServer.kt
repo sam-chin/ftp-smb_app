@@ -10,9 +10,12 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     private var serverScope: CoroutineScope? = null
     private var currentPort: Int = 0
     
+    // ✅ 公开属性，让外部可以检查当前模式
+    fun isAllowingExternalConnections(): Boolean = allowExternalConnections
+    
     // ✅ 图片数据缓存（用于加速重复访问）
     private val imageCache = mutableMapOf<String, ByteArray>()
-    private val maxCacheSize = 50 * 1024 * 1024  // 最大缓存50MB
+    private val maxCacheSize = 100 * 1024 * 1024  // ✅ 增加缓存到100MB
     private var currentCacheSize = 0L
     
     // ✅ 引用外部图片数据缓存（由MediaController提供，用于本地预览）
@@ -56,6 +59,33 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
         imageCache.clear()
         currentCacheSize = 0
         log("[HTTP Proxy] Cache cleared")
+    }
+    
+    // ✅ 生成HTTP代理URL（用于视频播放和图片预览）
+    fun getUrl(filePath: String): String {
+        val cleanPath = if (filePath.startsWith("/")) filePath.substring(1) else filePath
+        val encodedPath = try {
+            java.net.URLEncoder.encode(cleanPath, "UTF-8").replace("+", "%20")
+        } catch (e: Exception) {
+            cleanPath
+        }
+        // ✅ 本地模式使用127.0.0.1，DLNA模式使用局域网IP
+        val host = if (allowExternalConnections) {
+            // DLNA模式：需要获取局域网IP
+            java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList()
+                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                ?.find { 
+                    it is java.net.Inet4Address && 
+                    !it.isLoopbackAddress && 
+                    !it.isAnyLocalAddress &&
+                    it.hostAddress.startsWith("192.168.")
+                }?.hostAddress ?: "127.0.0.1"
+        } else {
+            // 本地模式：使用127.0.0.1
+            "127.0.0.1"
+        }
+        return "http://$host:$currentPort/$encodedPath"
     }
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
@@ -319,6 +349,11 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
                 outputStream.write(responseHeader.toByteArray())
                 outputStream.write(externalCachedData)
                 outputStream.flush()
+                
+                // ✅ 同时存入内部缓存，避免重复从externalCache读取
+                if (contentType.startsWith("image/")) {
+                    addToCache(filePath, externalCachedData)
+                }
                 
                 log("[HTTP Proxy] ✅ Sent from external cache successfully")
                 return

@@ -1704,41 +1704,39 @@ fun ImageViewerScreen(
         preloadTriggered = true
         lastPreloadIndex = 0
         
-        // ✅ 延迟2秒启动预加载，等待DLNA请求稳定，避免SMB连接竞争
-        kotlinx.coroutines.delay(2000)
+        // ✅ 降低延迟到500ms，快速启动预加载
+        kotlinx.coroutines.delay(500)
         
         // ✅ 在后台协程中并行加载，不阻塞UI
         launch {
-            mediaController.preloadImageData(imageFiles, 0, 10)
+            mediaController.preloadImageData(imageFiles, 0, 15)  // ✅ 初始预加载15张（更多缓存）
             println("[ImageViewer] === Initial preload END ===")
         }
     }
     
-    // ✅ 监听页面变化，预览到第5张时加载下10张
+    // ✅ 监听页面变化，预览到第3张时加载下10张（更早触发）
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
         
-        // 当预览到第5张（索引4）时，触发下一批预加载
-        if (currentPage == 4 && lastPreloadIndex == 0) {
-            println("[ImageViewer] === Triggering next batch preload at page 4 ===")
-            lastPreloadIndex = 10
+        // ✅ 当预览到第3张（索引2）时，触发下一批预加载（更早触发，确保缓存就绪）
+        if (currentPage == 2 && lastPreloadIndex == 0) {
+            println("[ImageViewer] === Triggering next batch preload at page 2 ===")
+            lastPreloadIndex = 15
             
             launch {
-                // ✅ 延迟300ms，避免与当前图片加载竞争
-                kotlinx.coroutines.delay(300)
-                mediaController.preloadImageData(imageFiles, 10, 10)
+                mediaController.preloadImageData(imageFiles, 15, 15)  // ✅ 第二批预加载15张
             }
         }
         
-        // 当预览到第15张（索引14）时，触发第三批预加载
-        if (currentPage == 14 && lastPreloadIndex == 10) {
-            println("[ImageViewer] === Triggering third batch preload at page 14 ===")
-            lastPreloadIndex = 20
+        // ✅ 当预览到第17张（索引16）时，触发第三批预加载
+        if (currentPage == 16 && lastPreloadIndex == 15) {
+            println("[ImageViewer] === Triggering third batch preload at page 16 ===")
+            lastPreloadIndex = 30
             
             launch {
-                mediaController.preloadImageData(imageFiles, 20, 10)
+                mediaController.preloadImageData(imageFiles, 30, 15)  // ✅ 第三批预加载15张
             }
         }
     }
