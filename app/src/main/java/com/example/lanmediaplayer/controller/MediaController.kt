@@ -83,8 +83,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         var successCount = 0
         var failCount = 0
         
-        // ✅ 使用协程并行加载，最多同时3个请求
-        val maxConcurrent = 3
+        // ✅ 使用协程并行加载，最多同时2个请求（降低并发避免SMB过载）
+        val maxConcurrent = 2
         val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
         
         // ✅ 使用coroutineScope创建协程作用域

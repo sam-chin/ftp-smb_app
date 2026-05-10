@@ -1694,6 +1694,9 @@ fun ImageViewerScreen(
         preloadTriggered = true
         lastPreloadIndex = 0
         
+        // ✅ 延迟500ms启动预加载，让UI先稳定，避免与HTTP代理竞争SMB连接
+        kotlinx.coroutines.delay(500)
+        
         // ✅ 在后台协程中并行加载，不阻塞UI
         launch {
             mediaController.preloadImageData(imageFiles, 0, 10)
@@ -1713,6 +1716,8 @@ fun ImageViewerScreen(
             lastPreloadIndex = 10
             
             launch {
+                // ✅ 延迟300ms，避免与当前图片加载竞争
+                kotlinx.coroutines.delay(300)
                 mediaController.preloadImageData(imageFiles, 10, 10)
             }
         }
