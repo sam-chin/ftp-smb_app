@@ -1567,8 +1567,9 @@ fun PlayerScreen(
                         castController.castVideo(device, videoUrl, mediaPath.split("/").lastOrNull() ?: "Video") { success, message ->
                             if (success) {
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                                // ✅ 启动前台服务，保持后台运行
-                                mediaController.startDlnaService(mediaPath.split("/").lastOrNull() ?: "Video")
+                                // ✅ 设置投屏状态为活跃（不立即启动服务）
+                                (context as? MainActivity)?.setCastingState(true)
+                                println("[VideoPlayer] Cast successful, will start service when app goes to background")
                             } else {
                                 onError(message)
                             }

@@ -55,6 +55,41 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         log("[HTTP Proxy] Cache cleared")
     }
     
+    // ✅ 生成HTTP代理URL（用于DLNA投屏）
+    fun getUrl(filePath: String): String? {
+        if (currentPort <= 0) {
+            log("[HTTP Proxy] ERROR: Server not started, cannot generate URL")
+            return null
+        }
+        
+        // 获取本地IP地址
+        val localIp = try {
+            java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList()
+                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                ?.find { 
+                    it is java.net.Inet4Address && 
+                    !it.isLoopbackAddress && 
+                    !it.isAnyLocalAddress &&
+                    it.hostAddress.startsWith("192.168.")
+                }?.hostAddress ?: "127.0.0.1"
+        } catch (e: Exception) {
+            "127.0.0.1"
+        }
+        
+        // URL编码文件路径
+        val encodedPath = try {
+            java.net.URLEncoder.encode(filePath, "UTF-8")
+                .replace("+", "%20")  // URLEncoder将空格编码为+，需要替换为%20
+        } catch (e: Exception) {
+            filePath
+        }
+        
+        val url = "http://$localIp:$currentPort/$encodedPath"
+        log("[HTTP Proxy] Generated URL: $url")
+        return url
+    }
+    
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
             // ✅ 如果已经在运行，先停止旧的服务
