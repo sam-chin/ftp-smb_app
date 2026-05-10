@@ -139,7 +139,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                 } catch (e: Exception) {
                     failCount++
-                    log("[Controller] ⚠️ Failed: ${e.message}")
+                    // ✅ 详细异常信息
+                    val errorMsg = e.message ?: "null message"
+                    val errorCause = e.cause?.message ?: "no cause"
+                    val errorClass = e.javaClass.simpleName
+                    log("[Controller] ⚠️ Failed: [$errorClass] $errorMsg (cause: $errorCause)")
+                    e.printStackTrace()
                 }
             }
         } else {
@@ -227,7 +232,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 }
                             } catch (e: Exception) {
                                 lastError = e
-                                log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: ${e.message}")
+                                // ✅ 详细异常信息：message + cause + class name
+                                val errorMsg = e.message ?: "null message"
+                                val errorCause = e.cause?.message ?: "no cause"
+                                val errorClass = e.javaClass.simpleName
+                                log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: [$errorClass] $errorMsg (cause: $errorCause)")
+                                e.printStackTrace()  // ✅ 打印完整堆栈
                                 
                                 // ✅ 如果是协程取消异常，立即退出
                                 if (e is kotlinx.coroutines.CancellationException) {
