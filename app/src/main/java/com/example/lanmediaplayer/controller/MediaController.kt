@@ -62,6 +62,117 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var lastFtpClientForProxy: FtpClient? = null
     private var lastSmbClientForProxy: SmbClient? = null
     
+    // ✅ HTTP代理重启回调（通知上层清空URL缓存）
+    var onProxyRestarted: (() -> Unit)? = null
+    
+    // ✅ 图片数据缓存（key=path, value=图片数据）
+    private val imageDataCache = mutableMapOf<String, ByteArray>()
+    private val maxImageDataCacheSize = 100 * 1024 * 1024  // 最大缓存100MB
+    private var currentImageDataCacheSize = 0L
+    
+    // ✅ 预加载队列管理
+    private var preloadStartIndex = 0  // 当前预加载起始索引
+    private var preloadBatchSize = 10  // 每批预加载10张
+    
+    // ✅ 预加载图片数据（直接读取到内存，带重试机制）
+    suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
+        log("[Controller] === Preloading image data START ===")
+        log("[Controller] Preloading $count images from index $startIndex")
+        
+        val endIndex = minOf(startIndex + count, imageFiles.size)
+        var successCount = 0
+        var failCount = 0
+        
+        for (i in startIndex until endIndex) {
+            try {
+                val imageFile = imageFiles[i]
+                val path = imageFile.path
+                
+                // 如果已经缓存，跳过
+                if (imageDataCache.containsKey(path)) {
+                    log("[Controller] Image $i already cached: $path")
+                    successCount++
+                    continue
+                }
+                
+                // ✅ 最多重试3次
+                var loaded = false
+                var lastError: Exception? = null
+                
+                for (attempt in 1..3) {
+                    try {
+                        log("[Controller] Preloading image $i/$endIndex (attempt $attempt/3): $path")
+                        
+                        // 从FTP/SMB读取完整文件
+                        val fileData = when (imageFile.protocol) {
+                            is NetworkProtocol.FTP -> {
+                                ftpClient?.getFileStream(path)?.readBytes()
+                            }
+                            is NetworkProtocol.SMB -> {
+                                val smbPath = if (path.startsWith("/")) path else "/$path"
+                                smbClient?.getFileStream(smbPath)?.readBytes()
+                            }
+                        }
+                        
+                        if (fileData != null && fileData.isNotEmpty()) {
+                            // 检查缓存大小限制
+                            if (currentImageDataCacheSize + fileData.size > maxImageDataCacheSize) {
+                                log("[Controller] Cache full (${currentImageDataCacheSize / 1024 / 1024}MB), clearing old data...")
+                                imageDataCache.clear()
+                                currentImageDataCacheSize = 0
+                            }
+                            
+                            // 加入缓存
+                            imageDataCache[path] = fileData
+                            currentImageDataCacheSize += fileData.size
+                            log("[Controller] ✅ Cached image $i: ${fileData.size / 1024}KB, total: ${currentImageDataCacheSize / 1024 / 1024}MB")
+                            
+                            loaded = true
+                            successCount++
+                            break  // 加载成功，跳出重试循环
+                        } else {
+                            log("[Controller] ⚠️ Empty data for image $i (attempt $attempt)")
+                            throw Exception("Empty file data")
+                        }
+                    } catch (e: Exception) {
+                        lastError = e
+                        log("[Controller] ⚠️ Attempt $attempt failed for image $i: ${e.message}")
+                        
+                        if (attempt < 3) {
+                            // 等待500ms后重试
+                            kotlinx.coroutines.delay(500)
+                            log("[Controller] Retrying image $i in 0.5s...")
+                        }
+                    }
+                }
+                
+                if (!loaded) {
+                    failCount++
+                    log("[Controller] ❌ Failed to load image $i after 3 attempts: ${lastError?.message}")
+                }
+            } catch (e: Exception) {
+                failCount++
+                log("[Controller] ❌ Error preloading image $i: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+        
+        log("[Controller] === Preloading image data END ===")
+        log("[Controller] Summary: Success=$successCount, Failed=$failCount, Total=${endIndex - startIndex}")
+    }
+    
+    // ✅ 从缓存获取图片数据
+    fun getImageDataFromCache(path: String): ByteArray? {
+        return imageDataCache[path]
+    }
+    
+    // ✅ 清空图片数据缓存
+    fun clearImageDataCache() {
+        imageDataCache.clear()
+        currentImageDataCacheSize = 0
+        log("[Controller] Image data cache cleared")
+    }
+    
     init {
         // 从 ConnectionPreferences 加载缓存的共享目录列表
         loadSmbSharesCache()
@@ -746,6 +857,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 httpProxy?.stop()
                 httpProxy = HttpProxyServer(logCallback)
                 
+                // ✅ 设置外部图片数据缓存提供者
+                httpProxy?.externalImageDataCacheProvider = { imageDataCache }
+                
                 currentMediaFile = mediaFile
                 
                 val ftpRef = ftpClient
@@ -869,6 +983,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
             httpProxy?.stop()
             currentPort = 0
             httpProxy = HttpProxyServer(logCallback)
+            
+            // ✅ 清空HTTP代理的图片缓存（因为客户端已变化，旧缓存无效）
+            httpProxy?.clearCache()
+            log("[Controller] HTTP proxy cache cleared due to client change")
+            
+            // ✅ 通知上层清空URL缓存（避免使用失效的URL）
+            onProxyRestarted?.invoke()
         }
         
         // 检查代理服务器是否已经在运行，如果没有则启动

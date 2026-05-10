@@ -15,6 +15,9 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     private val maxCacheSize = 50 * 1024 * 1024  // 最大缓存50MB
     private var currentCacheSize = 0L
     
+    // ✅ 引用外部图片数据缓存（由MediaController提供）
+    var externalImageDataCacheProvider: (() -> Map<String, ByteArray>)? = null
+    
     private fun log(message: String) {
         println(message)
         logCallback?.invoke(message)
@@ -280,7 +283,32 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         var fileStream: InputStream? = null
         var totalBytesRead = 0L  // ✅ 在函数开始时声明，供所有分支使用
         try {
-            // ✅ 检查缓存（仅对图片）
+            // ✅ 优先级1：检查外部图片数据缓存（MediaController预加载的）
+            val externalCache = externalImageDataCacheProvider?.invoke()
+            val externalCachedData = if (contentType.startsWith("image/") && externalCache != null) {
+                externalCache[filePath]
+            } else null
+            
+            if (externalCachedData != null) {
+                // 从外部缓存发送（最快！）
+                log("[HTTP Proxy] 🚀 Sending from external cache (preloaded): ${externalCachedData.size} bytes")
+                
+                val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: $contentType\r\n" +
+                        "Content-Length: ${externalCachedData.size}\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+                
+                outputStream.write(responseHeader.toByteArray())
+                outputStream.write(externalCachedData)
+                outputStream.flush()
+                
+                log("[HTTP Proxy] ✅ Sent from external cache successfully")
+                return
+            }
+            
+            // ✅ 优先级2：检查内部缓存（HTTP代理自己缓存的）
             val cachedData = if (contentType.startsWith("image/")) getFromCache(filePath) else null
             
             if (cachedData != null) {

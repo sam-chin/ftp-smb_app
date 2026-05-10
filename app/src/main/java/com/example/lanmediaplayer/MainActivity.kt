@@ -102,6 +102,14 @@ class MainActivity : ComponentActivity() {
         
         mediaController = MediaController(this, logCallback)
         mediaController.initializePlayer()
+        
+        // ✅ 设置HTTP代理重启回调，清空URL缓存
+        mediaController.onProxyRestarted = {
+            println("[MainActivity] HTTP proxy restarted, clearing URL cache...")
+            // 注意：这里无法直接访问imageCache，因为它在Composable中
+            // 所以我们在ImageViewerScreen中通过LaunchedEffect监听
+        }
+        
         castController = CastController(this, logCallback)
         connectionPrefs = ConnectionPreferences(this)
         
@@ -1645,213 +1653,47 @@ fun ImageViewerScreen(
     // ✅ 保存当前投屏设备（用于幻灯片模式自动切换）
     var castingDevice by remember { mutableStateOf<CastDevice?>(null) }
     
-    // 使用 LinkedHashMap 保持插入顺序，便于管理缓存
-    val imageCache = remember { mutableStateMapOf<Int, String>() }
-    val preloadBatchSize = 10 // 每批预加载10张图片
-    var currentBatchIndex by remember { mutableStateOf(0) } // 当前批次索引（0=第1批，1=第2批...）
+    // ✅ 全新的预加载机制：直接缓存图片数据，不是URL
+    var preloadTriggered by remember { mutableStateOf(false) }  // 是否已触发初始预加载
+    var lastPreloadIndex by remember { mutableStateOf(-1) }  // 上次预加载的起始索引
     
-    // 计算某张图片属于哪个批次
-    fun getBatchIndex(imageIndex: Int): Int {
-        return imageIndex / preloadBatchSize
-    }
-    
-    // 预加载指定批次的图片（带重试机制确保加载成功）
-    fun preloadBatch(batchIndex: Int) {
-        if (imageFiles.isEmpty()) return
-        
-        val startIndex = batchIndex * preloadBatchSize
-        val endIndex = minOf(imageFiles.size - 1, startIndex + preloadBatchSize - 1)
-        
-        coroutineScope.launch {
-            for (index in startIndex..endIndex) {
-                // 如果已经缓存成功，跳过
-                if (imageCache.containsKey(index)) continue
-                
-                // 最多重试3次
-                var loaded = false
-                for (attempt in 1..3) {
-                    try {
-                        val imagePath = imageFiles[index].path
-                        println("[ImageViewer] Loading image $index/$endIndex: path='$imagePath', protocol=${currentProtocol::class.simpleName}, attempt=$attempt")
-                        val url = getImageUrl(imagePath)
-                        println("[ImageViewer] ✅ Generated URL for image $index: $url")
-                        imageCache[index] = url
-                        loaded = true
-                        break // 加载成功，跳出重试循环
-                    } catch (e: Exception) {
-                        println("⚠️ Failed to load image at index $index (attempt $attempt/3): ${e.message}")
-                        e.printStackTrace()
-                        if (attempt < 3) {
-                            println("[ImageViewer] Retrying in 0.5 seconds...")
-                            kotlinx.coroutines.delay(500) // 等待0.5秒后重试
-                        }
-                    }
-                }
-                
-                if (!loaded) {
-                    println("❌ Failed to load image at index $index after 3 attempts")
-                } else {
-                    println("[ImageViewer] Image $index loaded successfully (${index - startIndex + 1}/${endIndex - startIndex + 1})")
-                    
-                    // ✅ 关键优化：对于FTP和SMB协议，主动触发HTTP代理读取并缓存图片数据
-                    if (imageCache.containsKey(index)) {
-                        launch {
-                            try {
-                                val url = imageCache[index]!!
-                                println("[ImageViewer] Warming up cache for batch image $index...")
-                                // 通过创建一个临时的HTTP请求来触发HTTP代理缓存
-                                val tempConnection = java.net.URL(url).openConnection()
-                                tempConnection.connectTimeout = 10000
-                                tempConnection.readTimeout = 10000
-                                tempConnection.getInputStream()?.use { inputStream ->
-                                    // ✅ 读取完整文件以触发HTTP代理的图片缓存
-                                    val fileData = inputStream.readBytes()
-                                    println("[ImageViewer] Batch cache warmed up for image $index (${fileData.size / 1024}KB)")
-                                }
-                            } catch (e: Exception) {
-                                println("[ImageViewer] Failed to warm up batch cache: ${e.message}")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // 快速预加载：优先加载当前页及附近几张（限制并发避免FTP/SMB过载）
-    fun quickPreload(currentIndex: Int) {
-        if (imageFiles.isEmpty()) return
-        
-        // 需要立即加载的索引：当前页、前一页、后一页、前两页、后两页
-        val urgentIndices = listOf(
-            currentIndex,
-            currentIndex + 1,
-            currentIndex - 1,
-            currentIndex + 2,
-            currentIndex - 2
-        ).filter { it in 0 until imageFiles.size && !imageCache.containsKey(it) }
-        
-        // ✅ 限制最多同时加载3张图片，避免FTP/SMB连接过载
-        val maxConcurrent = 3
-        var activeLoads = 0
-        val loadQueue = mutableListOf<Int>()
-        
-        // 将需要加载的图片加入队列
-        loadQueue.addAll(urgentIndices)
-        
-        // 启动加载任务（控制并发）
-        fun startNextLoad() {
-            if (loadQueue.isEmpty() || activeLoads >= maxConcurrent) return
-            
-            val index = loadQueue.removeAt(0)
-            activeLoads++
-            
-            coroutineScope.launch {
-                try {
-                    val imagePath = imageFiles[index].path
-                    println("[ImageViewer] Quick loading image $index (active: $activeLoads/$maxConcurrent)")
-                    val url = getImageUrl(imagePath)
-                    imageCache[index] = url
-                    
-                    // ✅ 关键优化：对于FTP和SMB协议，主动触发HTTP代理读取并缓存图片数据
-                    launch {
-                        try {
-                            println("[ImageViewer] Warming up cache for image $index...")
-                            // 通过创建一个临时的HTTP请求来触发HTTP代理缓存
-                            val tempConnection = java.net.URL(url).openConnection()
-                            tempConnection.connectTimeout = 10000
-                            tempConnection.readTimeout = 10000
-                            tempConnection.getInputStream()?.use { inputStream ->
-                                // ✅ 读取完整文件以触发HTTP代理的图片缓存
-                                val fileData = inputStream.readBytes()
-                                println("[ImageViewer] Cache warmed up for image $index (${fileData.size / 1024}KB)")
-                            }
-                        } catch (e: Exception) {
-                            println("[ImageViewer] Failed to warm up cache: ${e.message}")
-                            e.printStackTrace()
-                        }
-                    }
-                    
-                    println("[ImageViewer] Quick loaded image $index successfully")
-                } catch (e: Exception) {
-                    println("Failed to quick load image at index $index: ${e.message}")
-                    e.printStackTrace()
-                } finally {
-                    activeLoads--
-                    // 加载完成后，启动下一个
-                    startNextLoad()
-                }
-            }
-        }
-        
-        // 启动初始批次
-        repeat(minOf(maxConcurrent, loadQueue.size)) {
-            startNextLoad()
-        }
-    }
-    
-    // 清理旧批次缓存（保留当前批次和前一批次）
-    fun cleanupOldBatches(currentBatch: Int) {
-        val indicesToRemove = imageCache.keys.filter { index ->
-            val batchIndex = getBatchIndex(index)
-            // 删除距离当前批次超过1的批次（即保留当前批次和前一批次）
-            batchIndex < currentBatch - 1
-        }
-        
-        indicesToRemove.forEach { index ->
-            imageCache.remove(index)
-        }
-        
-        if (indicesToRemove.isNotEmpty()) {
-            println("Cleaned up ${indicesToRemove.size} old cached images")
-        }
-    }
-    
-    // 初始加载：优先快速加载当前页及附近图片
+    // ✅ 初始预加载：加载前10张图片数据
     LaunchedEffect(Unit) {
-        val initialBatch = getBatchIndex(initialPage)
-        currentBatchIndex = initialBatch
+        if (imageFiles.isEmpty() || preloadTriggered) return@LaunchedEffect
         
-        // 第一步：快速并行加载当前页及附近5张图片（优先级最高）
-        quickPreload(initialPage)
+        println("[ImageViewer] === Initial preload START ===")
+        preloadTriggered = true
+        lastPreloadIndex = 0
         
-        // 第二步：后台顺序加载整个批次（补充剩余图片）
-        preloadBatch(initialBatch)
+        // 初始加载10张图片数据
+        mediaController.preloadImageData(imageFiles, 0, 10)
         
-        // 如果初始页面不是批次的第一张，也预加载下一批
-        if (initialPage % preloadBatchSize > preloadBatchSize / 2 && initialBatch + 1 < (imageFiles.size + preloadBatchSize - 1) / preloadBatchSize) {
-            preloadBatch(initialBatch + 1)
-        }
+        println("[ImageViewer] === Initial preload END ===")
     }
     
-    // 当页面改变时，检查是否需要加载新批次
+    // ✅ 监听页面变化，预览到第5张时加载下10张
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
-        val totalImages = imageFiles.size
-        val pageBatch = getBatchIndex(currentPage)
         
-        // 第一步：立即并行加载当前页及附近图片（最高优先级）
-        quickPreload(currentPage)
-        
-        // 如果进入了新的批次
-        if (pageBatch != currentBatchIndex) {
-            currentBatchIndex = pageBatch
+        // 当预览到第5张（索引4）时，触发下一批预加载
+        if (currentPage == 4 && lastPreloadIndex == 0) {
+            println("[ImageViewer] === Triggering next batch preload at page 4 ===")
+            lastPreloadIndex = 10
             
-            // 第二步：后台顺序加载整个批次（补充剩余图片）
-            preloadBatch(pageBatch)
-            
-            // 预加载下一批次（如果存在）
-            val nextBatch = pageBatch + 1
-            val totalBatches = (totalImages + preloadBatchSize - 1) / preloadBatchSize
-            if (nextBatch < totalBatches) {
-                preloadBatch(nextBatch)
+            launch {
+                mediaController.preloadImageData(imageFiles, 10, 10)
             }
+        }
+        
+        // 当预览到第15张（索引14）时，触发第三批预加载
+        if (currentPage == 14 && lastPreloadIndex == 10) {
+            println("[ImageViewer] === Triggering third batch preload at page 14 ===")
+            lastPreloadIndex = 20
             
-            // 清理旧批次缓存（当加载第3批及以后时，清理第1批）
-            if (pageBatch >= 2) {
-                cleanupOldBatches(pageBatch)
+            launch {
+                mediaController.preloadImageData(imageFiles, 20, 10)
             }
         }
     }
@@ -1959,43 +1801,15 @@ fun ImageViewerScreen(
                 pageCount = imageFiles.size,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                val cachedUrl = imageCache[page]
-                if (cachedUrl != null) {
-                    ImageLoader(
-                        imageUrl = cachedUrl,
-                        contentDescription = imageFiles[page].name
-                    )
-                } else {
-                    // 如果缓存中没有，立即加载并显示加载中
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = Color.White)
-                    }
-                    // 异步加载当前图片（带重试）
-                    LaunchedEffect(page) {
-                        // 再次检查是否已被其他协程加载成功
-                        if (imageCache.containsKey(page)) return@LaunchedEffect
-                        
-                        // 最多重试2次
-                        for (attempt in 1..2) {
-                            // 每次重试前都检查是否已被加载
-                            if (imageCache.containsKey(page)) break
-                            
-                            try {
-                                val url = getImageUrl(imageFiles[page].path)
-                                imageCache[page] = url
-                                break // 加载成功
-                            } catch (e: Exception) {
-                                println("Failed to load image on demand at index $page (attempt $attempt): ${e.message}")
-                                if (attempt < 2) {
-                                    kotlinx.coroutines.delay(500) // 等待0.5秒后重试
-                                }
-                            }
-                        }
-                    }
+                // ✅ 关键修复：不缓存URL，每次动态生成以确保URL与HTTP代理状态一致
+                val imageUrl = remember(page, imageFiles[page].path) {
+                    getImageUrl(imageFiles[page].path)
                 }
+                
+                ImageLoader(
+                    imageUrl = imageUrl,
+                    contentDescription = imageFiles[page].name
+                )
             }
             
             Row(
