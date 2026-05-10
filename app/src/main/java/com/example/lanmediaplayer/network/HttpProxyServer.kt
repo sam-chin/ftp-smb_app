@@ -285,9 +285,30 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         try {
             // ✅ 优先级1：检查外部图片数据缓存（MediaController预加载的）
             val externalCache = externalImageDataCacheProvider?.invoke()
-            val externalCachedData = if (contentType.startsWith("image/") && externalCache != null) {
-                externalCache[filePath]
-            } else null
+            
+            // ✅ 关键修复：尝试两种路径格式（带/和不带/）
+            val pathWithSlash = if (filePath.startsWith("/")) filePath else "/$filePath"
+            val pathWithoutSlash = if (filePath.startsWith("/")) filePath.substring(1) else filePath
+            
+            var externalCachedData: ByteArray? = null
+            if (contentType.startsWith("image/") && externalCache != null) {
+                // 先尝试原始路径
+                externalCachedData = externalCache[filePath]
+                // 如果没找到，尝试带/的路径
+                if (externalCachedData == null && pathWithSlash != filePath) {
+                    externalCachedData = externalCache[pathWithSlash]
+                    if (externalCachedData != null) {
+                        log("[HTTP Proxy] Cache hit with path normalization: '$filePath' -> '$pathWithSlash'")
+                    }
+                }
+                // 如果还没找到，尝试不带/的路径
+                if (externalCachedData == null && pathWithoutSlash != filePath) {
+                    externalCachedData = externalCache[pathWithoutSlash]
+                    if (externalCachedData != null) {
+                        log("[HTTP Proxy] Cache hit with path normalization: '$filePath' -> '$pathWithoutSlash'")
+                    }
+                }
+            }
             
             if (externalCachedData != null) {
                 // 从外部缓存发送（最快！）

@@ -668,6 +668,34 @@ fun MainScreen(
                     if (isAtSmbRoot) {
                         // ✅ 当前在SMB共享列表页面，忽略返回
                         addLog("Already at SMB root (isAtSmbRoot=true), ignoring back click")
+                    } else if (currentPath.isEmpty()) {
+                        // ✅ 当前在共享内的根目录，返回到共享列表页面
+                        addLog("Returning from share root to share list")
+                        isLoading = true
+                        coroutineScope.launch {
+                            try {
+                                // 重新获取共享列表
+                                val shares = mediaController.getAvailableShares()
+                                availableShares = shares
+                                isAtSmbRoot = true
+                                browserTitle = "选择共享目录"
+                                files = shares.map { shareName ->
+                                    MediaFile(
+                                        name = shareName,
+                                        path = "",
+                                        size = 0L,
+                                        isDirectory = true,
+                                        protocol = selectedProtocol
+                                    )
+                                }
+                                isLoading = false
+                                addLog("Loaded ${shares.size} shares")
+                            } catch (e: Exception) {
+                                errorMessage = "Failed to load shares: ${e.message}"
+                                isLoading = false
+                                addLog("Error loading shares: ${e.message}")
+                            }
+                        }
                     } else {
                         // 当前在共享目录或子目录中，返回上级目录
                         val parentPath = if (currentPath.indexOf('/', startIndex = 1) != -1) {
@@ -681,11 +709,11 @@ fun MainScreen(
                         addLog("Navigating to parent directory: '$currentPath' -> '$parentPath'")
                         
                         if (parentPath.isEmpty()) {
-                            // 返回到共享根目录，显示该共享下的文件
+                            // 返回到共享根目录（某个共享下的根目录，不是共享列表）
                             addLog("Returning to share root")
                             currentPath = ""  // ✅ 使用空字符串而不是"/"
-                            isAtSmbRoot = true  // ✅ 标记为SMB根目录
-                            browserTitle = "选择共享目录"
+                            isAtSmbRoot = false  // ✅ 修正：这是在共享内的根目录，不是共享列表
+                            // browserTitle保持不变，仍然是当前共享名
                             isLoading = true
                             coroutineScope.launch {
                                 mediaController.browseFiles("", selectedProtocol, object : MediaController.MediaCallback {
