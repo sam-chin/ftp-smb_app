@@ -105,7 +105,8 @@ class MainActivity : ComponentActivity() {
         
         // ✅ 设置HTTP代理重启回调，清空URL缓存
         mediaController.onProxyRestarted = {
-            println("[MainActivity] HTTP proxy restarted, clearing URL cache...")
+            val timestamp = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
+            debugLogs.add("$timestamp - [MainActivity] HTTP proxy restarted, clearing URL cache...")
             // 注意：这里无法直接访问imageCache，因为它在Composable中
             // 所以我们在ImageViewerScreen中通过LaunchedEffect监听
         }
@@ -553,6 +554,9 @@ fun MainScreen(
             currentPath = currentPath,
             title = browserTitle,
             debugLogs = debugLogs,
+            addLog = { message ->
+                debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+            },
             showBackButton = when (selectedProtocol) {
                 is NetworkProtocol.SMB -> !isAtSmbRoot  // SMB: 不在根目录时显示
                 is NetworkProtocol.FTP -> currentPath != "/"  // FTP: 不在根目录时显示
@@ -1227,6 +1231,7 @@ fun FileBrowserScreen(
     currentPath: String,
     title: String,
     debugLogs: List<String>,
+    addLog: (String) -> Unit = {},  // ✅ 添加日志回调
     showBackButton: Boolean,
     isAtSmbRoot: Boolean,
     selectedProtocol: NetworkProtocol,
