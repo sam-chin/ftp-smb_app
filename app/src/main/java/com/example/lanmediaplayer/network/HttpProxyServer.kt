@@ -57,6 +57,12 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
+            // ✅ 如果已经在运行，先停止旧的服务
+            if (serverSocket != null && !serverSocket?.isClosed!!) {
+                log("[HTTP Proxy] Server already running on port $currentPort, reusing...")
+                return currentPort
+            }
+            
             // ✅ 显式获取本地IPv4地址并绑定（解决小米澎湃OS问题）
             val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
                 ?.toList()

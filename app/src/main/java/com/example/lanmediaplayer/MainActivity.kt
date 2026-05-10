@@ -170,6 +170,32 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    // ✅ 跟踪是否有活跃的投屏
+    private var hasActiveCasting = false
+    
+    // ✅ 设置投屏状态（由 Compose UI 调用）
+    fun setCastingState(active: Boolean) {
+        hasActiveCasting = active
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        // ✅ 当App进入后台且有活跃投屏时，启动前台服务
+        if (hasActiveCasting) {
+            android.util.Log.d("MainActivity", "App going to background with active casting, starting service")
+            mediaController.startDlnaService("Casting")
+        }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // ✅ 当App回到前台时，停止前台服务（不再需要后台保活）
+        if (hasActiveCasting) {
+            android.util.Log.d("MainActivity", "App returning to foreground, stopping service")
+            mediaController.stopDlnaService()
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         mediaController.release()
@@ -1864,6 +1890,8 @@ fun ImageViewerScreen(
             mediaController.stopDlnaService()
             // ✅ 清除投屏设备状态
             castingDevice = null
+            // ✅ 清除投屏活跃状态
+            (context as? MainActivity)?.setCastingState(false)
         }
     }
     
@@ -1944,6 +1972,7 @@ fun ImageViewerScreen(
                         if (!isSlideshowPlaying) {
                             castingDevice = null
                             mediaController.stopDlnaService()
+                            (context as? MainActivity)?.setCastingState(false)
                         }
                     }
                 ) {
@@ -2032,8 +2061,9 @@ fun ImageViewerScreen(
                             castController.castImage(device, imageUrl, currentImage.name) { success, message ->
                                 if (success) {
                                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                                    // ✅ 启动前台服务，保持后台运行
-                                    mediaController.startDlnaService(currentImage.name)
+                                    // ✅ 设置投屏状态为活跃
+                                    (context as? MainActivity)?.setCastingState(true)
+                                    println("[ImageViewer] Cast successful, will start service when app goes to background")
                                 } else {
                                     println("[ImageViewer] Cast failed: $message")
                                 }
