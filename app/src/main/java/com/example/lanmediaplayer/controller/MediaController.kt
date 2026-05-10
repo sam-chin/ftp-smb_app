@@ -1511,18 +1511,20 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         log("[Controller] ⚠️ No protocol in currentMediaFile, trying connected clients...")
                         
                         // 尝试 FTP
-                        if (ftpClient != null) {
+                        val ftp = ftpClient
+                        if (ftp != null) {
                             val ftpPath = if (path.startsWith("/")) path else "/$path"
                             log("[Controller] 📡 FTP getFileSize (fallback): $ftpPath")
-                            val size = ftpClient.getFileSize(ftpPath)
+                            val size = ftp.getFileSize(ftpPath)
                             log("[Controller] 📊 FTP file size (fallback): $size")
                             return size
                         }
                         
                         // 尝试 SMB
-                        if (smbClient != null) {
+                        val smb = smbClient
+                        if (smb != null) {
                             log("[Controller] 📡 SMB getFileSize (fallback): $path")
-                            val size = smbClient.getFileSize(path)
+                            val size = smb.getFileSize(path)
                             log("[Controller] 📊 SMB file size (fallback): $size")
                             return size
                         }
