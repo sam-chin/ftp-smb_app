@@ -87,90 +87,93 @@ class MediaController(private val context: Context, private val logCallback: ((S
         val maxConcurrent = 3
         val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
         
-        val jobs = mutableListOf<kotlinx.coroutines.Job>()
-        
-        for (i in startIndex until endIndex) {
-            val job = launch {
-                semaphore.acquire()
-                try {
-                    val imageFile = imageFiles[i]
-                    val path = imageFile.path
-                    
-                    // 如果已经缓存，跳过
-                    if (imageDataCache.containsKey(path)) {
-                        log("[Controller] Image $i already cached: $path")
-                        successCount++
-                        return@launch
-                    }
-                    
-                    // ✅ 最多重试3次
-                    var loaded = false
-                    var lastError: Exception? = null
-                    
-                    for (attempt in 1..3) {
-                        try {
-                            log("[Controller] Preloading image $i/$endIndex (attempt $attempt/3): $path")
-                            
-                            // 从FTP/SMB读取完整文件
-                            val fileData = when (imageFile.protocol) {
-                                is NetworkProtocol.FTP -> {
-                                    ftpClient?.getFileStream(path)?.readBytes()
-                                }
-                                is NetworkProtocol.SMB -> {
-                                    val smbPath = if (path.startsWith("/")) path else "/$path"
-                                    smbClient?.getFileStream(smbPath)?.readBytes()
-                                }
-                            }
-                            
-                            if (fileData != null && fileData.isNotEmpty()) {
-                                // 检查缓存大小限制
-                                if (currentImageDataCacheSize + fileData.size > maxImageDataCacheSize) {
-                                    log("[Controller] Cache full (${currentImageDataCacheSize / 1024 / 1024}MB), clearing old data...")
-                                    imageDataCache.clear()
-                                    currentImageDataCacheSize = 0
+        // ✅ 使用coroutineScope创建协程作用域
+        kotlinx.coroutines.coroutineScope {
+            val jobs = mutableListOf<kotlinx.coroutines.Job>()
+            
+            for (i in startIndex until endIndex) {
+                val job = launch {
+                    semaphore.acquire()
+                    try {
+                        val imageFile = imageFiles[i]
+                        val path = imageFile.path
+                        
+                        // 如果已经缓存，跳过
+                        if (imageDataCache.containsKey(path)) {
+                            log("[Controller] Image $i already cached: $path")
+                            successCount++
+                            return@launch
+                        }
+                        
+                        // ✅ 最多重试3次
+                        var loaded = false
+                        var lastError: Exception? = null
+                        
+                        for (attempt in 1..3) {
+                            try {
+                                log("[Controller] Preloading image $i/$endIndex (attempt $attempt/3): $path")
+                                
+                                // 从FTP/SMB读取完整文件
+                                val fileData = when (imageFile.protocol) {
+                                    is NetworkProtocol.FTP -> {
+                                        ftpClient?.getFileStream(path)?.readBytes()
+                                    }
+                                    is NetworkProtocol.SMB -> {
+                                        val smbPath = if (path.startsWith("/")) path else "/$path"
+                                        smbClient?.getFileStream(smbPath)?.readBytes()
+                                    }
                                 }
                                 
-                                // 加入缓存
-                                imageDataCache[path] = fileData
-                                currentImageDataCacheSize += fileData.size
-                                log("[Controller] ✅ Cached image $i: ${fileData.size / 1024}KB, total: ${currentImageDataCacheSize / 1024 / 1024}MB")
+                                if (fileData != null && fileData.isNotEmpty()) {
+                                    // 检查缓存大小限制
+                                    if (currentImageDataCacheSize + fileData.size > maxImageDataCacheSize) {
+                                        log("[Controller] Cache full (${currentImageDataCacheSize / 1024 / 1024}MB), clearing old data...")
+                                        imageDataCache.clear()
+                                        currentImageDataCacheSize = 0
+                                    }
+                                    
+                                    // 加入缓存
+                                    imageDataCache[path] = fileData
+                                    currentImageDataCacheSize += fileData.size
+                                    log("[Controller] ✅ Cached image $i: ${fileData.size / 1024}KB, total: ${currentImageDataCacheSize / 1024 / 1024}MB")
+                                    
+                                    loaded = true
+                                    successCount++
+                                    break  // 加载成功，跳出重试循环
+                                } else {
+                                    log("[Controller] ⚠️ Empty data for image $i (attempt $attempt)")
+                                    throw Exception("Empty file data")
+                                }
+                            } catch (e: Exception) {
+                                lastError = e
+                                log("[Controller] ⚠️ Attempt $attempt failed for image $i: ${e.message}")
                                 
-                                loaded = true
-                                successCount++
-                                break  // 加载成功，跳出重试循环
-                            } else {
-                                log("[Controller] ⚠️ Empty data for image $i (attempt $attempt)")
-                                throw Exception("Empty file data")
-                            }
-                        } catch (e: Exception) {
-                            lastError = e
-                            log("[Controller] ⚠️ Attempt $attempt failed for image $i: ${e.message}")
-                            
-                            if (attempt < 3) {
-                                // 等待500ms后重试
-                                kotlinx.coroutines.delay(500)
-                                log("[Controller] Retrying image $i in 0.5s...")
+                                if (attempt < 3) {
+                                    // 等待500ms后重试
+                                    kotlinx.coroutines.delay(500)
+                                    log("[Controller] Retrying image $i in 0.5s...")
+                                }
                             }
                         }
-                    }
-                    
-                    if (!loaded) {
+                        
+                        if (!loaded) {
+                            failCount++
+                            log("[Controller] ❌ Failed to load image $i after 3 attempts: ${lastError?.message}")
+                        }
+                    } catch (e: Exception) {
                         failCount++
-                        log("[Controller] ❌ Failed to load image $i after 3 attempts: ${lastError?.message}")
+                        log("[Controller] ❌ Error preloading image $i: ${e.message}")
+                        e.printStackTrace()
+                    } finally {
+                        semaphore.release()
                     }
-                } catch (e: Exception) {
-                    failCount++
-                    log("[Controller] ❌ Error preloading image $i: ${e.message}")
-                    e.printStackTrace()
-                } finally {
-                    semaphore.release()
                 }
+                jobs.add(job)
             }
-            jobs.add(job)
+            
+            // ✅ 等待所有并行任务完成
+            jobs.forEach { it.join() }
         }
-        
-        // ✅ 等待所有并行任务完成
-        jobs.forEach { it.join() }
         
         log("[Controller] === Preloading image data END ===")
         log("[Controller] Summary: Success=$successCount, Failed=$failCount, Total=${endIndex - startIndex}")
