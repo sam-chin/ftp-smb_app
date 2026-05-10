@@ -638,27 +638,17 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     private fun normalizePathForSmb(remotePath: String): String {
-        log("[SMB-JCIFS] normalizePathForSmb input: '$remotePath', share: '$share'")
+        log("[SMB-JCIFS] normalizePathForSmb input: '$remotePath'")
         
-        var normalized = if (remotePath.startsWith("/") && remotePath.length > 1) {
+        // ✅ 简单处理：只去掉开头的 / ，不做其他转换
+        // 因为 listFiles 返回的路径已经是不含共享名的相对路径
+        var normalized = if (remotePath.startsWith("/")) {
             remotePath.substring(1)
-        } else if (remotePath == "/") {
-            ""
         } else {
             remotePath
         }
         
         log("[SMB-JCIFS] After removing leading slash: '$normalized'")
-        
-        if (share.isNotEmpty()) {
-            if (normalized.startsWith("$share/")) {
-                normalized = normalized.substring(share.length + 1)
-                log("[SMB-JCIFS] Removed share prefix, new path: '$normalized'")
-            } else if (normalized == share) {
-                normalized = ""
-                log("[SMB-JCIFS] Path is just share name, set to empty")
-            }
-        }
         
         return normalized
     }

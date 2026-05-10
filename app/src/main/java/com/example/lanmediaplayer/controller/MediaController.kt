@@ -74,7 +74,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var currentLocalCacheSize = 0L
     
     // ✅ 预加载任务管理（防止累积）
-    private var preloadJob: kotlinx.coroutines.Job? = null
+    private var isPreloading = false
     
     // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
     suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
@@ -128,8 +128,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                         ftpClient?.getFileStream(ftpPath)?.readBytes()
                                     }
                                     is NetworkProtocol.SMB -> {
-                                        val smbPath = if (path.startsWith("/")) path else "/$path"
-                                        smbClient?.getFileStream(smbPath)?.readBytes()
+                                        // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
+                                        log("[Controller] 📡 SMB preloadImageData: $path")
+                                        smbClient?.getFileStream(path)?.readBytes()
                                     }
                                 }
                                 
@@ -1158,9 +1159,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
      * 释放所有资源
      */
     fun releaseAll() {
-        // ✅ 取消预加载任务
-        preloadJob?.cancel()
-        preloadJob = null
+        // ✅ 重置预加载状态
+        isPreloading = false
         
         localProxy?.stop()
         dlnaProxy?.stop()
@@ -1182,28 +1182,39 @@ class MediaController(private val context: Context, private val logCallback: ((S
     suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
         if (allImages.isEmpty()) return
         
-        // ✅ 取消之前的预加载任务，防止累积
-        preloadJob?.cancel()
+        // ✅ 如果正在预加载，直接返回（防止重复调用）
+        if (isPreloading) {
+            log("[Controller] ⚠️ Preload already in progress, skipping")
+            return
+        }
         
         val start = maxOf(0, currentIndex - 2)
         val end = minOf(allImages.size - 1, currentIndex + 2)
         
         log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex)")
         
-        // ✅ 创建新的预加载任务
-        preloadJob = coroutineScope {
-            val semaphore = kotlinx.coroutines.sync.Semaphore(2)
-            
-            (start..end).map { index ->
-                async {
-                    semaphore.acquire()
-                    try {
-                        preloadSingleImage(allImages[index])
-                    } finally {
-                        semaphore.release()
+        isPreloading = true
+        try {
+            coroutineScope {
+                val semaphore = kotlinx.coroutines.sync.Semaphore(2)
+                
+                // ✅ 启动所有预加载任务并等待完成
+                val jobs = (start..end).map { index ->
+                    async {
+                        semaphore.acquire()
+                        try {
+                            preloadSingleImage(allImages[index])
+                        } finally {
+                            semaphore.release()
+                        }
                     }
                 }
-            }.forEach { it.await() }
+                
+                // ✅ 等待所有任务完成
+                jobs.forEach { it.await() }
+            }
+        } finally {
+            isPreloading = false
         }
     }
     
@@ -1229,8 +1240,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     ftpClient?.getFileStream(ftpPath)
                 }
                 is NetworkProtocol.SMB -> {
-                    val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
-                    smbClient?.getFileStream("/$smbPath")
+                    // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
+                    log("[Controller] 📡 SMB preload: $path")
+                    smbClient?.getFileStream(path)
                 }
             }
             
@@ -1354,8 +1366,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         ftpClient?.getFileStream(ftpPath, startOffset)
                     }
                     is NetworkProtocol.SMB -> {
-                        val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
-                        smbClient?.getFileStream("/$smbPath", startOffset)
+                        // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
+                        // 直接使用，不需要额外处理
+                        log("[Controller] 📡 SMB getFileStream: $path")
+                        smbClient?.getFileStream(path, startOffset)
                     }
                     else -> null
                 }
@@ -1370,8 +1384,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         ftpClient?.getFileSize(ftpPath) ?: 0L
                     }
                     is NetworkProtocol.SMB -> {
-                        val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
-                        smbClient?.getFileSize("/$smbPath") ?: 0L
+                        // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
+                        log("[Controller] 📡 SMB getFileSize: $path")
+                        smbClient?.getFileSize(path) ?: 0L
                     }
                     else -> 0L
                 }
