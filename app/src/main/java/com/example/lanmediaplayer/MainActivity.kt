@@ -1807,7 +1807,7 @@ fun ImageViewerScreen(
                                     castingDevice?.let { device ->
                                         castController.castImage(device, imageUrl, newImage.name) { success, message ->
                                             if (success) {
-                                                addLog("Slideshow casted: ${newImage.name}")
+                                                println("[Slideshow] Casted: ${newImage.name}")
                                                 
                                                 // ✅ 预加载下一张图片到HTTP代理缓存
                                                 val nextIndex = if (nextPage < imageFiles.size - 1) nextPage + 1 else 0
@@ -1828,14 +1828,14 @@ fun ImageViewerScreen(
                                                     }
                                                 }
                                             } else {
-                                                addLog("Slideshow cast failed: $message")
+                                                println("[Slideshow] Cast failed: $message")
                                             }
                                         }
                                     }
                                 }
                             } catch (e: Exception) {
                                 e.printStackTrace()
-                                addLog("Slideshow cast error: ${e.message}")
+                                println("[Slideshow] Cast error: ${e.message}")
                             }
                         }
                     }
