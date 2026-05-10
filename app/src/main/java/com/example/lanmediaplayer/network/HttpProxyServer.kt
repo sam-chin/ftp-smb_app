@@ -55,41 +55,6 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         log("[HTTP Proxy] Cache cleared")
     }
     
-    // ✅ 生成HTTP代理URL（用于DLNA投屏）
-    fun getUrl(filePath: String): String? {
-        if (currentPort <= 0) {
-            log("[HTTP Proxy] ERROR: Server not started, cannot generate URL")
-            return null
-        }
-        
-        // 获取本地IP地址
-        val localIp = try {
-            java.net.NetworkInterface.getNetworkInterfaces()
-                ?.toList()
-                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
-                ?.find { 
-                    it is java.net.Inet4Address && 
-                    !it.isLoopbackAddress && 
-                    !it.isAnyLocalAddress &&
-                    it.hostAddress.startsWith("192.168.")
-                }?.hostAddress ?: "127.0.0.1"
-        } catch (e: Exception) {
-            "127.0.0.1"
-        }
-        
-        // URL编码文件路径
-        val encodedPath = try {
-            java.net.URLEncoder.encode(filePath, "UTF-8")
-                .replace("+", "%20")  // URLEncoder将空格编码为+，需要替换为%20
-        } catch (e: Exception) {
-            filePath
-        }
-        
-        val url = "http://$localIp:$currentPort/$encodedPath"
-        log("[HTTP Proxy] Generated URL: $url")
-        return url
-    }
-    
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
         return try {
             // ✅ 如果已经在运行，先停止旧的服务
@@ -627,6 +592,14 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         // Remove leading slash from path to avoid double slashes
         val cleanPath = if (path.startsWith("/")) path.substring(1) else path
         
+        // ✅ URL编码文件路径（处理中文和特殊字符）
+        val encodedPath = try {
+            java.net.URLEncoder.encode(cleanPath, "UTF-8")
+                .replace("+", "%20")  // URLEncoder将空格编码为+，需要替换为%20
+        } catch (e: Exception) {
+            cleanPath
+        }
+        
         // ✅ 获取本地IPv4地址用于生成URL（解决ExoPlayer无法访问127.0.0.1的问题）
         val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
             ?.toList()
@@ -639,7 +612,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             }?.hostAddress ?: "127.0.0.1"
         
         // ✅ 使用局域网IP而不是127.0.0.1
-        val url = "http://$localIpv4Address:$currentPort/$cleanPath"
+        val url = "http://$localIpv4Address:$currentPort/$encodedPath"
         log("[HTTP Proxy] Generated URL: $url")
         return url
     }
