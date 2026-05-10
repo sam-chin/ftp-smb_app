@@ -662,11 +662,17 @@ fun MainScreen(
                         addLog("Already at SMB root, ignoring back click")
                     } else {
                         // 当前在共享目录或子目录中，返回上级目录
-                        val parentPath = currentPath.substringBeforeLast("/")
-                        val newPath = if (parentPath.isEmpty()) "/" else parentPath
-                        addLog("Navigating to parent directory: '$currentPath' -> '$newPath'")
+                        val parentPath = if (currentPath.contains("/", startIndex = 1)) {
+                            // 有父目录：/folder1/subfolder -> /folder1
+                            currentPath.substringBeforeLast("/")
+                        } else {
+                            // 没有父目录：/folder1 -> "" (共享根目录)
+                            ""
+                        }
                         
-                        if (newPath == "/") {
+                        addLog("Navigating to parent directory: '$currentPath' -> '$parentPath'")
+                        
+                        if (parentPath.isEmpty()) {
                             // 返回到共享根目录，显示该共享下的文件
                             addLog("Returning to share root")
                             currentPath = ""  // ✅ 使用空字符串而不是"/"
@@ -691,8 +697,8 @@ fun MainScreen(
                             }
                         } else {
                             // 返回到子目录的父目录
-                            currentPath = newPath
-                            browserTitle = newPath.substringAfterLast("/")
+                            currentPath = parentPath
+                            browserTitle = parentPath.substringAfterLast("/")
                             
                             isLoading = true
                             coroutineScope.launch {
@@ -1686,6 +1692,27 @@ fun ImageViewerScreen(
                     println("❌ Failed to load image at index $index after 3 attempts")
                 } else {
                     println("[ImageViewer] Image $index loaded successfully (${index - startIndex + 1}/${endIndex - startIndex + 1})")
+                    
+                    // ✅ 关键优化：对于FTP和SMB协议，主动触发HTTP代理读取并缓存图片数据
+                    if (imageCache.containsKey(index)) {
+                        launch {
+                            try {
+                                val url = imageCache[index]!!
+                                println("[ImageViewer] Warming up cache for batch image $index...")
+                                // 通过创建一个临时的HTTP请求来触发HTTP代理缓存
+                                val tempConnection = java.net.URL(url).openConnection()
+                                tempConnection.connectTimeout = 10000
+                                tempConnection.readTimeout = 10000
+                                tempConnection.getInputStream()?.use { inputStream ->
+                                    // ✅ 读取完整文件以触发HTTP代理的图片缓存
+                                    val fileData = inputStream.readBytes()
+                                    println("[ImageViewer] Batch cache warmed up for image $index (${fileData.size / 1024}KB)")
+                                }
+                            } catch (e: Exception) {
+                                println("[ImageViewer] Failed to warm up batch cache: ${e.message}")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1725,6 +1752,26 @@ fun ImageViewerScreen(
                     println("[ImageViewer] Quick loading image $index (active: $activeLoads/$maxConcurrent)")
                     val url = getImageUrl(imagePath)
                     imageCache[index] = url
+                    
+                    // ✅ 关键优化：对于FTP和SMB协议，主动触发HTTP代理读取并缓存图片数据
+                    launch {
+                        try {
+                            println("[ImageViewer] Warming up cache for image $index...")
+                            // 通过创建一个临时的HTTP请求来触发HTTP代理缓存
+                            val tempConnection = java.net.URL(url).openConnection()
+                            tempConnection.connectTimeout = 10000
+                            tempConnection.readTimeout = 10000
+                            tempConnection.getInputStream()?.use { inputStream ->
+                                // ✅ 读取完整文件以触发HTTP代理的图片缓存
+                                val fileData = inputStream.readBytes()
+                                println("[ImageViewer] Cache warmed up for image $index (${fileData.size / 1024}KB)")
+                            }
+                        } catch (e: Exception) {
+                            println("[ImageViewer] Failed to warm up cache: ${e.message}")
+                            e.printStackTrace()
+                        }
+                    }
+                    
                     println("[ImageViewer] Quick loaded image $index successfully")
                 } catch (e: Exception) {
                     println("Failed to quick load image at index $index: ${e.message}")

@@ -58,6 +58,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private val smbSharesCache = mutableMapOf<String, List<String>>()
     private val connectionPrefs = com.lanmedia.player.ConnectionPreferences(context)
     
+    // ✅ 跟踪用于HTTP代理的客户端实例（检测是否需要重启代理）
+    private var lastFtpClientForProxy: FtpClient? = null
+    private var lastSmbClientForProxy: SmbClient? = null
+    
     init {
         // 从 ConnectionPreferences 加载缓存的共享目录列表
         loadSmbSharesCache()
@@ -854,6 +858,19 @@ class MediaController(private val context: Context, private val logCallback: ((S
             httpProxy = HttpProxyServer(logCallback)
         }
         
+        // ✅ 检查是否需要重启HTTP代理（当客户端实例变化时）
+        val needRestartProxy = currentPort > 0 && (
+            (protocol is NetworkProtocol.FTP && ftpClient != lastFtpClientForProxy) ||
+            (protocol is NetworkProtocol.SMB && smbClient != lastSmbClientForProxy)
+        )
+        
+        if (needRestartProxy) {
+            log("[Controller] ⚠️ Client instance changed, restarting HTTP proxy...")
+            httpProxy?.stop()
+            currentPort = 0
+            httpProxy = HttpProxyServer(logCallback)
+        }
+        
         // 检查代理服务器是否已经在运行，如果没有则启动
         val ftpRef = ftpClient
         val smbRef = smbClient
@@ -890,6 +907,14 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
             }) ?: -1
             currentPort = newPort
+            
+            // ✅ 记录当前用于代理的客户端实例
+            if (protocol is NetworkProtocol.FTP) {
+                lastFtpClientForProxy = ftpClient
+            } else if (protocol is NetworkProtocol.SMB) {
+                lastSmbClientForProxy = smbClient
+            }
+            
             log("[Controller] HTTP Proxy started on port: $currentPort")
             
             // ✅ 获取并保存局域网IP地址
