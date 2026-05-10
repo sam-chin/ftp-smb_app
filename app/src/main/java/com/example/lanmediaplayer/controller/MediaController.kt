@@ -770,45 +770,22 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] Image path: ${imageFile.path}")
             log("[Controller] Protocol: ${imageFile.protocol}")
             
-            // ✅ 检查FTP/SMB连接是否仍然有效，如果断开则重连
-            when (val protocol = imageFile.protocol) {
+            // ✅ 检查FTP/SMB连接是否仍然有效
+            when (imageFile.protocol) {
                 is NetworkProtocol.FTP -> {
                     if (ftpClient?.isConnected() != true) {
-                        log("[Controller] ⚠️ FTP connection lost, reconnecting...")
-                        val reconnected = ftpClient?.connect(protocol.host, protocol.port) ?: false
-                        if (reconnected) {
-                            val loginSuccess = ftpClient?.login(protocol.username, protocol.password) ?: false
-                            if (loginSuccess) {
-                                log("[Controller] ✅ FTP reconnected successfully")
-                            } else {
-                                log("[Controller] ❌ FTP reconnection failed (login)")
-                                callback.onError("FTP reconnection failed")
-                                return null
-                            }
-                        } else {
-                            log("[Controller] ❌ FTP reconnection failed")
-                            callback.onError("FTP reconnection failed")
-                            return null
-                        }
+                        log("[Controller] ⚠️ WARNING: FTP connection is not active!")
+                        log("[Controller] Please reconnect in the connection screen before casting")
+                        callback.onError("FTP connection lost. Please reconnect.")
+                        return null
                     }
                 }
                 is NetworkProtocol.SMB -> {
                     if (smbClient?.isConnected() != true) {
-                        log("[Controller] ⚠️ SMB connection lost, reconnecting...")
-                        val reconnected = smbClient?.connect(
-                            protocol.host,
-                            protocol.share,
-                            protocol.username,
-                            protocol.password,
-                            protocol.domain
-                        ) ?: false
-                        if (reconnected) {
-                            log("[Controller] ✅ SMB reconnected successfully")
-                        } else {
-                            log("[Controller] ❌ SMB reconnection failed")
-                            callback.onError("SMB reconnection failed")
-                            return null
-                        }
+                        log("[Controller] ⚠️ WARNING: SMB connection is not active!")
+                        log("[Controller] Please reconnect in the connection screen before casting")
+                        callback.onError("SMB connection lost. Please reconnect.")
+                        return null
                     }
                 }
             }
