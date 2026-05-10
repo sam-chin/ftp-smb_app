@@ -676,32 +676,4 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     }
     
     fun getPort(): Int = currentPort
-    fun getUrl(path: String): String {
-        // Remove leading slash from path to avoid double slashes
-        val cleanPath = if (path.startsWith("/")) path.substring(1) else path
-        
-        // ✅ URL编码文件路径（处理中文和特殊字符）
-        val encodedPath = try {
-            java.net.URLEncoder.encode(cleanPath, "UTF-8")
-                .replace("+", "%20")  // URLEncoder将空格编码为+，需要替换为%20
-        } catch (e: Exception) {
-            cleanPath
-        }
-        
-        // ✅ 获取本地IPv4地址用于生成URL（解决ExoPlayer无法访问127.0.0.1的问题）
-        val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
-            ?.toList()
-            ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
-            ?.find { 
-                it is java.net.Inet4Address && 
-                !it.isLoopbackAddress && 
-                !it.isAnyLocalAddress &&
-                it.hostAddress.startsWith("192.168.")
-            }?.hostAddress ?: "127.0.0.1"
-        
-        // ✅ 使用局域网IP而不是127.0.0.1
-        val url = "http://$localIpv4Address:$currentPort/$encodedPath"
-        log("[HTTP Proxy] Generated URL: $url")
-        return url
-    }
 }
