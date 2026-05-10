@@ -532,6 +532,87 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Protocol: ${mediaFile.protocol::class.simpleName}")
         log("[Controller] Size: ${mediaFile.size}")
         
+        // ✅ 检查FTP/SMB连接是否仍然有效，如果断开则自动重连
+        browseScope.launch {
+            try {
+                when (mediaFile.protocol) {
+                    is NetworkProtocol.FTP -> {
+                        if (ftpClient?.isConnected() != true) {
+                            log("[Controller] ⚠️ FTP connection lost, attempting auto-reconnect...")
+                            
+                            if (currentFtpHost.isNotEmpty()) {
+                                val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
+                                if (reconnected) {
+                                    val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
+                                    if (loginSuccess) {
+                                        log("[Controller] ✅ FTP auto-reconnect successful")
+                                    } else {
+                                        log("[Controller] ❌ FTP auto-reconnect failed: login error")
+                                        withContext(Dispatchers.Main) {
+                                            callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                        }
+                                        return@launch
+                                    }
+                                } else {
+                                    log("[Controller] ❌ FTP auto-reconnect failed: connection error")
+                                    withContext(Dispatchers.Main) {
+                                        callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                    }
+                                    return@launch
+                                }
+                            } else {
+                                log("[Controller] ❌ FTP connection parameters not saved")
+                                withContext(Dispatchers.Main) {
+                                    callback.onError("FTP connection lost. Please reconnect manually.")
+                                }
+                                return@launch
+                            }
+                        }
+                    }
+                    is NetworkProtocol.SMB -> {
+                        if (smbClient?.isConnected() != true) {
+                            log("[Controller] ⚠️ SMB connection lost, attempting auto-reconnect...")
+                            
+                            if (currentSmbHost.isNotEmpty()) {
+                                try {
+                                    val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
+                                    val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+                                    if (reconnected == true) {
+                                        log("[Controller] ✅ SMB auto-reconnect successful")
+                                    } else {
+                                        log("[Controller] ❌ SMB auto-reconnect failed")
+                                        withContext(Dispatchers.Main) {
+                                            callback.onError("SMB reconnection failed. Please reconnect manually.")
+                                        }
+                                        return@launch
+                                    }
+                                } catch (e: Exception) {
+                                    log("[Controller] ❌ SMB auto-reconnect exception: ${e.message}")
+                                    withContext(Dispatchers.Main) {
+                                        callback.onError("SMB reconnection failed: ${e.message}")
+                                    }
+                                    return@launch
+                                }
+                            } else {
+                                log("[Controller] ❌ SMB connection parameters not saved")
+                                withContext(Dispatchers.Main) {
+                                    callback.onError("SMB connection lost. Please reconnect manually.")
+                                }
+                                return@launch
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                log("[Controller] Connection check error: ${e.message}")
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    callback.onError(e.message ?: "Unknown error")
+                }
+                return@launch
+            }
+        }
+        
         val extension = mediaFile.name.substringAfterLast('.', "").lowercase()
         val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
         
@@ -770,22 +851,62 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] Image path: ${imageFile.path}")
             log("[Controller] Protocol: ${imageFile.protocol}")
             
-            // ✅ 检查FTP/SMB连接是否仍然有效
+            // ✅ 检查FTP/SMB连接是否仍然有效，如果断开则自动重连
             when (imageFile.protocol) {
                 is NetworkProtocol.FTP -> {
                     if (ftpClient?.isConnected() != true) {
-                        log("[Controller] ⚠️ WARNING: FTP connection is not active!")
-                        log("[Controller] Please reconnect in the connection screen before casting")
-                        callback.onError("FTP connection lost. Please reconnect.")
-                        return null
+                        log("[Controller] ⚠️ FTP connection lost, attempting auto-reconnect...")
+                        
+                        // 尝试自动重连
+                        if (currentFtpHost.isNotEmpty()) {
+                            val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
+                            if (reconnected) {
+                                val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
+                                if (loginSuccess) {
+                                    log("[Controller] ✅ FTP auto-reconnect successful")
+                                } else {
+                                    log("[Controller] ❌ FTP auto-reconnect failed: login error")
+                                    callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                    return null
+                                }
+                            } else {
+                                log("[Controller] ❌ FTP auto-reconnect failed: connection error")
+                                callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                return null
+                            }
+                        } else {
+                            log("[Controller] ❌ FTP connection parameters not saved")
+                            callback.onError("FTP connection lost. Please reconnect manually.")
+                            return null
+                        }
                     }
                 }
                 is NetworkProtocol.SMB -> {
                     if (smbClient?.isConnected() != true) {
-                        log("[Controller] ⚠️ WARNING: SMB connection is not active!")
-                        log("[Controller] Please reconnect in the connection screen before casting")
-                        callback.onError("SMB connection lost. Please reconnect.")
-                        return null
+                        log("[Controller] ⚠️ SMB connection lost, attempting auto-reconnect...")
+                        
+                        // 尝试自动重连
+                        if (currentSmbHost.isNotEmpty()) {
+                            try {
+                                val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
+                                val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+                                if (reconnected == true) {
+                                    log("[Controller] ✅ SMB auto-reconnect successful")
+                                } else {
+                                    log("[Controller] ❌ SMB auto-reconnect failed")
+                                    callback.onError("SMB reconnection failed. Please reconnect manually.")
+                                    return null
+                                }
+                            } catch (e: Exception) {
+                                log("[Controller] ❌ SMB auto-reconnect exception: ${e.message}")
+                                callback.onError("SMB reconnection failed: ${e.message}")
+                                return null
+                            }
+                        } else {
+                            log("[Controller] ❌ SMB connection parameters not saved")
+                            callback.onError("SMB connection lost. Please reconnect manually.")
+                            return null
+                        }
                     }
                 }
             }
