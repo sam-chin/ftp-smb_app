@@ -497,6 +497,96 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 } ?: emptyList()
                             }
                         }
+                    } catch (e: com.lanmedia.player.network.FtpConnectionLostException) {
+                        // ✅ 捕获FTP连接断开异常，尝试重连
+                        log("[Controller] ⚠️ FTP connection lost during browse, attempting reconnect...")
+                        
+                        if (currentFtpHost.isNotEmpty()) {
+                            try {
+                                // 断开旧连接
+                                ftpClient?.disconnect()
+                                ftpClient = null
+                                
+                                // 创建新客户端并重连
+                                ftpClient = com.lanmedia.player.network.FtpClient(logCallback)
+                                val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
+                                if (reconnected) {
+                                    val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
+                                    if (loginSuccess) {
+                                        log("[Controller] ✅ FTP reconnection successful, retrying browse...")
+                                        // 重试浏览操作
+                                        ftpClient?.listFiles(path)?.map { ftpFile ->
+                                            val filePath = if (path == "/") {
+                                                "/${ftpFile.name}"
+                                            } else if (path.endsWith("/")) {
+                                                "$path${ftpFile.name}"
+                                            } else {
+                                                "$path/${ftpFile.name}"
+                                            }
+                                            MediaFile(
+                                                name = ftpFile.name,
+                                                path = filePath,
+                                                size = ftpFile.size,
+                                                isDirectory = ftpFile.isDirectory,
+                                                protocol = NetworkProtocol.FTP
+                                            )
+                                        } ?: emptyList()
+                                    } else {
+                                        log("[Controller] ❌ FTP reconnection failed: login error")
+                                        null
+                                    }
+                                } else {
+                                    log("[Controller] ❌ FTP reconnection failed: connection error")
+                                    null
+                                }
+                            } catch (reconnectEx: Exception) {
+                                log("[Controller] ❌ FTP reconnection exception: ${reconnectEx.message}")
+                                reconnectEx.printStackTrace()
+                                null
+                            }
+                        } else {
+                            log("[Controller] ❌ FTP connection parameters not saved")
+                            null
+                        }
+                    } catch (e: com.lanmedia.player.network.SmbConnectionLostException) {
+                        // ✅ 捕获SMB连接断开异常，尝试重连
+                        log("[Controller] ⚠️ SMB connection lost during browse, attempting reconnect...")
+                        
+                        if (currentSmbHost.isNotEmpty()) {
+                            try {
+                                // 断开旧连接
+                                smbClient?.disconnect()
+                                smbClient = null
+                                
+                                // 创建新客户端并重连
+                                smbClient = com.lanmedia.player.network.SmbClient(logCallback)
+                                val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
+                                val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+                                if (reconnected == true) {
+                                    log("[Controller] ✅ SMB reconnection successful, retrying browse...")
+                                    // 重试浏览操作
+                                    smbClient?.listFiles(path)?.map { smbFile ->
+                                        MediaFile(
+                                            name = smbFile.name,
+                                            path = smbFile.path,
+                                            size = smbFile.size,
+                                            isDirectory = smbFile.isDirectory,
+                                            protocol = NetworkProtocol.SMB
+                                        )
+                                    } ?: emptyList()
+                                } else {
+                                    log("[Controller] ❌ SMB reconnection failed")
+                                    null
+                                }
+                            } catch (reconnectEx: Exception) {
+                                log("[Controller] ❌ SMB reconnection exception: ${reconnectEx.message}")
+                                reconnectEx.printStackTrace()
+                                null
+                            }
+                        } else {
+                            log("[Controller] ❌ SMB connection parameters not saved")
+                            null
+                        }
                     } catch (e: Exception) {
                         log("[Controller] Error in withTimeoutOrNull: ${e.message}")
                         null

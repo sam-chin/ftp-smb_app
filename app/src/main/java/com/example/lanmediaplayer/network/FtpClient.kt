@@ -12,6 +12,9 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.regex.Pattern
 
+// ✅ 自定义异常：表示FTP连接已断开，需要重连
+class FtpConnectionLostException(message: String) : Exception(message)
+
 data class FtpFileInfo(
     val name: String,
     val size: Long,
@@ -361,6 +364,18 @@ class FtpClient(private val logCallback: ((String) -> Unit)? = null) {
         } catch (e: Exception) {
             log("[FTP] Error listing files: ${e.message}")
             e.printStackTrace()
+            
+            // ✅ 检测是否为连接断开异常
+            val isConnectionLost = e.message?.contains("connection abort", ignoreCase = true) == true ||
+                                   e.message?.contains("ETIMEDOUT", ignoreCase = true) == true ||
+                                   e.message?.contains("Connection reset", ignoreCase = true) == true ||
+                                   e is java.net.SocketException
+            
+            if (isConnectionLost) {
+                log("[FTP] ⚠️ Connection lost detected, throwing FtpConnectionLostException")
+                throw FtpConnectionLostException("FTP connection lost: ${e.message}")
+            }
+            
             emptyList()
         } finally {
             closeDataConnection()

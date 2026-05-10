@@ -19,6 +19,9 @@ import java.io.InputStream
 import java.nio.charset.Charset
 import java.util.Properties
 
+// ✅ 自定义异常：表示SMB连接已断开，需要重连
+class SmbConnectionLostException(message: String) : Exception(message)
+
 data class SmbFileInfo(
     val name: String,
     val size: Long,
@@ -485,6 +488,19 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error listing files: ${e.message}")
             e.printStackTrace()
+            
+            // ✅ 检测是否为连接断开异常
+            val isConnectionLost = e.message?.contains("connection", ignoreCase = true) == true ||
+                                   e.message?.contains("timeout", ignoreCase = true) == true ||
+                                   e.message?.contains("reset", ignoreCase = true) == true ||
+                                   e.message?.contains("closed", ignoreCase = true) == true ||
+                                   e is jcifs.smb.SmbException
+            
+            if (isConnectionLost) {
+                log("[SMB-JCIFS] ⚠️ Connection lost detected, throwing SmbConnectionLostException")
+                throw SmbConnectionLostException("SMB connection lost: ${e.message}")
+            }
+            
             emptyList()
         }
     }
