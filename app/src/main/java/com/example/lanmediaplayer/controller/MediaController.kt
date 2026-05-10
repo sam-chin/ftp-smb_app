@@ -97,54 +97,58 @@ class MediaController(private val context: Context, private val logCallback: ((S
         if (isFtp) {
             // ✅ FTP 串行加载（避免 dataSocket 冲突）
             log("[Controller] 🔄 FTP mode: sequential loading")
-            for (i in startIndex until endIndex) {
-                try {
-                    val imageFile = imageFiles[i]
-                    val path = imageFile.path
-                    
-                    if (localImageCache.containsKey(path)) {
-                        log("[Controller] ✅ Already cached: $path")
-                        successCount++
-                        continue
-                    }
-                    
-                    log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex}: $path")
-                    
-                    val ftpPath = if (path.startsWith("/")) path else "/$path"
-                    log("[Controller] 📡 FTP getFileStream: $ftpPath")
-                    var inputStream: java.io.InputStream? = null
+            
+            // ✅ 在 IO 线程执行所有网络操作
+            withContext(Dispatchers.IO) {
+                for (i in startIndex until endIndex) {
                     try {
-                        inputStream = ftpClient?.getFileStream(ftpPath)
+                        val imageFile = imageFiles[i]
+                        val path = imageFile.path
                         
-                        if (inputStream == null) {
-                            log("[Controller] ❌ FTP getFileStream returned null for: $ftpPath")
-                            throw Exception("FTP stream is null")
-                        }
-                        
-                        log("[Controller] 📖 Reading data from FTP stream...")
-                        val fileData = inputStream.readBytes()
-                        log("[Controller] 📊 Read ${fileData.size} bytes")
-                        
-                        if (fileData.isNotEmpty()) {
-                            localImageCache[path] = fileData
-                            currentLocalCacheSize += fileData.size
+                        if (localImageCache.containsKey(path)) {
+                            log("[Controller] ✅ Already cached: $path")
                             successCount++
-                            log("[Controller] ✅ Cached: $path (${fileData.size / 1024}KB)")
-                        } else {
-                            log("[Controller] ⚠️ FTP readBytes returned empty data")
-                            throw Exception("FTP readBytes returned empty data")
+                            continue
                         }
-                    } finally {
-                        inputStream?.close()  // ✅ 立即关闭
+                        
+                        log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex}: $path")
+                        
+                        val ftpPath = if (path.startsWith("/")) path else "/$path"
+                        log("[Controller] 📡 FTP getFileStream: $ftpPath")
+                        var inputStream: java.io.InputStream? = null
+                        try {
+                            inputStream = ftpClient?.getFileStream(ftpPath)
+                            
+                            if (inputStream == null) {
+                                log("[Controller] ❌ FTP getFileStream returned null for: $ftpPath")
+                                throw Exception("FTP stream is null")
+                            }
+                            
+                            log("[Controller] 📖 Reading data from FTP stream...")
+                            val fileData = inputStream.readBytes()
+                            log("[Controller] 📊 Read ${fileData.size} bytes")
+                            
+                            if (fileData.isNotEmpty()) {
+                                localImageCache[path] = fileData
+                                currentLocalCacheSize += fileData.size
+                                successCount++
+                                log("[Controller] ✅ Cached: $path (${fileData.size / 1024}KB)")
+                            } else {
+                                log("[Controller] ⚠️ FTP readBytes returned empty data")
+                                throw Exception("FTP readBytes returned empty data")
+                            }
+                        } finally {
+                            inputStream?.close()  // ✅ 立即关闭
+                        }
+                    } catch (e: Exception) {
+                        failCount++
+                        // ✅ 详细异常信息
+                        val errorMsg = e.message ?: "null message"
+                        val errorCause = e.cause?.message ?: "no cause"
+                        val errorClass = e.javaClass.simpleName
+                        log("[Controller] ⚠️ Failed: [$errorClass] $errorMsg (cause: $errorCause)")
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) {
-                    failCount++
-                    // ✅ 详细异常信息
-                    val errorMsg = e.message ?: "null message"
-                    val errorCause = e.cause?.message ?: "no cause"
-                    val errorClass = e.javaClass.simpleName
-                    log("[Controller] ⚠️ Failed: [$errorClass] $errorMsg (cause: $errorCause)")
-                    e.printStackTrace()
                 }
             }
         } else {
@@ -185,26 +189,49 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     is NetworkProtocol.FTP -> {
                                         // ✅ FTP 路径处理：确保以 / 开头
                                         val ftpPath = if (path.startsWith("/")) path else "/$path"
-                                        ftpClient?.getFileStream(ftpPath)?.readBytes()
+                                        
+                                        // ✅ 在 IO 线程执行网络操作
+                                        withContext(Dispatchers.IO) {
+                                            var ftpInputStream: java.io.InputStream? = null
+                                            try {
+                                                ftpInputStream = ftpClient?.getFileStream(ftpPath)
+                                                
+                                                if (ftpInputStream == null) {
+                                                    log("[Controller] ❌ FTP getFileStream returned null for: $ftpPath")
+                                                    throw Exception("FTP stream is null")
+                                                }
+                                                
+                                                log("[Controller] 📖 Reading data from FTP stream...")
+                                                val data = ftpInputStream.readBytes()
+                                                log("[Controller] 📊 Read ${data.size} bytes")
+                                                data
+                                            } finally {
+                                                ftpInputStream?.close()
+                                            }
+                                        }
                                     }
                                     is NetworkProtocol.SMB -> {
                                         // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
                                         log("[Controller] 📡 SMB getFileStream: $path")
-                                        var smbInputStream: java.io.InputStream? = null
-                                        try {
-                                            smbInputStream = smbClient?.getFileStream(path)
-                                            
-                                            if (smbInputStream == null) {
-                                                log("[Controller] ❌ SMB getFileStream returned null for: $path")
-                                                throw Exception("SMB stream is null")
+                                        
+                                        // ✅ 在 IO 线程执行网络操作
+                                        withContext(Dispatchers.IO) {
+                                            var smbInputStream: java.io.InputStream? = null
+                                            try {
+                                                smbInputStream = smbClient?.getFileStream(path)
+                                                
+                                                if (smbInputStream == null) {
+                                                    log("[Controller] ❌ SMB getFileStream returned null for: $path")
+                                                    throw Exception("SMB stream is null")
+                                                }
+                                                
+                                                log("[Controller] 📖 Reading data from SMB stream...")
+                                                val data = smbInputStream.readBytes()
+                                                log("[Controller] 📊 Read ${data.size} bytes")
+                                                data
+                                            } finally {
+                                                smbInputStream?.close()
                                             }
-                                            
-                                            log("[Controller] 📖 Reading data from SMB stream...")
-                                            val data = smbInputStream.readBytes()
-                                            log("[Controller] 📊 Read ${data.size} bytes")
-                                            data
-                                        } finally {
-                                            smbInputStream?.close()
                                         }
                                     }
                                 }
