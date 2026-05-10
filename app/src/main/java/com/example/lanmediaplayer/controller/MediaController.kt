@@ -85,8 +85,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         var successCount = 0
         var failCount = 0
         
-        // ✅ 使用协程并行加载，最多同时2个请求（降低并发避免SMB过载）
-        val maxConcurrent = 2
+        // ✅ 使用协程并行加载，最多同时1个请求（极低并发，避免与DLNA竞争SMB连接）
+        val maxConcurrent = 1
         val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
         
         // ✅ 使用coroutineScope创建协程作用域
@@ -149,7 +149,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: ${e.message}")
                                 
                                 if (attempt < 3) {
-                                    kotlinx.coroutines.delay(500)  // 等待500ms后重试
+                                    kotlinx.coroutines.delay(1000)  // ✅ 增加重试间隔到1秒，等待SMB连接释放
                                 }
                             }
                         }
@@ -977,7 +977,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
     fun getImageUrl(path: String, protocol: NetworkProtocol): String {
         // 确保 HTTP 代理服务器只启动一次
         if (httpProxy == null) {
-            httpProxy = HttpProxyServer(logCallback)
+            // ✅ 本地预览模式：只监听127.0.0.1，禁止外部设备连接
+            httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
         }
         
         // ✅ 检查是否需要重启HTTP代理（当客户端实例变化时）
@@ -990,7 +991,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] ⚠️ Client instance changed, restarting HTTP proxy...")
             httpProxy?.stop()
             currentPort = 0
-            httpProxy = HttpProxyServer(logCallback)
+            // ✅ 本地预览模式：只监听127.0.0.1
+            httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
             
             // ✅ 清空HTTP代理的图片缓存（因为客户端已变化，旧缓存无效）
             httpProxy?.clearCache()

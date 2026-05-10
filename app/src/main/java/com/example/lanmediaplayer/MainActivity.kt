@@ -1704,8 +1704,8 @@ fun ImageViewerScreen(
         preloadTriggered = true
         lastPreloadIndex = 0
         
-        // ✅ 延迟500ms启动预加载，让UI先稳定，避免与HTTP代理竞争SMB连接
-        kotlinx.coroutines.delay(500)
+        // ✅ 延迟2秒启动预加载，等待DLNA请求稳定，避免SMB连接竞争
+        kotlinx.coroutines.delay(2000)
         
         // ✅ 在后台协程中并行加载，不阻塞UI
         launch {

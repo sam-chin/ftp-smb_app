@@ -5,7 +5,7 @@ import java.io.*
 import java.net.ServerSocket
 import java.net.Socket
 
-class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
+class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, private val allowExternalConnections: Boolean = false) {
     private var serverSocket: ServerSocket? = null
     private var serverScope: CoroutineScope? = null
     private var currentPort: Int = 0
@@ -67,28 +67,35 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             }
             
             // ✅ 显式获取本地IPv4地址并绑定（解决小米澎湃OS问题）
-            val localIpv4Address = java.net.NetworkInterface.getNetworkInterfaces()
-                ?.toList()
-                ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
-                ?.find { 
-                    it is java.net.Inet4Address && 
-                    !it.isLoopbackAddress && 
-                    !it.isAnyLocalAddress &&
-                    it.hostAddress.startsWith("192.168.")  // 优先选择局域网IP
-                } ?: java.net.InetAddress.getByName("0.0.0.0")
+            // ✅ 根据allowExternalConnections选择监听地址
+            val bindAddress = if (allowExternalConnections) {
+                // DLNA投屏模式：监听局域网IP，允许外部设备连接
+                java.net.NetworkInterface.getNetworkInterfaces()
+                    ?.toList()
+                    ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+                    ?.find { 
+                        it is java.net.Inet4Address && 
+                        !it.isLoopbackAddress && 
+                        !it.isAnyLocalAddress &&
+                        it.hostAddress.startsWith("192.168.")  // 优先选择局域网IP
+                    } ?: java.net.InetAddress.getByName("0.0.0.0")
+            } else {
+                // 本地预览模式：只监听回环地址，禁止外部连接
+                java.net.InetAddress.getByName("127.0.0.1")
+            }
             
-            log("[HTTP Proxy] Binding to IPv4 address: ${localIpv4Address.hostAddress}")
+            log("[HTTP Proxy] Binding to: ${bindAddress.hostAddress} (${if (allowExternalConnections) "DLNA mode" else "Local only"})")
             
             // ✅ 如果指定端口失败，尝试随机端口
             serverSocket = try {
                 if (port > 0) {
-                    ServerSocket(port, 50, localIpv4Address)
+                    ServerSocket(port, 50, bindAddress)
                 } else {
-                    ServerSocket(0, 50, localIpv4Address)
+                    ServerSocket(0, 50, bindAddress)
                 }
             } catch (e: java.net.BindException) {
                 log("[HTTP Proxy] Port $port is in use, trying random port...")
-                ServerSocket(0, 50, localIpv4Address)
+                ServerSocket(0, 50, bindAddress)
             }
             
             currentPort = serverSocket?.localPort ?: 0
