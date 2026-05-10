@@ -68,8 +68,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ✅ HTTP代理重启回调（通知上层清空URL缓存）
     var onProxyRestarted: (() -> Unit)? = null
     
-    // ✅ 本地预览图片缓存（LRU，最多10张）
-    private val localImageCache = mutableMapOf<String, ByteArray>()
+    // ✅ 本地预览图片缓存（LRU，最多200MB）
+    private val localImageCache = java.util.LinkedHashMap<String, ByteArray>()
     private val maxLocalCacheSize = 200 * 1024 * 1024  // 200MB
     private var currentLocalCacheSize = 0L
     
@@ -141,9 +141,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             inputStream?.close()  // ✅ 立即关闭
                         }
                         
-                        // ✅ FTP 友好：每张图片之间延迟 100ms，避免服务器过载
+                        // ✅ FTP 友好：每张图片之间延迟 50ms，平衡速度和服务器负载
                         if (i < endIndex - 1) {
-                            kotlinx.coroutines.delay(100)
+                            kotlinx.coroutines.delay(50)
                         }
                     } catch (e: Exception) {
                         failCount++
@@ -244,14 +244,20 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 if (fileData != null && fileData.isNotEmpty()) {
                                     // ✅ 检查缓存大小限制
                                     if (currentLocalCacheSize + fileData.size > maxLocalCacheSize) {
-                                        // 清除最旧的缓存（简单策略：清空一半）
-                                        val keysToRemove = localImageCache.keys.take(localImageCache.size / 2).toList()
-                                        keysToRemove.forEach { key ->
-                                            localImageCache.remove(key)?.let { removedData ->
-                                                currentLocalCacheSize -= removedData.size
-                                            }
+                                        // ✅ LRU 淘汰：删除最早插入的图片（LinkedHashMap 保持插入顺序）
+                                        val iterator = localImageCache.entries.iterator()
+                                        var removedCount = 0
+                                        var removedSize = 0L
+                                        
+                                        while (iterator.hasNext() && currentLocalCacheSize + fileData.size > maxLocalCacheSize) {
+                                            val entry = iterator.next()
+                                            removedSize += entry.value.size
+                                            iterator.remove()  // ✅ 安全删除
+                                            removedCount++
                                         }
-                                        log("[Controller] Cache full, cleared ${keysToRemove.size} old entries")
+                                        
+                                        currentLocalCacheSize -= removedSize
+                                        log("[Controller] 🗑️ Cache full, LRU evicted $removedCount entries (${removedSize / 1024}KB)")
                                     }
                                     
                                     // ✅ 存入本地缓存

@@ -1714,7 +1714,7 @@ fun ImageViewerScreen(
     var preloadTriggered by remember { mutableStateOf(false) }  // 是否已触发初始预加载
     var lastPreloadIndex by remember { mutableStateOf(-1) }  // 上次预加载的起始索引
     
-    // ✅ 初始预加载：异步加载前10张图片数据（不阻塞UI）
+    // ✅ 初始预加载：异步加载前30张图片数据（不阻塞UI）
     LaunchedEffect(Unit) {
         if (imageFiles.isEmpty() || preloadTriggered) return@LaunchedEffect
         
@@ -1722,8 +1722,8 @@ fun ImageViewerScreen(
         preloadTriggered = true
         lastPreloadIndex = 0
         
-        // ✅ 降低延迟到500ms，快速启动预加载
-        kotlinx.coroutines.delay(500)
+        // ✅ 立即启动预加载，不要延迟（确保HTTP请求时缓存已就绪）
+        // kotlinx.coroutines.delay(500)  ← 已移除
         
         // ✅ 在后台协程中并行加载，不阻塞UI
         launch {
@@ -1732,15 +1732,15 @@ fun ImageViewerScreen(
         }
     }
     
-    // ✅ 监听页面变化，智能预加载（每10张触发一次）
+    // ✅ 监听页面变化，智能预加载（更早触发，确保缓存就绪）
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 当预览到第11张（索引10）时，触发下一批预加载
-        if (currentPage == 10 && lastPreloadIndex == 0) {
-            addLog("[ImageViewer] === Triggering next batch preload at page 10 ===")
+        // ✅ 当预览到第6张（索引5）时，立即触发下一批预加载（更早触发）
+        if (currentPage == 5 && lastPreloadIndex == 0) {
+            addLog("[ImageViewer] === Triggering next batch preload at page 5 ===")
             lastPreloadIndex = 30
             
             launch {
@@ -1748,9 +1748,9 @@ fun ImageViewerScreen(
             }
         }
         
-        // ✅ 当预览到第41张（索引40）时，触发第三批预加载
-        if (currentPage == 40 && lastPreloadIndex == 30) {
-            addLog("[ImageViewer] === Triggering third batch preload at page 40 ===")
+        // ✅ 当预览到第36张（索引35）时，触发第三批预加载
+        if (currentPage == 35 && lastPreloadIndex == 30) {
+            addLog("[ImageViewer] === Triggering third batch preload at page 35 ===")
             lastPreloadIndex = 60
             
             launch {
