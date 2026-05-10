@@ -13,14 +13,19 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     // ✅ 公开属性，让外部可以检查当前模式
     fun isAllowingExternalConnections(): Boolean = allowExternalConnections
     
-    // ✅ SMB 文件尺寸缓存（避免重复查询）
-    private val fileSizeCache = mutableMapOf<String, Long>()
+    // ✅ 双缓存架构：完全隔离本地预览和DLNA投屏的缓存
+    private val localCache = mutableMapOf<String, ByteArray>()      // 本地预览缓存（预加载）
+    private val dlnaCache = mutableMapOf<String, ByteArray>()       // DLNA投屏缓存（按需加载）
+    private val fileSizeCache = mutableMapOf<String, Long>()        // 文件尺寸缓存（共享）
+    
+    private val cacheMutex = kotlinx.coroutines.sync.Mutex()
     private val fileSizeCacheMutex = kotlinx.coroutines.sync.Mutex()
     
-    // ✅ 图片数据缓存（用于加速重复访问）
-    private val imageCache = mutableMapOf<String, ByteArray>()
-    private val maxCacheSize = 100 * 1024 * 1024  // ✅ 增加缓存到100MB
-    private var currentCacheSize = 0L
+    // ✅ 缓存大小限制
+    private val maxLocalCacheSize = 200 * 1024 * 1024L   // 本地缓存 200MB
+    private val maxDlnaCacheSize = 50 * 1024 * 1024L     // DLNA缓存 50MB
+    private var currentLocalCacheSize = 0L
+    private var currentDlnaCacheSize = 0L
     
     // ✅ 引用外部图片数据缓存（由MediaController提供，用于本地预览）
     var externalImageCacheProvider: (() -> Map<String, ByteArray>)? = null
@@ -35,35 +40,95 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
         suspend fun getFileSize(path: String): Long
     }
     
-    // ✅ 缓存管理方法
-    private fun addToCache(path: String, data: ByteArray) {
-        val dataSize = data.size.toLong()
-        
-        // 如果超过最大缓存，清理旧数据（简单策略：清空所有）
-        if (currentCacheSize + dataSize > maxCacheSize) {
-            log("[HTTP Proxy] Cache full ($currentCacheSize bytes), clearing...")
-            imageCache.clear()
-            currentCacheSize = 0
+    // ✅ 双缓存架构的缓存管理方法
+    private fun addToLocalCache(path: String, data: ByteArray) {
+        cacheMutex.tryRun {
+            val dataSize = data.size.toLong()
+            
+            // 如果超过最大缓存，清理旧数据
+            if (currentLocalCacheSize + dataSize > maxLocalCacheSize) {
+                log("[HTTP Proxy] Local cache full ($currentLocalCacheSize bytes), clearing...")
+                localCache.clear()
+                currentLocalCacheSize = 0
+            }
+            
+            localCache[path] = data
+            currentLocalCacheSize += dataSize
+            log("[HTTP Proxy] 📦 Cached to LOCAL: $path (${dataSize / 1024}KB), total: ${currentLocalCacheSize / 1024}KB")
         }
-        
-        imageCache[path] = data
-        currentCacheSize += dataSize
-        log("[HTTP Proxy] Cached image: $path (${dataSize / 1024}KB), total cache: ${currentCacheSize / 1024}KB")
     }
     
-    private fun getFromCache(path: String): ByteArray? {
-        val cached = imageCache[path]
-        if (cached != null) {
-            log("[HTTP Proxy] ✅ Cache hit for: $path")
+    private fun addToDlnaCache(path: String, data: ByteArray) {
+        cacheMutex.tryRun {
+            val dataSize = data.size.toLong()
+            
+            // 如果超过最大缓存，清理旧数据
+            if (currentDlnaCacheSize + dataSize > maxDlnaCacheSize) {
+                log("[HTTP Proxy] DLNA cache full ($currentDlnaCacheSize bytes), clearing...")
+                dlnaCache.clear()
+                currentDlnaCacheSize = 0
+            }
+            
+            dlnaCache[path] = data
+            currentDlnaCacheSize += dataSize
+            log("[HTTP Proxy] 📡 Cached to DLNA: $path (${dataSize / 1024}KB), total: ${currentDlnaCacheSize / 1024}KB")
         }
-        return cached
+    }
+    
+    private fun getFromLocalCache(path: String): ByteArray? {
+        return cacheMutex.tryRun {
+            val cached = localCache[path]
+            if (cached != null) {
+                log("[HTTP Proxy] ✅ LOCAL cache hit: $path")
+            }
+            cached
+        }
+    }
+    
+    private fun getFromDlnaCache(path: String): ByteArray? {
+        return cacheMutex.tryRun {
+            val cached = dlnaCache[path]
+            if (cached != null) {
+                log("[HTTP Proxy] ✅ DLNA cache hit: $path")
+            }
+            cached
+        }
+    }
+    
+    // ✅ 根据模式获取缓存
+    private fun getFromCache(path: String): ByteArray? {
+        return if (allowExternalConnections) {
+            getFromDlnaCache(path)
+        } else {
+            getFromLocalCache(path)
+        }
+    }
+    
+    // ✅ 根据模式添加缓存
+    private fun addToCache(path: String, data: ByteArray) {
+        if (allowExternalConnections) {
+            addToDlnaCache(path, data)
+        } else {
+            addToLocalCache(path, data)
+        }
     }
     
     fun clearCache() {
-        imageCache.clear()
-        currentCacheSize = 0
-        fileSizeCache.clear()  // ✅ 清空文件尺寸缓存
-        log("[HTTP Proxy] Cache cleared")
+        cacheMutex.tryRun {
+            localCache.clear()
+            dlnaCache.clear()
+            fileSizeCache.clear()
+            currentLocalCacheSize = 0
+            currentDlnaCacheSize = 0
+            log("[HTTP Proxy] 🗑️ All caches cleared (Local + DLNA + FileSize)")
+        }
+    }
+    
+    // ✅ Mutex 的安全执行辅助方法
+    private inline fun <T> kotlinx.coroutines.sync.Mutex.tryRun(block: () -> T): T {
+        return runBlocking {
+            withLock { block() }
+        }
     }
     
     // ✅ 生成HTTP代理URL（用于视频播放和图片预览）
