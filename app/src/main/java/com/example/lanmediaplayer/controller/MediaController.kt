@@ -68,10 +68,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ✅ HTTP代理重启回调（通知上层清空URL缓存）
     var onProxyRestarted: (() -> Unit)? = null
     
-    // ✅ 本地预览图片缓存（与DLNA独立，避免冲突）
+    // ✅ 本地预览图片缓存（LRU，最多10张）
     private val localImageCache = mutableMapOf<String, ByteArray>()
-    private val maxLocalCacheSize = 200 * 1024 * 1024  // ✅ 增加缓存到200MB
+    private val maxLocalCacheSize = 200 * 1024 * 1024  // 200MB
     private var currentLocalCacheSize = 0L
+    
+    // ✅ 预加载任务管理（防止累积）
+    private var preloadJob: kotlinx.coroutines.Job? = null
     
     // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
     suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
@@ -119,7 +122,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         for (attempt in 1..3) {
                             try {
                                 val fileData = when (imageFile.protocol) {
-                                    is NetworkProtocol.FTP -> ftpClient?.getFileStream(path)?.readBytes()
+                                    is NetworkProtocol.FTP -> {
+                                        // ✅ FTP 路径处理：确保以 / 开头
+                                        val ftpPath = if (path.startsWith("/")) path else "/$path"
+                                        ftpClient?.getFileStream(ftpPath)?.readBytes()
+                                    }
                                     is NetworkProtocol.SMB -> {
                                         val smbPath = if (path.startsWith("/")) path else "/$path"
                                         smbClient?.getFileStream(smbPath)?.readBytes()
@@ -1069,7 +1076,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
 
     suspend fun getFileStream(path: String, protocol: NetworkProtocol): InputStream? {
         return when (protocol) {
-            is NetworkProtocol.FTP -> ftpClient?.getFileStream(path, 0)
+            is NetworkProtocol.FTP -> {
+                // ✅ FTP 路径处理：确保以 / 开头
+                val ftpPath = if (path.startsWith("/")) path else "/$path"
+                log("[Controller] 📡 FTP getFileStream: $ftpPath")
+                ftpClient?.getFileStream(ftpPath, 0)
+            }
             is NetworkProtocol.SMB -> smbClient?.getFileStream(path, 0)
         }
     }
@@ -1146,6 +1158,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
      * 释放所有资源
      */
     fun releaseAll() {
+        // ✅ 取消预加载任务
+        preloadJob?.cancel()
+        preloadJob = null
+        
         localProxy?.stop()
         dlnaProxy?.stop()
         localProxy = null
@@ -1166,12 +1182,16 @@ class MediaController(private val context: Context, private val logCallback: ((S
     suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
         if (allImages.isEmpty()) return
         
+        // ✅ 取消之前的预加载任务，防止累积
+        preloadJob?.cancel()
+        
         val start = maxOf(0, currentIndex - 2)
         val end = minOf(allImages.size - 1, currentIndex + 2)
         
         log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex)")
         
-        coroutineScope {
+        // ✅ 创建新的预加载任务
+        preloadJob = coroutineScope {
             val semaphore = kotlinx.coroutines.sync.Semaphore(2)
             
             (start..end).map { index ->
@@ -1198,28 +1218,48 @@ class MediaController(private val context: Context, private val logCallback: ((S
             return
         }
         
+        var inputStream: java.io.InputStream? = null
         try {
-            val fileData = when (imageFile.protocol) {
-                is NetworkProtocol.FTP -> ftpClient?.getFileStream(path)?.readBytes()
+            // ✅ 获取文件流
+            inputStream = when (imageFile.protocol) {
+                is NetworkProtocol.FTP -> {
+                    // ✅ FTP 路径处理：确保以 / 开头
+                    val ftpPath = if (path.startsWith("/")) path else "/$path"
+                    log("[Controller] 📡 FTP preload: $ftpPath")
+                    ftpClient?.getFileStream(ftpPath)
+                }
                 is NetworkProtocol.SMB -> {
                     val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
-                    smbClient?.getFileStream("/$smbPath")?.readBytes()
+                    smbClient?.getFileStream("/$smbPath")
                 }
             }
             
-            if (fileData != null && fileData.isNotEmpty()) {
-                // LRU 缓存管理（最多10张）
-                if (localImageCache.size >= 10) {
-                    val oldestKey = localImageCache.keys.first()
-                    localImageCache.remove(oldestKey)
-                    log("[Controller] 🗑️ Evicted oldest: $oldestKey")
-                }
+            if (inputStream != null) {
+                // ✅ 读取数据
+                val fileData = inputStream.readBytes()
                 
-                localImageCache[path] = fileData
-                log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB)")
+                if (fileData.isNotEmpty()) {
+                    // ✅ LRU 缓存管理（最多10张）
+                    while (localImageCache.size >= 10) {
+                        val oldestKey = localImageCache.keys.first()
+                        localImageCache.remove(oldestKey)
+                        log("[Controller] 🗑️ Evicted oldest: $oldestKey")
+                    }
+                    
+                    localImageCache[path] = fileData
+                    log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB)")
+                }
             }
         } catch (e: Exception) {
             log("[Controller] ⚠️ Preload failed: ${e.message}")
+            e.printStackTrace()
+        } finally {
+            // ✅ 确保关闭 InputStream，防止资源泄漏
+            try {
+                inputStream?.close()
+            } catch (e: Exception) {
+                log("[Controller] ⚠️ Error closing stream: ${e.message}")
+            }
         }
     }
     
@@ -1307,7 +1347,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
         return object : HttpProxyServer.FileProvider {
             override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
                 return when (currentMediaFile?.protocol) {
-                    is NetworkProtocol.FTP -> ftpClient?.getFileStream(path, startOffset)
+                    is NetworkProtocol.FTP -> {
+                        // ✅ FTP 路径处理：确保以 / 开头
+                        val ftpPath = if (path.startsWith("/")) path else "/$path"
+                        log("[Controller] 📡 FTP getFileStream: $ftpPath")
+                        ftpClient?.getFileStream(ftpPath, startOffset)
+                    }
                     is NetworkProtocol.SMB -> {
                         val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
                         smbClient?.getFileStream("/$smbPath", startOffset)
@@ -1318,7 +1363,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
             
             override suspend fun getFileSize(path: String): Long {
                 return when (currentMediaFile?.protocol) {
-                    is NetworkProtocol.FTP -> ftpClient?.getFileSize(path) ?: 0L
+                    is NetworkProtocol.FTP -> {
+                        // ✅ FTP 路径处理：确保以 / 开头
+                        val ftpPath = if (path.startsWith("/")) path else "/$path"
+                        log("[Controller] 📡 FTP getFileSize: $ftpPath")
+                        ftpClient?.getFileSize(ftpPath) ?: 0L
+                    }
                     is NetworkProtocol.SMB -> {
                         val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
                         smbClient?.getFileSize("/$smbPath") ?: 0L
