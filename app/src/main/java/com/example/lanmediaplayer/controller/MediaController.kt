@@ -32,8 +32,11 @@ data class MediaFile(
 
 class MediaController(private val context: Context, private val logCallback: ((String) -> Unit)? = null) {
     private var exoPlayer: ExoPlayer? = null
-    private var httpProxy: HttpProxyServer? = null
-    private var currentPort: Int = 0  // HTTP代理服务器端口，0表示未启动
+    
+    // ✅ 双代理架构：本地预览和DLNA投屏完全隔离
+    private var localProxy: HttpProxyServer? = null   // 本地预览专用（127.0.0.1）
+    private var dlnaProxy: HttpProxyServer? = null    // DLNA投屏专用（局域网IP）
+    
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
     private var currentMediaFile: MediaFile? = null
@@ -871,57 +874,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 exoPlayer?.stop()
                 exoPlayer?.clearMediaItems()
                 
-                httpProxy?.stop()
-                // ✅ 本地播放模式：只监听127.0.0.1
-                httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
-                
                 currentMediaFile = mediaFile
                 
-                val ftpRef = ftpClient
-                val smbRef = smbClient
-                val mediaRef = currentMediaFile
+                // ✅ 使用本地代理
+                ensureLocalProxy()
                 
-                val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
-                    override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
-                        log("[Controller] getFileStream called for: $path (offset: $startOffset)")
-                        return when (mediaRef?.protocol) {
-                            is NetworkProtocol.FTP -> ftpRef?.getFileStream(path, startOffset)
-                            is NetworkProtocol.SMB -> {
-                                val smbPath = if (path.startsWith("/")) path else "/$path"
-                                smbRef?.getFileStream(smbPath, startOffset)
-                            }
-                            else -> null
-                        }
-                    }
-                    
-                    override suspend fun getFileSize(path: String): Long {
-                        log("[Controller] getFileSize called for: $path")
-                        return when (mediaRef?.protocol) {
-                            is NetworkProtocol.FTP -> ftpRef?.getFileSize(path) ?: mediaRef?.size ?: 0L
-                            is NetworkProtocol.SMB -> {
-                                val smbPath = if (path.startsWith("/")) path else "/$path"
-                                smbRef?.getFileSize(smbPath) ?: mediaRef?.size ?: 0L
-                            }
-                            else -> mediaRef?.size ?: 0L
-                        }
-                    }
-                }) ?: -1
-                
-                log("[Controller] HTTP Proxy started on port: $port")
-                
-                // ✅ 获取并保存局域网IP地址
-                localIpAddress = getLocalIpAddress()
-                log("[Controller] Local IP address: $localIpAddress, Proxy port: $port")
-                
-                if (port <= 0) {
-                    log("[Controller] ERROR: Failed to start proxy server")
-                    withContext(Dispatchers.Main) {
-                        callback.onError("Failed to start proxy server")
-                    }
-                    return@launch
-                }
-                
-                val proxyUrl = httpProxy?.getUrl(mediaFile.path) ?: ""
+                val proxyUrl = localProxy?.getUrl(mediaFile.path) ?: ""
                 currentVideoUrl = proxyUrl
                 log("[Controller] Proxy URL: $proxyUrl")
                 log("[Controller] Media file path: ${mediaFile.path}")
@@ -976,109 +934,29 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] Stopping playback...")
         exoPlayer?.stop()
         exoPlayer?.clearMediaItems()
-        httpProxy?.stop()
-        httpProxy = null
+        localProxy?.stop()
+        localProxy = null
         log("[Controller] Playback stopped")
     }
     
-    fun getImageUrl(path: String, protocol: NetworkProtocol): String {
-        // 确保 HTTP 代理服务器只启动一次
-        if (httpProxy == null) {
-            // ✅ 本地预览模式：只监听127.0.0.1，禁止外部设备连接
-            httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
+    // ✅ 获取本地预览URL（127.0.0.1）
+    fun getLocalImageUrl(path: String): String {
+        ensureLocalProxy()
+        return localProxy!!.getUrl(path)
+    }
+    
+    // ✅ 获取DLNA投屏URL（局域网IP）
+    suspend fun getDlnaImageUrl(imageFile: MediaFile, callback: MediaCallback): String? {
+        // 确保连接有效
+        if (!ensureConnection(imageFile.protocol)) {
+            log("❌ Connection not available for DLNA")
+            callback.onError("Connection lost. Please reconnect.")
+            return null
         }
         
-        // ✅ 检查是否需要重启HTTP代理（当客户端实例变化时）
-        val needRestartProxy = currentPort > 0 && (
-            (protocol is NetworkProtocol.FTP && ftpClient != lastFtpClientForProxy) ||
-            (protocol is NetworkProtocol.SMB && smbClient != lastSmbClientForProxy)
-        )
-        
-        if (needRestartProxy) {
-            log("[Controller] ⚠️ Client instance changed, restarting HTTP proxy...")
-            httpProxy?.stop()
-            currentPort = 0
-            // ✅ 本地预览模式：只监听127.0.0.1
-            httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
-            
-            // ✅ 清空HTTP代理的图片缓存（因为客户端已变化，旧缓存无效）
-            httpProxy?.clearCache()
-            log("[Controller] HTTP proxy cache cleared due to client change")
-            
-            // ✅ 通知上层清空URL缓存（避免使用失效的URL）
-            onProxyRestarted?.invoke()
-            
-            // ✅ 重新设置外部图片缓存提供者
-            httpProxy?.externalImageCacheProvider = { localImageCache }
-            log("[Controller] External image cache provider re-set after proxy restart")
-        }
-        
-        // 检查代理服务器是否已经在运行，如果没有则启动
-        val ftpRef = ftpClient
-        val smbRef = smbClient
-        val currentProtocol = protocol
-        
-        // 只在第一次调用时启动代理服务器，后续调用复用同一个实例
-        val port = if (currentPort <= 0) {
-            // ✅ 尝试使用固定端口8080，更容易被外部设备访问
-            // 如果8080被占用，则使用随机端口（0）
-            val preferredPort = 8080
-            log("[Controller] Attempting to start HTTP proxy on port $preferredPort...")
-            
-            val newPort = httpProxy?.start(preferredPort, object : HttpProxyServer.FileProvider {
-                override suspend fun getFileStream(filePath: String, startOffset: Long): InputStream? {
-                    return when (currentProtocol) {
-                        is NetworkProtocol.FTP -> ftpRef?.getFileStream(filePath, startOffset)
-                        is NetworkProtocol.SMB -> {
-                            val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
-                            smbRef?.getFileStream(smbPath, startOffset)
-                        }
-                        else -> null
-                    }
-                }
-                
-                override suspend fun getFileSize(filePath: String): Long {
-                    return when (currentProtocol) {
-                        is NetworkProtocol.FTP -> ftpRef?.getFileSize(filePath) ?: 0L
-                        is NetworkProtocol.SMB -> {
-                            val smbPath = if (filePath.startsWith("/")) filePath else "/$filePath"
-                            smbRef?.getFileSize(smbPath) ?: 0L
-                        }
-                        else -> 0L
-                    }
-                }
-            }) ?: -1
-            currentPort = newPort
-            
-            // ✅ 记录当前用于代理的客户端实例
-            if (protocol is NetworkProtocol.FTP) {
-                lastFtpClientForProxy = ftpClient
-            } else if (protocol is NetworkProtocol.SMB) {
-                lastSmbClientForProxy = smbClient
-            }
-            
-            log("[Controller] HTTP Proxy started on port: $currentPort")
-            
-            // ✅ 设置外部图片缓存提供者（让HTTP代理优先使用预加载的本地缓存）
-            httpProxy?.externalImageCacheProvider = { localImageCache }
-            log("[Controller] External image cache provider set for HTTP proxy")
-            localIpAddress = getLocalIpAddress()
-            log("[Controller] Local IP address: $localIpAddress, Proxy port: $currentPort")
-            
-            newPort
-        } else {
-            // 已经启动，直接返回端口号
-            currentPort
-        }
-        
-        val cleanPath = if (path.startsWith("/")) path.substring(1) else path
-        val encodedPath = try {
-            java.net.URLEncoder.encode(cleanPath, "UTF-8").replace("+", "%20")
-        } catch (e: Exception) {
-            cleanPath
-        }
-        // ✅ 本地预览模式：使用127.0.0.1（因为HTTP代理只监听回环地址）
-        return "http://127.0.0.1:$port/$encodedPath"
+        // 启动 DLNA 代理
+        ensureDlnaProxy()
+        return dlnaProxy?.getUrl(imageFile.path)
     }
     
     fun getVideoUrl(): String {
@@ -1125,202 +1003,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     // ✅ 关键修复：停止投屏后切换HTTP代理回本地模式
-    fun switchToLocalMode() {
-        log("[Controller] === Switching HTTP proxy to LOCAL mode ===")
-        
-        if (httpProxy != null && httpProxy!!.isAllowingExternalConnections()) {
-            log("[Controller] Current mode is DLNA, switching to local...")
-            
-            // 停止当前的DLNA模式代理
-            httpProxy?.stop()
-            currentPort = 0
-            
-            // 创建新的本地模式代理（只监听127.0.0.1）
-            httpProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
-            
-            // ✅ 清空缓存（避免使用DLNA模式的缓存数据）
-            httpProxy?.clearCache()
-            log("[Controller] HTTP proxy switched to LOCAL mode (127.0.0.1 only)")
-            
-            // ✅ 重新设置外部图片缓存提供者
-            httpProxy?.externalImageCacheProvider = { localImageCache }
-            log("[Controller] External image cache provider re-set for local mode")
-        } else {
-            log("[Controller] Already in local mode or proxy not started")
-        }
-    }
-    
-    // ✅ 获取图片的HTTP代理URL（用于DLNA投屏）
-    suspend fun getImageUrl(imageFile: MediaFile, callback: MediaCallback): String? {
-        return try {
-            log("[Controller] === Getting Image URL for DLNA ===")
-            log("[Controller] Image name: ${imageFile.name}")
-            log("[Controller] Image path: ${imageFile.path}")
-            log("[Controller] Protocol: ${imageFile.protocol}")
-            
-            // ✅ 检查FTP/SMB连接是否仍然有效，如果断开则自动重连
-            when (imageFile.protocol) {
-                is NetworkProtocol.FTP -> {
-                    if (ftpClient?.isConnected() != true) {
-                        log("[Controller] ⚠️ FTP connection lost, attempting auto-reconnect...")
-                        
-                        // 尝试自动重连
-                        if (currentFtpHost.isNotEmpty()) {
-                            try {
-                                // ✅ 先断开旧连接（清理失效的socket）
-                                ftpClient?.disconnect()
-                                ftpClient = null
-                                
-                                // 创建新的FTP客户端
-                                ftpClient = FtpClient(logCallback)
-                                
-                                val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
-                                if (reconnected) {
-                                    val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
-                                    if (loginSuccess) {
-                                        log("[Controller] ✅ FTP auto-reconnect successful")
-                                    } else {
-                                        log("[Controller] ❌ FTP auto-reconnect failed: login error")
-                                        callback.onError("FTP reconnection failed. Please reconnect manually.")
-                                        return null
-                                    }
-                                } else {
-                                    log("[Controller] ❌ FTP auto-reconnect failed: connection error")
-                                    callback.onError("FTP reconnection failed. Please reconnect manually.")
-                                    return null
-                                }
-                            } catch (e: Exception) {
-                                log("[Controller] ❌ FTP auto-reconnect exception: ${e.message}")
-                                e.printStackTrace()
-                                callback.onError("FTP reconnection failed: ${e.message}")
-                                return null
-                            }
-                        } else {
-                            log("[Controller] ❌ FTP connection parameters not saved")
-                            callback.onError("FTP connection lost. Please reconnect manually.")
-                            return null
-                        }
-                    }
-                }
-                is NetworkProtocol.SMB -> {
-                    if (smbClient?.isConnected() != true) {
-                        log("[Controller] ⚠️ SMB connection lost, attempting auto-reconnect...")
-                        
-                        // 尝试自动重连
-                        if (currentSmbHost.isNotEmpty()) {
-                            try {
-                                // ✅ 先断开旧连接（清理失效的context）
-                                smbClient?.disconnect()
-                                smbClient = null
-                                
-                                // 创建新的SMB客户端
-                                smbClient = SmbClient(logCallback)
-                                
-                                val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
-                                val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
-                                if (reconnected == true) {
-                                    log("[Controller] ✅ SMB auto-reconnect successful")
-                                } else {
-                                    log("[Controller] ❌ SMB auto-reconnect failed")
-                                    callback.onError("SMB reconnection failed. Please reconnect manually.")
-                                    return null
-                                }
-                            } catch (e: Exception) {
-                                log("[Controller] ❌ SMB auto-reconnect exception: ${e.message}")
-                                e.printStackTrace()
-                                callback.onError("SMB reconnection failed: ${e.message}")
-                                return null
-                            }
-                        } else {
-                            log("[Controller] ❌ SMB connection parameters not saved")
-                            callback.onError("SMB connection lost. Please reconnect manually.")
-                            return null
-                        }
-                    }
-                }
-            }
-            
-            // ✅ 关键修复：DLNA投屏模式，必须允许外部设备连接
-            if (httpProxy == null) {
-                // ✅ DLNA投屏模式：允许外部设备连接
-                httpProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
-            } else if (!httpProxy!!.isAllowingExternalConnections()) {
-                // ✅ 如果当前是本地模式，需要重启为DLNA模式
-                log("[Controller] Switching HTTP proxy to DLNA mode (allow external connections)")
-                httpProxy?.stop()
-                currentPort = 0
-                httpProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
-                
-                // ✅ 清空HTTP代理的图片缓存（模式切换后缓存失效）
-                httpProxy?.clearCache()
-                log("[Controller] HTTP proxy cache cleared due to mode switch to DLNA")
-            }
-            
-            // 如果HTTP代理还没启动，启动它
-            if (currentPort <= 0) {
-                val ftpRef = ftpClient
-                val smbRef = smbClient
-                val protocol = imageFile.protocol
-                
-                log("[Controller] Starting HTTP proxy for image casting...")
-                
-                val port = httpProxy?.start(0, object : HttpProxyServer.FileProvider {
-                    override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
-                        log("[Controller] HTTP Proxy requesting file stream: $path")
-                        return when (protocol) {
-                            is NetworkProtocol.FTP -> {
-                                log("[Controller] Getting FTP file stream: $path")
-                                ftpRef?.getFileStream(path, startOffset)
-                            }
-                            is NetworkProtocol.SMB -> {
-                                val smbPath = if (path.startsWith("/")) path else "/$path"
-                                log("[Controller] Getting SMB file stream: $smbPath")
-                                smbRef?.getFileStream(smbPath, startOffset)
-                            }
-                            else -> null
-                        }
-                    }
-                    
-                    override suspend fun getFileSize(path: String): Long {
-                        log("[Controller] HTTP Proxy requesting file size: $path")
-                        return when (protocol) {
-                            is NetworkProtocol.FTP -> {
-                                log("[Controller] Getting FTP file size: $path")
-                                ftpRef?.getFileSize(path) ?: 0L
-                            }
-                            is NetworkProtocol.SMB -> {
-                                val smbPath = if (path.startsWith("/")) path else "/$path"
-                                log("[Controller] Getting SMB file size: $smbPath")
-                                smbRef?.getFileSize(smbPath) ?: 0L
-                            }
-                            else -> 0L
-                        }
-                    }
-                }) ?: -1
-                
-                currentPort = port
-                localIpAddress = getLocalIpAddress()
-                log("[Controller] HTTP Proxy started on port: $currentPort")
-                log("[Controller] Local IP address: $localIpAddress")
-            }
-            
-            if (currentPort <= 0) {
-                log("[Controller] ERROR: Failed to start HTTP proxy")
-                return null
-            }
-            
-            // 生成HTTP代理URL
-            val imageUrl = httpProxy?.getUrl(imageFile.path)
-            log("[Controller] Image HTTP URL: $imageUrl")
-            log("[Controller] URL should be accessible from DLNA device")
-            
-            imageUrl
-        } catch (e: Exception) {
-            log("[Controller] Error getting image URL: ${e.message}")
-            e.printStackTrace()
-            null
-        }
-    }
     
     // 获取当前媒体的真实路径（用于DLNA投屏）
     fun getCurrentMediaPath(): String? {
@@ -1374,13 +1056,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         browseScope.cancel()
         exoPlayer?.release()
         exoPlayer = null
-        httpProxy?.stop()
-        httpProxy = null
-        currentPort = 0  // 重置端口
-        ftpClient?.disconnect()
-        ftpClient = null
-        smbClient?.disconnect()
-        smbClient = null
+        releaseAll()
     }
 
     suspend fun renameFile(path: String, newName: String, protocol: NetworkProtocol): Boolean {
@@ -1422,5 +1098,237 @@ class MediaController(private val context: Context, private val logCallback: ((S
             e.printStackTrace()
         }
         return "127.0.0.1"  // fallback
+    }
+    
+    // ==================== 双代理管理 ====================
+    
+    /**
+     * 确保本地代理运行
+     */
+    private fun ensureLocalProxy() {
+        if (localProxy == null) {
+            localProxy = HttpProxyServer(logCallback, allowExternalConnections = false)
+            localProxy?.externalImageCacheProvider = { localImageCache }
+            
+            val port = localProxy?.start(8080, createFileProvider()) ?: -1
+            if (port > 0) {
+                log("[Controller] ✅ Local proxy started on port $port")
+            }
+        }
+    }
+    
+    /**
+     * 确保DLNA代理运行
+     */
+    private suspend fun ensureDlnaProxy() {
+        if (dlnaProxy == null) {
+            dlnaProxy = HttpProxyServer(logCallback, allowExternalConnections = true)
+            dlnaProxy?.externalImageCacheProvider = { localImageCache }  // 共享只读
+            
+            val port = dlnaProxy?.start(8081, createFileProvider()) ?: -1
+            if (port > 0) {
+                log("[Controller] ✅ DLNA proxy started on port $port")
+            }
+        }
+    }
+    
+    /**
+     * 停止投屏（不影响本地预览）
+     */
+    fun stopCasting() {
+        dlnaProxy?.stop()
+        dlnaProxy = null
+        log("[Controller] 🛑 DLNA proxy stopped, local preview unaffected")
+    }
+    
+    /**
+     * 释放所有资源
+     */
+    override fun finalize() {
+        releaseAll()
+    }
+    
+    fun releaseAll() {
+        localProxy?.stop()
+        dlnaProxy?.stop()
+        localProxy = null
+        dlnaProxy = null
+        
+        ftpClient?.disconnect()
+        smbClient?.disconnect()
+        
+        localImageCache.clear()
+        log("[Controller] 🗑️ All resources released")
+    }
+    
+    // ==================== 智能预加载 ====================
+    
+    /**
+     * 智能预加载：当前图片 ±2 张
+     */
+    suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
+        if (allImages.isEmpty()) return
+        
+        val start = maxOf(0, currentIndex - 2)
+        val end = minOf(allImages.size - 1, currentIndex + 2)
+        
+        log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex)")
+        
+        coroutineScope {
+            val semaphore = kotlinx.coroutines.sync.Semaphore(2)
+            
+            (start..end).map { index ->
+                async {
+                    semaphore.acquire()
+                    try {
+                        preloadSingleImage(allImages[index])
+                    } finally {
+                        semaphore.release()
+                    }
+                }
+            }.forEach { it.await() }
+        }
+    }
+    
+    /**
+     * 预加载单张图片
+     */
+    private suspend fun preloadSingleImage(imageFile: MediaFile) {
+        val path = imageFile.path
+        
+        if (localImageCache.containsKey(path)) {
+            log("[Controller] ✅ Already cached: $path")
+            return
+        }
+        
+        try {
+            val fileData = when (imageFile.protocol) {
+                is NetworkProtocol.FTP -> ftpClient?.getFileStream(path)?.readBytes()
+                is NetworkProtocol.SMB -> {
+                    val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
+                    smbClient?.getFileStream("/$smbPath")?.readBytes()
+                }
+            }
+            
+            if (fileData != null && fileData.isNotEmpty()) {
+                // LRU 缓存管理（最多10张）
+                if (localImageCache.size >= 10) {
+                    val oldestKey = localImageCache.keys.first()
+                    localImageCache.remove(oldestKey)
+                    log("[Controller] 🗑️ Evicted oldest: $oldestKey")
+                }
+                
+                localImageCache[path] = fileData
+                log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB)")
+            }
+        } catch (e: Exception) {
+            log("[Controller] ⚠️ Preload failed: ${e.message}")
+        }
+    }
+    
+    // ==================== 统一重连逻辑 ====================
+    
+    /**
+     * 确保连接有效（自动重连）
+     */
+    private suspend fun ensureConnection(protocol: NetworkProtocol): Boolean {
+        return when (protocol) {
+            is NetworkProtocol.FTP -> ensureFtpConnection()
+            is NetworkProtocol.SMB -> ensureSmbConnection()
+        }
+    }
+    
+    /**
+     * 确保FTP连接有效
+     */
+    private suspend fun ensureFtpConnection(): Boolean {
+        if (ftpClient?.isConnected() == true) return true
+        
+        if (currentFtpHost.isEmpty()) {
+            log("[Controller] ❌ FTP config not saved")
+            return false
+        }
+        
+        log("[Controller] 🔄 FTP reconnecting...")
+        
+        try {
+            ftpClient?.disconnect()
+            ftpClient = FtpClient(logCallback)
+            
+            val connected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
+            if (!connected) return false
+            
+            val loggedIn = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
+            if (loggedIn) {
+                log("[Controller] ✅ FTP reconnected")
+                return true
+            }
+        } catch (e: Exception) {
+            log("[Controller] ❌ FTP reconnect failed: ${e.message}")
+        }
+        
+        return false
+    }
+    
+    /**
+     * 确保SMB连接有效
+     */
+    private suspend fun ensureSmbConnection(): Boolean {
+        if (smbClient?.isConnected() == true) return true
+        
+        if (currentSmbHost.isEmpty()) {
+            log("[Controller] ❌ SMB config not saved")
+            return false
+        }
+        
+        log("[Controller] 🔄 SMB reconnecting...")
+        
+        try {
+            smbClient?.disconnect()
+            smbClient = SmbClient(logCallback)
+            
+            val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
+            val connected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+            
+            if (connected == true) {
+                log("[Controller] ✅ SMB reconnected")
+                return true
+            }
+        } catch (e: Exception) {
+            log("[Controller] ❌ SMB reconnect failed: ${e.message}")
+        }
+        
+        return false
+    }
+    
+    // ==================== FileProvider 创建 ====================
+    
+    /**
+     * 创建统一的 FileProvider
+     */
+    private fun createFileProvider(): HttpProxyServer.FileProvider {
+        return object : HttpProxyServer.FileProvider {
+            override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
+                return when (currentMediaFile?.protocol) {
+                    is NetworkProtocol.FTP -> ftpClient?.getFileStream(path, startOffset)
+                    is NetworkProtocol.SMB -> {
+                        val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
+                        smbClient?.getFileStream("/$smbPath", startOffset)
+                    }
+                    else -> null
+                }
+            }
+            
+            override suspend fun getFileSize(path: String): Long {
+                return when (currentMediaFile?.protocol) {
+                    is NetworkProtocol.FTP -> ftpClient?.getFileSize(path) ?: 0L
+                    is NetworkProtocol.SMB -> {
+                        val smbPath = com.lanmedia.player.network.PathManager.toSmbRelativePath(path, currentSmbShare)
+                        smbClient?.getFileSize("/$smbPath") ?: 0L
+                    }
+                    else -> 0L
+                }
+            }
+        }
     }
 }
