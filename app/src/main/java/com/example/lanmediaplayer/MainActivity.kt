@@ -665,9 +665,9 @@ fun MainScreen(
                     addLog("Current path: '$currentPath'")
                     addLog("isAtSmbRoot: $isAtSmbRoot")
                     
-                    if (currentPath == "/") {
-                        // 当前在SMB根目录("/")，已经在共享列表页面，忽略返回
-                        addLog("Already at SMB root, ignoring back click")
+                    if (isAtSmbRoot) {
+                        // ✅ 当前在SMB共享列表页面，忽略返回
+                        addLog("Already at SMB root (isAtSmbRoot=true), ignoring back click")
                     } else {
                         // 当前在共享目录或子目录中，返回上级目录
                         val parentPath = if (currentPath.indexOf('/', startIndex = 1) != -1) {
@@ -684,6 +684,7 @@ fun MainScreen(
                             // 返回到共享根目录，显示该共享下的文件
                             addLog("Returning to share root")
                             currentPath = ""  // ✅ 使用空字符串而不是"/"
+                            isAtSmbRoot = true  // ✅ 标记为SMB根目录
                             browserTitle = "选择共享目录"
                             isLoading = true
                             coroutineScope.launch {
@@ -1657,18 +1658,19 @@ fun ImageViewerScreen(
     var preloadTriggered by remember { mutableStateOf(false) }  // 是否已触发初始预加载
     var lastPreloadIndex by remember { mutableStateOf(-1) }  // 上次预加载的起始索引
     
-    // ✅ 初始预加载：加载前10张图片数据
+    // ✅ 初始预加载：异步加载前10张图片数据（不阻塞UI）
     LaunchedEffect(Unit) {
         if (imageFiles.isEmpty() || preloadTriggered) return@LaunchedEffect
         
-        println("[ImageViewer] === Initial preload START ===")
+        println("[ImageViewer] === Initial preload START (async) ===")
         preloadTriggered = true
         lastPreloadIndex = 0
         
-        // 初始加载10张图片数据
-        mediaController.preloadImageData(imageFiles, 0, 10)
-        
-        println("[ImageViewer] === Initial preload END ===")
+        // ✅ 在后台协程中并行加载，不阻塞UI
+        launch {
+            mediaController.preloadImageData(imageFiles, 0, 10)
+            println("[ImageViewer] === Initial preload END ===")
+        }
     }
     
     // ✅ 监听页面变化，预览到第5张时加载下10张
