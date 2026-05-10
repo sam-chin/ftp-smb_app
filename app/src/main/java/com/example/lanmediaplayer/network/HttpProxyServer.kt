@@ -229,11 +229,16 @@ class HttpProxyServer(
         }
         
         // 优先级1：检查外部缓存（预加载的图片）
-        val cachedData = externalImageCacheProvider?.invoke()?.get(filePath)
+        val cache = externalImageCacheProvider?.invoke()
+        log("🔍 Cache check: cache=${cache != null}, size=${cache?.size ?: 0}, looking for: $filePath")
+        
+        val cachedData = cache?.get(filePath)
         if (cachedData != null) {
             log("🚀 Cache hit: $filePath (${cachedData.size / 1024}KB)")
             sendCachedData(outputStream, cachedData, contentType)
             return
+        } else {
+            log("⚠️ Cache miss: $filePath (cache size: ${cache?.size ?: 0})")
         }
         
         // 优先级2：流式传输（边读边发）
