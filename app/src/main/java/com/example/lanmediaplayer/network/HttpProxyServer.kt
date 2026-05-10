@@ -42,56 +42,64 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     
     // ✅ 双缓存架构的缓存管理方法
     private fun addToLocalCache(path: String, data: ByteArray) {
-        cacheMutex.tryRun {
-            val dataSize = data.size.toLong()
-            
-            // 如果超过最大缓存，清理旧数据
-            if (currentLocalCacheSize + dataSize > maxLocalCacheSize) {
-                log("[HTTP Proxy] Local cache full ($currentLocalCacheSize bytes), clearing...")
-                localCache.clear()
-                currentLocalCacheSize = 0
+        runBlocking {
+            cacheMutex.withLock {
+                val dataSize = data.size.toLong()
+                
+                // 如果超过最大缓存，清理旧数据
+                if (currentLocalCacheSize + dataSize > maxLocalCacheSize) {
+                    log("[HTTP Proxy] Local cache full ($currentLocalCacheSize bytes), clearing...")
+                    localCache.clear()
+                    currentLocalCacheSize = 0
+                }
+                
+                localCache[path] = data
+                currentLocalCacheSize += dataSize
+                log("[HTTP Proxy] 📦 Cached to LOCAL: $path (${dataSize / 1024}KB), total: ${currentLocalCacheSize / 1024}KB")
             }
-            
-            localCache[path] = data
-            currentLocalCacheSize += dataSize
-            log("[HTTP Proxy] 📦 Cached to LOCAL: $path (${dataSize / 1024}KB), total: ${currentLocalCacheSize / 1024}KB")
         }
     }
     
     private fun addToDlnaCache(path: String, data: ByteArray) {
-        cacheMutex.tryRun {
-            val dataSize = data.size.toLong()
-            
-            // 如果超过最大缓存，清理旧数据
-            if (currentDlnaCacheSize + dataSize > maxDlnaCacheSize) {
-                log("[HTTP Proxy] DLNA cache full ($currentDlnaCacheSize bytes), clearing...")
-                dlnaCache.clear()
-                currentDlnaCacheSize = 0
+        runBlocking {
+            cacheMutex.withLock {
+                val dataSize = data.size.toLong()
+                
+                // 如果超过最大缓存，清理旧数据
+                if (currentDlnaCacheSize + dataSize > maxDlnaCacheSize) {
+                    log("[HTTP Proxy] DLNA cache full ($currentDlnaCacheSize bytes), clearing...")
+                    dlnaCache.clear()
+                    currentDlnaCacheSize = 0
+                }
+                
+                dlnaCache[path] = data
+                currentDlnaCacheSize += dataSize
+                log("[HTTP Proxy] 📡 Cached to DLNA: $path (${dataSize / 1024}KB), total: ${currentDlnaCacheSize / 1024}KB")
             }
-            
-            dlnaCache[path] = data
-            currentDlnaCacheSize += dataSize
-            log("[HTTP Proxy] 📡 Cached to DLNA: $path (${dataSize / 1024}KB), total: ${currentDlnaCacheSize / 1024}KB")
         }
     }
     
     private fun getFromLocalCache(path: String): ByteArray? {
-        return cacheMutex.tryRun {
-            val cached = localCache[path]
-            if (cached != null) {
-                log("[HTTP Proxy] ✅ LOCAL cache hit: $path")
+        return runBlocking {
+            cacheMutex.withLock {
+                val cached = localCache[path]
+                if (cached != null) {
+                    log("[HTTP Proxy] ✅ LOCAL cache hit: $path")
+                }
+                cached
             }
-            cached
         }
     }
     
     private fun getFromDlnaCache(path: String): ByteArray? {
-        return cacheMutex.tryRun {
-            val cached = dlnaCache[path]
-            if (cached != null) {
-                log("[HTTP Proxy] ✅ DLNA cache hit: $path")
+        return runBlocking {
+            cacheMutex.withLock {
+                val cached = dlnaCache[path]
+                if (cached != null) {
+                    log("[HTTP Proxy] ✅ DLNA cache hit: $path")
+                }
+                cached
             }
-            cached
         }
     }
     
@@ -114,20 +122,15 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     }
     
     fun clearCache() {
-        cacheMutex.tryRun {
-            localCache.clear()
-            dlnaCache.clear()
-            fileSizeCache.clear()
-            currentLocalCacheSize = 0
-            currentDlnaCacheSize = 0
-            log("[HTTP Proxy] 🗑️ All caches cleared (Local + DLNA + FileSize)")
-        }
-    }
-    
-    // ✅ Mutex 的安全执行辅助方法
-    private inline fun <T> kotlinx.coroutines.sync.Mutex.tryRun(block: () -> T): T {
-        return runBlocking {
-            withLock { block() }
+        runBlocking {
+            cacheMutex.withLock {
+                localCache.clear()
+                dlnaCache.clear()
+                fileSizeCache.clear()
+                currentLocalCacheSize = 0
+                currentDlnaCacheSize = 0
+                log("[HTTP Proxy] 🗑️ All caches cleared (Local + DLNA + FileSize)")
+            }
         }
     }
     
