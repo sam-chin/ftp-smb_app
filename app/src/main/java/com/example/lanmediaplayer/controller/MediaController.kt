@@ -1,6 +1,8 @@
 package com.lanmedia.player.controller
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -9,6 +11,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.lanmedia.player.network.FtpClient
 import com.lanmedia.player.network.HttpProxyServer
 import com.lanmedia.player.network.SmbClient
+import com.lanmedia.player.service.DlnaCastingService
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.InputStream
@@ -720,6 +723,43 @@ class MediaController(private val context: Context, private val logCallback: ((S
         
         log("[Controller] getVideoUrl: $urlWithLocalIp")
         return urlWithLocalIp
+    }
+    
+    // ✅ 启动DLNA前台服务（保持后台运行）
+    fun startDlnaService(fileName: String) {
+        try {
+            val serviceIntent = Intent(context, DlnaCastingService::class.java).apply {
+                action = DlnaCastingService.ACTION_START_CASTING
+            }
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+                log("[Controller] ✅ DLNA foreground service started")
+            } else {
+                context.startService(serviceIntent)
+                log("[Controller] ✅ DLNA service started")
+            }
+            
+            // 更新通知内容
+            DlnaCastingService.getInstance()?.updateNotification("正在投屏: $fileName")
+        } catch (e: Exception) {
+            log("[Controller] ⚠️ Failed to start DLNA service: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+    
+    // ✅ 停止DLNA前台服务
+    fun stopDlnaService() {
+        try {
+            val serviceIntent = Intent(context, DlnaCastingService::class.java).apply {
+                action = DlnaCastingService.ACTION_STOP_CASTING
+            }
+            context.startService(serviceIntent)
+            log("[Controller] ✅ DLNA service stopped")
+        } catch (e: Exception) {
+            log("[Controller] ⚠️ Failed to stop DLNA service: ${e.message}")
+            e.printStackTrace()
+        }
     }
     
     // ✅ 获取图片的HTTP代理URL（用于DLNA投屏）

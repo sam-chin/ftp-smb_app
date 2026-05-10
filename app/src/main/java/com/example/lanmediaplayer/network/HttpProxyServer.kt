@@ -10,6 +10,11 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     private var serverScope: CoroutineScope? = null
     private var currentPort: Int = 0
     
+    // ✅ 图片数据缓存（可选，用于加速重复访问）
+    private val imageCache = mutableMapOf<String, ByteArray>()
+    private val maxCacheSize = 50 * 1024 * 1024  // 最大缓存50MB
+    private var currentCacheSize = 0L
+    
     private fun log(message: String) {
         println(message)
         logCallback?.invoke(message)
@@ -18,6 +23,36 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
     interface FileProvider {
         suspend fun getFileStream(path: String, startOffset: Long = 0): InputStream?
         suspend fun getFileSize(path: String): Long
+    }
+    
+    // ✅ 缓存管理方法
+    private fun addToCache(path: String, data: ByteArray) {
+        val dataSize = data.size.toLong()
+        
+        // 如果超过最大缓存，清理旧数据（简单策略：清空所有）
+        if (currentCacheSize + dataSize > maxCacheSize) {
+            log("[HTTP Proxy] Cache full ($currentCacheSize bytes), clearing...")
+            imageCache.clear()
+            currentCacheSize = 0
+        }
+        
+        imageCache[path] = data
+        currentCacheSize += dataSize
+        log("[HTTP Proxy] Cached image: $path (${dataSize / 1024}KB), total cache: ${currentCacheSize / 1024}KB")
+    }
+    
+    private fun getFromCache(path: String): ByteArray? {
+        val cached = imageCache[path]
+        if (cached != null) {
+            log("[HTTP Proxy] ✅ Cache hit for: $path")
+        }
+        return cached
+    }
+    
+    fun clearCache() {
+        imageCache.clear()
+        currentCacheSize = 0
+        log("[HTTP Proxy] Cache cleared")
     }
     
     fun start(port: Int = 0, fileProvider: FileProvider): Int {
@@ -238,6 +273,29 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
         
         var fileStream: InputStream? = null
         try {
+            // ✅ 检查缓存（仅对图片）
+            val cachedData = if (contentType.startsWith("image/")) getFromCache(filePath) else null
+            
+            if (cachedData != null) {
+                // 从缓存发送
+                log("[HTTP Proxy] Sending from cache: ${cachedData.size} bytes")
+                
+                val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: $contentType\r\n" +
+                        "Content-Length: ${cachedData.size}\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+                
+                outputStream.write(responseHeader.toByteArray())
+                outputStream.write(cachedData)
+                outputStream.flush()
+                
+                log("[HTTP Proxy] ✅ Sent from cache successfully")
+                return
+            }
+            
+            // 没有缓存，从FTP/SMB读取
             fileStream = fileProvider.getFileStream(filePath)
             if (fileStream == null) {
                 log("[HTTP Proxy] Failed to get file stream")
@@ -245,29 +303,77 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
                 return
             }
             
-            log("[HTTP Proxy] File stream opened, size: $fileSize, starting to send data...")
+            // ✅ 关键修复：对于小文件，先完整读取到内存再发送，避免并发冲突
+            val shouldReadFully = fileSize <= 20 * 1024 * 1024  // <=20MB的文件完整读取
             
-            val responseHeader = "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: $contentType\r\n" +
-                    "Content-Length: $fileSize\r\n" +
-                    "Accept-Ranges: bytes\r\n" +
-                    "Connection: close\r\n" +
-                    "\r\n"
-            
-            outputStream.write(responseHeader.toByteArray())
-            outputStream.flush()
-            
-            // Stream the file in chunks for progressive playback
-            val buffer = ByteArray(64 * 1024) // 64KB buffer
-            var bytesRead: Int
-            var totalBytesRead = 0L
-            while (fileStream.read(buffer).also { bytesRead = it } != -1) {
-                outputStream.write(buffer, 0, bytesRead)
+            if (shouldReadFully) {
+                // 策略A：完整读取到内存（适用于小图片）
+                log("[HTTP Proxy] Reading entire file to memory (${fileSize / 1024}KB) to avoid concurrent conflicts")
+                val fileData = fileStream!!.readBytes()
+                fileStream!!.close()  // 立即关闭FTP/SMB连接
+                fileStream = null
+                
+                log("[HTTP Proxy] File loaded to memory, sending ${fileData.size} bytes")
+                
+                val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: $contentType\r\n" +
+                        "Content-Length: ${fileData.size}\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+                
+                outputStream.write(responseHeader.toByteArray())
+                outputStream.write(fileData)
                 outputStream.flush()
-                totalBytesRead += bytesRead
+                
+                totalBytesRead = fileData.size.toLong()
+                
+                // ✅ 加入缓存
+                if (contentType.startsWith("image/")) {
+                    addToCache(filePath, fileData)
+                }
+                
+                log("[HTTP Proxy] ✅ Sent $totalBytesRead bytes from memory")
+            } else {
+                // 策略B：流式传输（适用于大视频）
+                log("[HTTP Proxy] Using streaming mode for large file (${fileSize / 1024 / 1024}MB)")
+                
+                val responseHeader = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: $contentType\r\n" +
+                        "Content-Length: $fileSize\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+                
+                outputStream.write(responseHeader.toByteArray())
+                outputStream.flush()
+                
+                // ✅ 根据文件类型动态调整缓冲区大小
+                val bufferSize = when {
+                    contentType.startsWith("video/") -> 256 * 1024  // 视频：256KB
+                    contentType.startsWith("audio/") -> 128 * 1024  // 音频：128KB
+                    else -> 64 * 1024                                // 其他：64KB
+                }
+                
+                log("[HTTP Proxy] Using buffer size: ${bufferSize / 1024}KB for $contentType")
+                
+                val buffer = ByteArray(bufferSize)
+                var bytesRead: Int
+                while (fileStream!!.read(buffer).also { bytesRead = it } != -1) {
+                    outputStream.write(buffer, 0, bytesRead)
+                    outputStream.flush()
+                    totalBytesRead += bytesRead
+                }
+                
+                log("[HTTP Proxy] ✅ Sent $totalBytesRead bytes via streaming")
             }
             
-            log("[HTTP Proxy] Sent $totalBytesRead bytes")
+            // ✅ 验证是否发送了完整文件
+            if (totalBytesRead == fileSize) {
+                log("[HTTP Proxy] ✅ File sent completely ($totalBytesRead/$fileSize bytes)")
+            } else {
+                log("[HTTP Proxy] ⚠️ WARNING: File incomplete! Sent $totalBytesRead but expected $fileSize bytes")
+            }
         } catch (e: Exception) {
             // Ignore connection reset and broken pipe errors - these are normal when client disconnects
             if (e.message?.contains("Connection reset", ignoreCase = true) == true ||
@@ -328,33 +434,74 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             
             log("[HTTP Proxy] File stream opened at offset $start")
             
-            val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
-                    "Content-Type: $contentType\r\n" +
-                    "Content-Length: $contentLength\r\n" +
-                    "Content-Range: bytes $start-$end/$fileSize\r\n" +
-                    "Accept-Ranges: bytes\r\n" +
-                    "Connection: close\r\n" +
-                    "\r\n"
+            // ✅ 对于小文件，先完整读取再发送，避免并发冲突
+            val shouldReadFully = contentLength <= 20 * 1024 * 1024  // <=20MB
             
-            outputStream.write(responseHeader.toByteArray())
-            outputStream.flush()
-            
-            // Stream the requested range
-            val buffer = ByteArray(64 * 1024) // 64KB buffer
-            var remainingBytes = contentLength
-            var totalSent = 0L
-            while (remainingBytes > 0) {
-                val bytesRead = fileStream.read(buffer)
-                if (bytesRead == -1) break
+            if (shouldReadFully) {
+                log("[HTTP Proxy] Reading range to memory (${contentLength / 1024}KB)")
+                val fileData = fileStream!!.readBytes()
+                fileStream!!.close()
+                fileStream = null
                 
-                val bytesToWrite = minOf(bytesRead.toLong(), remainingBytes).toInt()
-                outputStream.write(buffer, 0, bytesToWrite)
+                log("[HTTP Proxy] Range data loaded, sending ${fileData.size} bytes")
+                
+                val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
+                        "Content-Type: $contentType\r\n" +
+                        "Content-Length: ${fileData.size}\r\n" +
+                        "Content-Range: bytes $start-${start + fileData.size - 1}/$fileSize\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+                
+                outputStream.write(responseHeader.toByteArray())
+                outputStream.write(fileData)
                 outputStream.flush()
-                remainingBytes -= bytesToWrite
-                totalSent += bytesToWrite
+                
+                totalSent = fileData.size.toLong()
+                log("[HTTP Proxy] ✅ Range request sent from memory ($totalSent bytes)")
+            } else {
+                // 流式传输大文件
+                log("[HTTP Proxy] Using streaming mode for large range request")
+                
+                val responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
+                        "Content-Type: $contentType\r\n" +
+                        "Content-Length: $contentLength\r\n" +
+                        "Content-Range: bytes $start-$end/$fileSize\r\n" +
+                        "Accept-Ranges: bytes\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n"
+                
+                outputStream.write(responseHeader.toByteArray())
+                outputStream.flush()
+                
+                val bufferSize = when {
+                    contentType.startsWith("video/") -> 256 * 1024
+                    contentType.startsWith("audio/") -> 128 * 1024
+                    else -> 64 * 1024
+                }
+                
+                val buffer = ByteArray(bufferSize)
+                var remainingBytes = contentLength
+                while (remainingBytes > 0) {
+                    val bytesRead = fileStream!!.read(buffer)
+                    if (bytesRead == -1) break
+                    
+                    val bytesToWrite = minOf(bytesRead.toLong(), remainingBytes).toInt()
+                    outputStream.write(buffer, 0, bytesToWrite)
+                    outputStream.flush()
+                    remainingBytes -= bytesToWrite
+                    totalSent += bytesToWrite
+                }
+                
+                log("[HTTP Proxy] ✅ Range request sent via streaming ($totalSent bytes)")
             }
             
-            log("[HTTP Proxy] Range request completed, sent $totalSent bytes")
+            // ✅ 验证Range请求是否发送完整
+            if (totalSent == contentLength) {
+                log("[HTTP Proxy] ✅ Range request sent completely ($totalSent/$contentLength bytes)")
+            } else {
+                log("[HTTP Proxy] ⚠️ WARNING: Range request incomplete! Sent $totalSent but expected $contentLength bytes")
+            }
         } catch (e: Exception) {
             // Ignore connection reset and broken pipe errors - these are normal when client disconnects
             if (e.message?.contains("Connection reset", ignoreCase = true) == true ||

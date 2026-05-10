@@ -1385,6 +1385,8 @@ fun PlayerScreen(
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             window?.decorView?.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+            // ✅ 停止DLNA前台服务
+            mediaController.stopDlnaService()
         }
     }
     
@@ -1539,6 +1541,8 @@ fun PlayerScreen(
                         castController.castVideo(device, videoUrl, mediaPath.split("/").lastOrNull() ?: "Video") { success, message ->
                             if (success) {
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                // ✅ 启动前台服务，保持后台运行
+                                mediaController.startDlnaService(mediaPath.split("/").lastOrNull() ?: "Video")
                             } else {
                                 onError(message)
                             }
@@ -1599,11 +1603,14 @@ fun ImageViewerScreen(
     val initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))
     val pagerState = rememberPagerState(initialPage = initialPage)
     var isSlideshowPlaying by remember { mutableStateOf(false) }
-    var slideshowInterval by remember { mutableStateOf(6) }
+    var slideshowInterval by remember { mutableStateOf(2) }  // ✅ 默认2秒
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showCastDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    
+    // ✅ 保存当前投屏设备（用于幻灯片模式自动切换）
+    var castingDevice by remember { mutableStateOf<CastDevice?>(null) }
     
     // 使用 LinkedHashMap 保持插入顺序，便于管理缓存
     val imageCache = remember { mutableStateMapOf<Int, String>() }
@@ -1632,29 +1639,32 @@ fun ImageViewerScreen(
                 for (attempt in 1..3) {
                     try {
                         val imagePath = imageFiles[index].path
-                        println("[ImageViewer] Loading image $index: path='$imagePath', protocol=${currentProtocol::class.simpleName}")
+                        println("[ImageViewer] Loading image $index/$endIndex: path='$imagePath', protocol=${currentProtocol::class.simpleName}, attempt=$attempt")
                         val url = getImageUrl(imagePath)
-                        println("[ImageViewer] Generated URL for image $index: $url")
+                        println("[ImageViewer] ✅ Generated URL for image $index: $url")
                         imageCache[index] = url
                         loaded = true
                         break // 加载成功，跳出重试循环
                     } catch (e: Exception) {
-                        println("Failed to load image at index $index (attempt $attempt): ${e.message}")
+                        println("⚠️ Failed to load image at index $index (attempt $attempt/3): ${e.message}")
                         e.printStackTrace()
                         if (attempt < 3) {
+                            println("[ImageViewer] Retrying in 0.5 seconds...")
                             kotlinx.coroutines.delay(500) // 等待0.5秒后重试
                         }
                     }
                 }
                 
                 if (!loaded) {
-                    println("Failed to load image at index $index after 3 attempts")
+                    println("❌ Failed to load image at index $index after 3 attempts")
+                } else {
+                    println("[ImageViewer] Image $index loaded successfully (${index - startIndex + 1}/${endIndex - startIndex + 1})")
                 }
             }
         }
     }
     
-    // 快速预加载：优先加载当前页及附近几张（并行加载）
+    // 快速预加载：优先加载当前页及附近几张（限制并发避免FTP/SMB过载）
     fun quickPreload(currentIndex: Int) {
         if (imageFiles.isEmpty()) return
         
@@ -1667,19 +1677,42 @@ fun ImageViewerScreen(
             currentIndex - 2
         ).filter { it in 0 until imageFiles.size && !imageCache.containsKey(it) }
         
-        // 并行加载这些图片
-        urgentIndices.forEach { index ->
+        // ✅ 限制最多同时加载3张图片，避免FTP/SMB连接过载
+        val maxConcurrent = 3
+        var activeLoads = 0
+        val loadQueue = mutableListOf<Int>()
+        
+        // 将需要加载的图片加入队列
+        loadQueue.addAll(urgentIndices)
+        
+        // 启动加载任务（控制并发）
+        fun startNextLoad() {
+            if (loadQueue.isEmpty() || activeLoads >= maxConcurrent) return
+            
+            val index = loadQueue.removeAt(0)
+            activeLoads++
+            
             coroutineScope.launch {
                 try {
                     val imagePath = imageFiles[index].path
-                    println("[ImageViewer] Quick loading image $index")
+                    println("[ImageViewer] Quick loading image $index (active: $activeLoads/$maxConcurrent)")
                     val url = getImageUrl(imagePath)
                     imageCache[index] = url
                     println("[ImageViewer] Quick loaded image $index successfully")
                 } catch (e: Exception) {
                     println("Failed to quick load image at index $index: ${e.message}")
+                    e.printStackTrace()
+                } finally {
+                    activeLoads--
+                    // 加载完成后，启动下一个
+                    startNextLoad()
                 }
             }
+        }
+        
+        // 启动初始批次
+        repeat(minOf(maxConcurrent, loadQueue.size)) {
+            startNextLoad()
         }
     }
     
@@ -1756,6 +1789,56 @@ fun ImageViewerScreen(
                 if (isSlideshowPlaying) {
                     val nextPage = if (pagerState.currentPage < imageFiles.size - 1) pagerState.currentPage + 1 else 0
                     pagerState.animateScrollToPage(nextPage)
+                    
+                    // ✅ 如果正在投屏，自动投屏新图片
+                    if (castingDevice != null) {
+                        val newImage = imageFiles[nextPage]
+                        coroutineScope.launch {
+                            try {
+                                val imageUrl = mediaController.getImageUrl(newImage, object : MediaController.MediaCallback {
+                                    override fun onFilesLoaded(files: List<MediaFile>) {}
+                                    override fun onError(error: String) {
+                                        addLog("Failed to get image URL for slideshow: $error")
+                                    }
+                                    override fun onPlaybackStateChanged(state: Int) {}
+                                })
+                                
+                                if (imageUrl != null && imageUrl.isNotEmpty()) {
+                                    castingDevice?.let { device ->
+                                        castController.castImage(device, imageUrl, newImage.name) { success, message ->
+                                            if (success) {
+                                                addLog("Slideshow casted: ${newImage.name}")
+                                                
+                                                // ✅ 预加载下一张图片到HTTP代理缓存
+                                                val nextIndex = if (nextPage < imageFiles.size - 1) nextPage + 1 else 0
+                                                val nextImage = imageFiles[nextIndex]
+                                                launch {
+                                                    try {
+                                                        addLog("Preloading next image for casting: ${nextImage.name}")
+                                                        mediaController.getImageUrl(nextImage, object : MediaController.MediaCallback {
+                                                            override fun onFilesLoaded(files: List<MediaFile>) {}
+                                                            override fun onError(error: String) {
+                                                                addLog("Failed to preload next image: $error")
+                                                            }
+                                                            override fun onPlaybackStateChanged(state: Int) {}
+                                                        })
+                                                        addLog("Next image preloaded successfully")
+                                                    } catch (e: Exception) {
+                                                        addLog("Preload error: ${e.message}")
+                                                    }
+                                                }
+                                            } else {
+                                                addLog("Slideshow cast failed: $message")
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                addLog("Slideshow cast error: ${e.message}")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1777,6 +1860,10 @@ fun ImageViewerScreen(
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             window?.decorView?.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+            // ✅ 停止DLNA前台服务
+            mediaController.stopDlnaService()
+            // ✅ 清除投屏设备状态
+            castingDevice = null
         }
     }
     
@@ -1851,7 +1938,14 @@ fun ImageViewerScreen(
                 )
                 
                 IconButton(
-                    onClick = { isSlideshowPlaying = !isSlideshowPlaying }
+                    onClick = {
+                        isSlideshowPlaying = !isSlideshowPlaying
+                        // ✅ 停止幻灯片时清除投屏设备
+                        if (!isSlideshowPlaying) {
+                            castingDevice = null
+                            mediaController.stopDlnaService()
+                        }
+                    }
                 ) {
                     Icon(
                         imageVector = if (isSlideshowPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -1917,6 +2011,8 @@ fun ImageViewerScreen(
             onDismiss = { showCastDialog = false },
             onDeviceSelected = { device: CastDevice ->
                 showCastDialog = false
+                castingDevice = device  // ✅ 保存投屏设备
+                
                 val currentImage = imageFiles[pagerState.currentPage]
                 
                 // ✅ 启动HTTP代理并获取HTTP URL（DLNA设备通过HTTP访问）
@@ -1936,6 +2032,8 @@ fun ImageViewerScreen(
                             castController.castImage(device, imageUrl, currentImage.name) { success, message ->
                                 if (success) {
                                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                    // ✅ 启动前台服务，保持后台运行
+                                    mediaController.startDlnaService(currentImage.name)
                                 } else {
                                     onError(message)
                                 }
