@@ -86,14 +86,69 @@ class MediaController(private val context: Context, private val logCallback: ((S
             return
         }
         
-        log("[Controller] Preloading $count images from index $startIndex (parallel mode)")
+        log("[Controller] Preloading $count images from index $startIndex")
         
         var successCount = 0
         var failCount = 0
         
-        // ✅ 使用协程并行加载，最多同时2个请求（平衡速度和SMB负载）
-        val maxConcurrent = 2
-        val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
+        // ✅ FTP 不支持并发，必须串行；SMB 可以并行
+        val isFtp = imageFiles.firstOrNull()?.protocol is NetworkProtocol.FTP
+        
+        if (isFtp) {
+            // ✅ FTP 串行加载（避免 dataSocket 冲突）
+            log("[Controller] 🔄 FTP mode: sequential loading")
+            for (i in startIndex until endIndex) {
+                try {
+                    val imageFile = imageFiles[i]
+                    val path = imageFile.path
+                    
+                    if (localImageCache.containsKey(path)) {
+                        log("[Controller] ✅ Already cached: $path")
+                        successCount++
+                        continue
+                    }
+                    
+                    log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex}: $path")
+                    
+                    val ftpPath = if (path.startsWith("/")) path else "/$path"
+                    log("[Controller] 📡 FTP getFileStream: $ftpPath")
+                    var inputStream: java.io.InputStream? = null
+                    try {
+                        inputStream = ftpClient?.getFileStream(ftpPath)
+                        
+                        if (inputStream == null) {
+                            log("[Controller] ❌ FTP getFileStream returned null for: $ftpPath")
+                            throw Exception("FTP stream is null")
+                        }
+                        
+                        log("[Controller] 📖 Reading data from FTP stream...")
+                        val fileData = inputStream.readBytes()
+                        log("[Controller] 📊 Read ${fileData.size} bytes")
+                        
+                        if (fileData.isNotEmpty()) {
+                            localImageCache[path] = fileData
+                            currentLocalCacheSize += fileData.size
+                            successCount++
+                            log("[Controller] ✅ Cached: $path (${fileData.size / 1024}KB)")
+                        } else {
+                            log("[Controller] ⚠️ FTP readBytes returned empty data")
+                            throw Exception("FTP readBytes returned empty data")
+                        }
+                    } finally {
+                        inputStream?.close()  // ✅ 立即关闭
+                    }
+                } catch (e: Exception) {
+                    failCount++
+                    log("[Controller] ⚠️ Failed: ${e.message}")
+                }
+            }
+        } else {
+            // ✅ SMB 并行加载（最多2个并发）
+            log("[Controller] 🔄 SMB mode: parallel loading (max 2 concurrent)")
+            
+            // ✅ 使用协程并行加载，最多同时2个请求（平衡速度和SMB负载）
+            val maxConcurrent = 2
+            val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
         
         // ✅ 使用coroutineScope创建协程作用域
         kotlinx.coroutines.coroutineScope {
@@ -129,8 +184,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     }
                                     is NetworkProtocol.SMB -> {
                                         // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
-                                        log("[Controller] 📡 SMB preloadImageData: $path")
-                                        smbClient?.getFileStream(path)?.readBytes()
+                                        log("[Controller] 📡 SMB getFileStream: $path")
+                                        var smbInputStream: java.io.InputStream? = null
+                                        try {
+                                            smbInputStream = smbClient?.getFileStream(path)
+                                            
+                                            if (smbInputStream == null) {
+                                                log("[Controller] ❌ SMB getFileStream returned null for: $path")
+                                                throw Exception("SMB stream is null")
+                                            }
+                                            
+                                            log("[Controller] 📖 Reading data from SMB stream...")
+                                            val data = smbInputStream.readBytes()
+                                            log("[Controller] 📊 Read ${data.size} bytes")
+                                            data
+                                        } finally {
+                                            smbInputStream?.close()
+                                        }
                                     }
                                 }
                                 
@@ -185,6 +255,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // ✅ 等待所有协程完成
             jobs.forEach { it.join() }
         }
+        }  // ✅ 结束 else 块（SMB并行加载）
         
         log("[Controller] === Preload Summary: Success=$successCount, Failed=$failCount ===")
     }
