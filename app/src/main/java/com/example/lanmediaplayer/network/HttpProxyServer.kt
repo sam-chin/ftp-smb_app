@@ -9,6 +9,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
 import java.nio.charset.Charsets
+import java.util.Collections
 
 /**
  * HTTP 代理服务器
@@ -130,18 +131,21 @@ class HttpProxyServer(
     // ==================== 内部实现 ====================
     
     private suspend fun acceptConnections(fileProvider: FileProvider) {
-        while (isActive) {
-            try {
-                val clientSocket = serverSocket?.accept() ?: break
-                launch {
-                    handleClient(clientSocket, fileProvider)
-                }
-            } catch (e: Exception) {
-                if (isActive) {
-                    log("❌ Accept error: ${e.message}")
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        scope.launch {
+            while (isActive) {
+                try {
+                    val clientSocket = serverSocket?.accept() ?: break
+                    launch {
+                        handleClient(clientSocket, fileProvider)
+                    }
+                } catch (e: Exception) {
+                    if (isActive) {
+                        log("❌ Accept error: ${e.message}")
+                    }
                 }
             }
-        }
+        }.join()
     }
     
     private suspend fun handleClient(clientSocket: Socket, fileProvider: FileProvider) {

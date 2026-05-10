@@ -859,7 +859,7 @@ fun MainScreen(
             currentProtocol = selectedProtocol,
             connectionPrefs = connectionPrefs,
             mediaController = mediaController,  // ✅ 传递
-            getImageUrl = { path -> mediaController.getImageUrl(path, selectedProtocol) },
+            getImageUrl = { path -> mediaController.getLocalImageUrl(path) },
             castController = castController,
             onBackClick = {
                 currentScreen = Screen.FileBrowser
@@ -1754,7 +1754,7 @@ fun ImageViewerScreen(
                         val newImage = imageFiles[nextPage]
                         coroutineScope.launch {
                             try {
-                                val imageUrl = mediaController.getImageUrl(newImage, object : MediaController.MediaCallback {
+                                val imageUrl = mediaController.getDlnaImageUrl(newImage, object : MediaController.MediaCallback {
                                     override fun onFilesLoaded(files: List<MediaFile>) {}
                                     override fun onError(error: String) {
                                         println("[Slideshow] Failed to get image URL: $error")
@@ -1774,7 +1774,7 @@ fun ImageViewerScreen(
                                                 launch {
                                                     try {
                                                         println("[Slideshow] Preloading next image: ${nextImage.name}")
-                                                        mediaController.getImageUrl(nextImage, object : MediaController.MediaCallback {
+                                                        mediaController.getDlnaImageUrl(nextImage, object : MediaController.MediaCallback {
                                                             override fun onFilesLoaded(files: List<MediaFile>) {}
                                                             override fun onError(error: String) {
                                                                 println("[Slideshow] Failed to preload: $error")
@@ -1822,7 +1822,7 @@ fun ImageViewerScreen(
             // ✅ 停止DLNA前台服务
             mediaController.stopDlnaService()
             // ✅ 关键修复：切换HTTP代理回本地模式（恢复本地预览）
-            mediaController.switchToLocalMode()
+            mediaController.stopCasting()
             // ✅ 清除投屏设备状态
             castingDevice = null
             // ✅ 清除投屏活跃状态
@@ -1879,7 +1879,7 @@ fun ImageViewerScreen(
                         if (!isSlideshowPlaying) {
                             castingDevice = null
                             mediaController.stopDlnaService()
-                            mediaController.switchToLocalMode()  // ✅ 关键修复：恢复本地预览
+                            mediaController.stopCasting()  // ✅ 关键修复：恢复本地预览
                             (context as? MainActivity)?.setCastingState(false)
                         }
                     }
@@ -1955,7 +1955,7 @@ fun ImageViewerScreen(
                 // ✅ 启动HTTP代理并获取HTTP URL（DLNA设备通过HTTP访问）
                 coroutineScope.launch {
                     try {
-                        val imageUrl = mediaController.getImageUrl(currentImage, object : MediaController.MediaCallback {
+                        val imageUrl = mediaController.getDlnaImageUrl(currentImage, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(files: List<MediaFile>) {}
                             
                             override fun onError(errorMsg: String) {

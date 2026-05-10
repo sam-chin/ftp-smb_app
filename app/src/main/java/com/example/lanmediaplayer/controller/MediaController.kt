@@ -244,7 +244,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     fun initializePlayer() {
         exoPlayer = ExoPlayer.Builder(context).build()
-        httpProxy = HttpProxyServer(logCallback)
     }
     
     // ✅ 清理当前连接状态（用于协议切换）
@@ -259,8 +258,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         
         // 停止HTTP代理
         try {
-            httpProxy?.stop()
-            currentPort = 0
+            localProxy?.stop()
+            dlnaProxy?.stop()
+            localProxy = null
+            dlnaProxy = null
             log("[Controller] HTTP proxy stopped")
         } catch (e: Exception) {
             log("[Controller] Error stopping HTTP proxy: ${e.message}")
@@ -1144,10 +1145,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
     /**
      * 释放所有资源
      */
-    override fun finalize() {
-        releaseAll()
-    }
-    
     fun releaseAll() {
         localProxy?.stop()
         dlnaProxy?.stop()
