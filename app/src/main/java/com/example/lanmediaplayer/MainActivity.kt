@@ -546,7 +546,10 @@ fun MainScreen(
                 }
             },
             isLoading = isLoading,
-            connectionPrefs = connectionPrefs  // 传递connectionPrefs以支持自动填充
+            connectionPrefs = connectionPrefs,  // 传递connectionPrefs以支持自动填充
+            addLog = { message ->
+                debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+            }
         )
         
         Screen.FileBrowser -> FileBrowserScreen(
@@ -868,7 +871,10 @@ fun MainScreen(
             onBackClick = {
                 currentScreen = Screen.FileBrowser
             },
-            onError = onError
+            onError = onError,
+            addLog = { message ->
+                debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+            }
         )
     }
     
@@ -963,7 +969,8 @@ fun ConnectionScreen(
     debugLogs: List<String>,
     onConnect: (NetworkProtocol, String, Int, String, String, String, String) -> Unit,
     isLoading: Boolean,
-    connectionPrefs: ConnectionPreferences? = null  // 新增参数
+    connectionPrefs: ConnectionPreferences? = null,  // 新增参数
+    addLog: (String) -> Unit = {}  // ✅ 添加日志回调
 ) {
     var protocol by remember { mutableStateOf(selectedProtocol) }
     
@@ -1143,14 +1150,14 @@ fun ConnectionScreen(
                 val portInt = port.toIntOrNull() ?: (if (protocol is NetworkProtocol.FTP) 21 else 445)
                 
                 // Debug: Log actual values being passed
-                println("[UI DEBUG] Protocol: ${protocol::class.simpleName}")
-                println("[UI DEBUG] Host: '$host' (length: ${host.length})")
-                println("[UI DEBUG] Port: $portInt")
-                println("[UI DEBUG] Username: '$username' (length: ${username.length})")
-                println("[UI DEBUG] Password length: ${password.length}")
+                addLog("[UI DEBUG] Protocol: ${protocol::class.simpleName}")
+                addLog("[UI DEBUG] Host: '$host' (length: ${host.length})")
+                addLog("[UI DEBUG] Port: $portInt")
+                addLog("[UI DEBUG] Username: '$username' (length: ${username.length})")
+                addLog("[UI DEBUG] Password length: ${password.length}")
                 if (protocol is NetworkProtocol.SMB) {
-                    println("[UI DEBUG] Share: '$share'")
-                    println("[UI DEBUG] Domain: '$domain'")
+                    addLog("[UI DEBUG] Share: '$share'")
+                    addLog("[UI DEBUG] Domain: '$domain'")
                 }
                 
                 onConnect(protocol, host, portInt, username, password, share, domain)
@@ -1618,7 +1625,7 @@ fun PlayerScreen(
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                 // ✅ 设置投屏状态为活跃（不立即启动服务）
                                 (context as? MainActivity)?.setCastingState(true)
-                                println("[VideoPlayer] Cast successful, will start service when app goes to background")
+                                addLog("[VideoPlayer] Cast successful, will start service when app goes to background")
                             } else {
                                 onError(message)
                             }
@@ -1683,7 +1690,8 @@ fun ImageViewerScreen(
     getImageUrl: (String) -> String,
     castController: CastController,
     onBackClick: () -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    addLog: (String) -> Unit = {}  // ✅ 添加日志回调
 ) {
     val initialPage = initialIndex.coerceIn(0, maxOf(0, imageFiles.size - 1))
     val pagerState = rememberPagerState(initialPage = initialPage)
@@ -1705,7 +1713,7 @@ fun ImageViewerScreen(
     LaunchedEffect(Unit) {
         if (imageFiles.isEmpty() || preloadTriggered) return@LaunchedEffect
         
-        println("[ImageViewer] === Initial preload START (async) ===")
+        addLog("[ImageViewer] === Initial preload START (async) ===")
         preloadTriggered = true
         lastPreloadIndex = 0
         
@@ -1715,7 +1723,7 @@ fun ImageViewerScreen(
         // ✅ 在后台协程中并行加载，不阻塞UI
         launch {
             mediaController.preloadImageData(imageFiles, 0, 15)  // ✅ 初始预加载15张（更多缓存）
-            println("[ImageViewer] === Initial preload END ===")
+            addLog("[ImageViewer] === Initial preload END ===")
         }
     }
     
@@ -1727,7 +1735,7 @@ fun ImageViewerScreen(
         
         // ✅ 当预览到第3张（索引2）时，触发下一批预加载（更早触发，确保缓存就绪）
         if (currentPage == 2 && lastPreloadIndex == 0) {
-            println("[ImageViewer] === Triggering next batch preload at page 2 ===")
+            addLog("[ImageViewer] === Triggering next batch preload at page 2 ===")
             lastPreloadIndex = 15
             
             launch {
@@ -1737,7 +1745,7 @@ fun ImageViewerScreen(
         
         // ✅ 当预览到第17张（索引16）时，触发第三批预加载
         if (currentPage == 16 && lastPreloadIndex == 15) {
-            println("[ImageViewer] === Triggering third batch preload at page 16 ===")
+            addLog("[ImageViewer] === Triggering third batch preload at page 16 ===")
             lastPreloadIndex = 30
             
             launch {
@@ -1762,7 +1770,7 @@ fun ImageViewerScreen(
                                 val imageUrl = mediaController.getDlnaImageUrl(newImage, object : MediaController.MediaCallback {
                                     override fun onFilesLoaded(files: List<MediaFile>) {}
                                     override fun onError(error: String) {
-                                        println("[Slideshow] Failed to get image URL: $error")
+                                        addLog("[Slideshow] Failed to get image URL: $error")
                                     }
                                     override fun onPlaybackStateChanged(state: Int) {}
                                 })
@@ -1771,14 +1779,14 @@ fun ImageViewerScreen(
                                     castingDevice?.let { device ->
                                         castController.castImage(device, imageUrl, newImage.name) { success, message ->
                                             if (success) {
-                                                println("[Slideshow] Casted: ${newImage.name}")
+                                                addLog("[Slideshow] Casted: ${newImage.name}")
                                                 
                                                 // ✅ 预加载下一张图片到HTTP代理缓存
                                                 val nextIndex = if (nextPage < imageFiles.size - 1) nextPage + 1 else 0
                                                 val nextImage = imageFiles[nextIndex]
                                                 launch {
                                                     try {
-                                                        println("[Slideshow] Preloading next image: ${nextImage.name}")
+                                                        addLog("[Slideshow] Preloading next image: ${nextImage.name}")
                                                         mediaController.getDlnaImageUrl(nextImage, object : MediaController.MediaCallback {
                                                             override fun onFilesLoaded(files: List<MediaFile>) {}
                                                             override fun onError(error: String) {
