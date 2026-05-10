@@ -592,6 +592,15 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null) {
             "gif" -> "image/gif"
             "bmp" -> "image/bmp"
             "webp" -> "image/webp"
+            "tiff", "tif" -> "image/tiff"
+            "svg" -> "image/svg+xml"
+            "ico" -> "image/x-icon"
+            "heic", "heif" -> "image/heic"
+            "raw" -> "image/x-raw"
+            "cr2" -> "image/x-canon-cr2"
+            "nef" -> "image/x-nikon-nef"
+            "arw" -> "image/x-sony-arw"
+            "dng" -> "image/x-adobe-dng"
             else -> "application/octet-stream"
         }
     }

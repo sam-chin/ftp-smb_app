@@ -629,12 +629,13 @@ fun MainScreen(
                     }
                 } else {
                     val extension = file.name.substringAfterLast('.', "").lowercase()
-                    val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+                    // ✅ 支持更多图片格式
+                    val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "svg", "ico", "heic", "heif", "raw", "cr2", "nef", "arw", "dng")
                     
                     if (isImage) {
                         val allImageFiles = files.filter { f ->
                             val ext = f.name.substringAfterLast('.', "").lowercase()
-                            ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+                            ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "svg", "ico", "heic", "heif", "raw", "cr2", "nef", "arw", "dng")
                         }
                         val index = allImageFiles.indexOfFirst { it.path == file.path }
                         imageFiles = allImageFiles
@@ -1643,6 +1644,15 @@ fun getMimeType(fileName: String): String {
         "gif" -> "image/gif"
         "bmp" -> "image/bmp"
         "webp" -> "image/webp"
+        "tiff", "tif" -> "image/tiff"
+        "svg" -> "image/svg+xml"
+        "ico" -> "image/x-icon"
+        "heic", "heif" -> "image/heic"
+        "raw" -> "image/x-raw"
+        "cr2" -> "image/x-canon-cr2"
+        "nef" -> "image/x-nikon-nef"
+        "arw" -> "image/x-sony-arw"
+        "dng" -> "image/x-adobe-dng"
         "mp4" -> "video/mp4"
         "mkv" -> "video/x-matroska"
         "avi" -> "video/x-msvideo"
@@ -2313,7 +2323,7 @@ fun FileOperationMenu(
     onOpenWith: () -> Unit
 ) {
     val extension = file.name.substringAfterLast('.', "").lowercase()
-    val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
+    val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "svg", "ico", "heic", "heif", "raw", "cr2", "nef", "arw", "dng")
     val isVideo = extension in listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm")
     val isAudio = extension in listOf("mp3", "wav", "flac", "aac", "ogg", "m4a")
     val isDocument = extension in listOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt")
