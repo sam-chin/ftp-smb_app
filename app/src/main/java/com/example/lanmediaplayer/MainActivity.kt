@@ -1727,34 +1727,34 @@ fun ImageViewerScreen(
         
         // ✅ 在后台协程中并行加载，不阻塞UI
         launch {
-            mediaController.preloadImageData(imageFiles, 0, 15)  // ✅ 初始预加载15张（更多缓存）
+            mediaController.preloadImageData(imageFiles, 0, 30)  // ✅ 初始预加载30张（FTP友好）
             addLog("[ImageViewer] === Initial preload END ===")
         }
     }
     
-    // ✅ 监听页面变化，预览到第3张时加载下10张（更早触发）
+    // ✅ 监听页面变化，智能预加载（每10张触发一次）
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 当预览到第3张（索引2）时，触发下一批预加载（更早触发，确保缓存就绪）
-        if (currentPage == 2 && lastPreloadIndex == 0) {
-            addLog("[ImageViewer] === Triggering next batch preload at page 2 ===")
-            lastPreloadIndex = 15
-            
-            launch {
-                mediaController.preloadImageData(imageFiles, 15, 15)  // ✅ 第二批预加载15张
-            }
-        }
-        
-        // ✅ 当预览到第17张（索引16）时，触发第三批预加载
-        if (currentPage == 16 && lastPreloadIndex == 15) {
-            addLog("[ImageViewer] === Triggering third batch preload at page 16 ===")
+        // ✅ 当预览到第11张（索引10）时，触发下一批预加载
+        if (currentPage == 10 && lastPreloadIndex == 0) {
+            addLog("[ImageViewer] === Triggering next batch preload at page 10 ===")
             lastPreloadIndex = 30
             
             launch {
-                mediaController.preloadImageData(imageFiles, 30, 15)  // ✅ 第三批预加载15张
+                mediaController.preloadImageData(imageFiles, 30, 30)  // ✅ 第二批预加载30张
+            }
+        }
+        
+        // ✅ 当预览到第41张（索引40）时，触发第三批预加载
+        if (currentPage == 40 && lastPreloadIndex == 30) {
+            addLog("[ImageViewer] === Triggering third batch preload at page 40 ===")
+            lastPreloadIndex = 60
+            
+            launch {
+                mediaController.preloadImageData(imageFiles, 60, 30)  // ✅ 第三批预加载30张
             }
         }
     }

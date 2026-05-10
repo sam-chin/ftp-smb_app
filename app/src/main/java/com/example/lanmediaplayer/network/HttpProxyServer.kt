@@ -324,6 +324,8 @@ class HttpProxyServer(
         var totalBytesRead = 0L
         var bytesRead: Int
         
+        log("📤 Starting stream: expected $expectedSize bytes")
+        
         inputStream.use { input ->
             while (input.read(buffer).also { bytesRead = it } != -1) {
                 outputStream.write(buffer, 0, bytesRead)
@@ -332,7 +334,12 @@ class HttpProxyServer(
             }
         }
         
-        log("✅ Streamed $totalBytesRead bytes")
+        log("✅ Streamed $totalBytesRead bytes (expected: $expectedSize)")
+        
+        // ✅ 验证完整性
+        if (totalBytesRead != expectedSize) {
+            log("⚠️ WARNING: Size mismatch! Read $totalBytesRead but expected $expectedSize")
+        }
     }
     
     private fun getFileSizeWithCache(filePath: String, fileProvider: FileProvider): Long {

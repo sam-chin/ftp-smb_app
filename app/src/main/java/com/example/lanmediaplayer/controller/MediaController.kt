@@ -140,6 +140,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         } finally {
                             inputStream?.close()  // ✅ 立即关闭
                         }
+                        
+                        // ✅ FTP 友好：每张图片之间延迟 100ms，避免服务器过载
+                        if (i < endIndex - 1) {
+                            kotlinx.coroutines.delay(100)
+                        }
                     } catch (e: Exception) {
                         failCount++
                         // ✅ 详细异常信息
