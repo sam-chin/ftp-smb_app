@@ -541,22 +541,38 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             log("[Controller] ⚠️ FTP connection lost, attempting auto-reconnect...")
                             
                             if (currentFtpHost.isNotEmpty()) {
-                                val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
-                                if (reconnected) {
-                                    val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
-                                    if (loginSuccess) {
-                                        log("[Controller] ✅ FTP auto-reconnect successful")
+                                try {
+                                    // ✅ 先断开旧连接（清理失效的socket）
+                                    ftpClient?.disconnect()
+                                    ftpClient = null
+                                    
+                                    // 创建新的FTP客户端
+                                    ftpClient = FtpClient(logCallback)
+                                    
+                                    val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
+                                    if (reconnected) {
+                                        val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
+                                        if (loginSuccess) {
+                                            log("[Controller] ✅ FTP auto-reconnect successful")
+                                        } else {
+                                            log("[Controller] ❌ FTP auto-reconnect failed: login error")
+                                            withContext(Dispatchers.Main) {
+                                                callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                            }
+                                            return@launch
+                                        }
                                     } else {
-                                        log("[Controller] ❌ FTP auto-reconnect failed: login error")
+                                        log("[Controller] ❌ FTP auto-reconnect failed: connection error")
                                         withContext(Dispatchers.Main) {
                                             callback.onError("FTP reconnection failed. Please reconnect manually.")
                                         }
                                         return@launch
                                     }
-                                } else {
-                                    log("[Controller] ❌ FTP auto-reconnect failed: connection error")
+                                } catch (e: Exception) {
+                                    log("[Controller] ❌ FTP auto-reconnect exception: ${e.message}")
+                                    e.printStackTrace()
                                     withContext(Dispatchers.Main) {
-                                        callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                        callback.onError("FTP reconnection failed: ${e.message}")
                                     }
                                     return@launch
                                 }
@@ -575,6 +591,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             
                             if (currentSmbHost.isNotEmpty()) {
                                 try {
+                                    // ✅ 先断开旧连接（清理失效的context）
+                                    smbClient?.disconnect()
+                                    smbClient = null
+                                    
+                                    // 创建新的SMB客户端
+                                    smbClient = SmbClient(logCallback)
+                                    
                                     val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
                                     val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
                                     if (reconnected == true) {
@@ -588,6 +611,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     }
                                 } catch (e: Exception) {
                                     log("[Controller] ❌ SMB auto-reconnect exception: ${e.message}")
+                                    e.printStackTrace()
                                     withContext(Dispatchers.Main) {
                                         callback.onError("SMB reconnection failed: ${e.message}")
                                     }
@@ -859,19 +883,33 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         
                         // 尝试自动重连
                         if (currentFtpHost.isNotEmpty()) {
-                            val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
-                            if (reconnected) {
-                                val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
-                                if (loginSuccess) {
-                                    log("[Controller] ✅ FTP auto-reconnect successful")
+                            try {
+                                // ✅ 先断开旧连接（清理失效的socket）
+                                ftpClient?.disconnect()
+                                ftpClient = null
+                                
+                                // 创建新的FTP客户端
+                                ftpClient = FtpClient(logCallback)
+                                
+                                val reconnected = ftpClient?.connect(currentFtpHost, currentFtpPort) ?: false
+                                if (reconnected) {
+                                    val loginSuccess = ftpClient?.login(currentFtpUsername, currentFtpPassword) ?: false
+                                    if (loginSuccess) {
+                                        log("[Controller] ✅ FTP auto-reconnect successful")
+                                    } else {
+                                        log("[Controller] ❌ FTP auto-reconnect failed: login error")
+                                        callback.onError("FTP reconnection failed. Please reconnect manually.")
+                                        return null
+                                    }
                                 } else {
-                                    log("[Controller] ❌ FTP auto-reconnect failed: login error")
+                                    log("[Controller] ❌ FTP auto-reconnect failed: connection error")
                                     callback.onError("FTP reconnection failed. Please reconnect manually.")
                                     return null
                                 }
-                            } else {
-                                log("[Controller] ❌ FTP auto-reconnect failed: connection error")
-                                callback.onError("FTP reconnection failed. Please reconnect manually.")
+                            } catch (e: Exception) {
+                                log("[Controller] ❌ FTP auto-reconnect exception: ${e.message}")
+                                e.printStackTrace()
+                                callback.onError("FTP reconnection failed: ${e.message}")
                                 return null
                             }
                         } else {
@@ -888,6 +926,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         // 尝试自动重连
                         if (currentSmbHost.isNotEmpty()) {
                             try {
+                                // ✅ 先断开旧连接（清理失效的context）
+                                smbClient?.disconnect()
+                                smbClient = null
+                                
+                                // 创建新的SMB客户端
+                                smbClient = SmbClient(logCallback)
+                                
                                 val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
                                 val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
                                 if (reconnected == true) {
@@ -899,6 +944,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 }
                             } catch (e: Exception) {
                                 log("[Controller] ❌ SMB auto-reconnect exception: ${e.message}")
+                                e.printStackTrace()
                                 callback.onError("SMB reconnection failed: ${e.message}")
                                 return null
                             }
