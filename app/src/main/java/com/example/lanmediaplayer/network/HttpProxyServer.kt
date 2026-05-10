@@ -18,8 +18,9 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     private val dlnaCache = mutableMapOf<String, ByteArray>()       // DLNA投屏缓存（按需加载）
     private val fileSizeCache = mutableMapOf<String, Long>()        // 文件尺寸缓存（共享）
     
-    private val cacheMutex = kotlinx.coroutines.sync.Mutex()
-    private val fileSizeCacheMutex = kotlinx.coroutines.sync.Mutex()
+    // ✅ 使用简单的同步锁（非协程）
+    private val cacheLock = Any()
+    private val fileSizeCacheLock = Any()
     
     // ✅ 缓存大小限制
     private val maxLocalCacheSize = 200 * 1024 * 1024L   // 本地缓存 200MB
@@ -42,64 +43,56 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     
     // ✅ 双缓存架构的缓存管理方法
     private fun addToLocalCache(path: String, data: ByteArray) {
-        runBlocking {
-            cacheMutex.withLock {
-                val dataSize = data.size.toLong()
-                
-                // 如果超过最大缓存，清理旧数据
-                if (currentLocalCacheSize + dataSize > maxLocalCacheSize) {
-                    log("[HTTP Proxy] Local cache full ($currentLocalCacheSize bytes), clearing...")
-                    localCache.clear()
-                    currentLocalCacheSize = 0
-                }
-                
-                localCache[path] = data
-                currentLocalCacheSize += dataSize
-                log("[HTTP Proxy] 📦 Cached to LOCAL: $path (${dataSize / 1024}KB), total: ${currentLocalCacheSize / 1024}KB")
+        synchronized(cacheLock) {
+            val dataSize = data.size.toLong()
+            
+            // 如果超过最大缓存，清理旧数据
+            if (currentLocalCacheSize + dataSize > maxLocalCacheSize) {
+                log("[HTTP Proxy] Local cache full ($currentLocalCacheSize bytes), clearing...")
+                localCache.clear()
+                currentLocalCacheSize = 0
             }
+            
+            localCache[path] = data
+            currentLocalCacheSize += dataSize
+            log("[HTTP Proxy] 📦 Cached to LOCAL: $path (${dataSize / 1024}KB), total: ${currentLocalCacheSize / 1024}KB")
         }
     }
     
     private fun addToDlnaCache(path: String, data: ByteArray) {
-        runBlocking {
-            cacheMutex.withLock {
-                val dataSize = data.size.toLong()
-                
-                // 如果超过最大缓存，清理旧数据
-                if (currentDlnaCacheSize + dataSize > maxDlnaCacheSize) {
-                    log("[HTTP Proxy] DLNA cache full ($currentDlnaCacheSize bytes), clearing...")
-                    dlnaCache.clear()
-                    currentDlnaCacheSize = 0
-                }
-                
-                dlnaCache[path] = data
-                currentDlnaCacheSize += dataSize
-                log("[HTTP Proxy] 📡 Cached to DLNA: $path (${dataSize / 1024}KB), total: ${currentDlnaCacheSize / 1024}KB")
+        synchronized(cacheLock) {
+            val dataSize = data.size.toLong()
+            
+            // 如果超过最大缓存，清理旧数据
+            if (currentDlnaCacheSize + dataSize > maxDlnaCacheSize) {
+                log("[HTTP Proxy] DLNA cache full ($currentDlnaCacheSize bytes), clearing...")
+                dlnaCache.clear()
+                currentDlnaCacheSize = 0
             }
+            
+            dlnaCache[path] = data
+            currentDlnaCacheSize += dataSize
+            log("[HTTP Proxy] 📡 Cached to DLNA: $path (${dataSize / 1024}KB), total: ${currentDlnaCacheSize / 1024}KB")
         }
     }
     
     private fun getFromLocalCache(path: String): ByteArray? {
-        return runBlocking {
-            cacheMutex.withLock {
-                val cached = localCache[path]
-                if (cached != null) {
-                    log("[HTTP Proxy] ✅ LOCAL cache hit: $path")
-                }
-                cached
+        return synchronized(cacheLock) {
+            val cached = localCache[path]
+            if (cached != null) {
+                log("[HTTP Proxy] ✅ LOCAL cache hit: $path")
             }
+            cached
         }
     }
     
     private fun getFromDlnaCache(path: String): ByteArray? {
-        return runBlocking {
-            cacheMutex.withLock {
-                val cached = dlnaCache[path]
-                if (cached != null) {
-                    log("[HTTP Proxy] ✅ DLNA cache hit: $path")
-                }
-                cached
+        return synchronized(cacheLock) {
+            val cached = dlnaCache[path]
+            if (cached != null) {
+                log("[HTTP Proxy] ✅ DLNA cache hit: $path")
             }
+            cached
         }
     }
     
@@ -122,16 +115,16 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
     }
     
     fun clearCache() {
-        runBlocking {
-            cacheMutex.withLock {
-                localCache.clear()
-                dlnaCache.clear()
-                fileSizeCache.clear()
-                currentLocalCacheSize = 0
-                currentDlnaCacheSize = 0
-                log("[HTTP Proxy] 🗑️ All caches cleared (Local + DLNA + FileSize)")
-            }
+        synchronized(cacheLock) {
+            localCache.clear()
+            dlnaCache.clear()
         }
+        synchronized(fileSizeCacheLock) {
+            fileSizeCache.clear()
+        }
+        currentLocalCacheSize = 0
+        currentDlnaCacheSize = 0
+        log("[HTTP Proxy] 🗑️ All caches cleared (Local + DLNA + FileSize)")
     }
     
     // ✅ 生成HTTP代理URL（用于视频播放和图片预览）
@@ -329,7 +322,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
             log("[HTTP Proxy] Calling getFileSize for path: '$filePath'")
             
             // ✅ 先检查文件尺寸缓存
-            val cachedFileSize = fileSizeCacheMutex.withLock {
+            val cachedFileSize = synchronized(fileSizeCacheLock) {
                 fileSizeCache[filePath]
             }
             
@@ -343,7 +336,7 @@ class HttpProxyServer(private val logCallback: ((String) -> Unit)? = null, priva
                 
                 // ✅ 缓存文件尺寸（避免重复查询）
                 if (size > 0) {
-                    fileSizeCacheMutex.withLock {
+                    synchronized(fileSizeCacheLock) {
                         fileSizeCache[filePath] = size
                     }
                 }
