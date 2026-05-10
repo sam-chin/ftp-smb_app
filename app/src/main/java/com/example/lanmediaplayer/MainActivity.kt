@@ -662,7 +662,7 @@ fun MainScreen(
                         addLog("Already at SMB root, ignoring back click")
                     } else {
                         // 当前在共享目录或子目录中，返回上级目录
-                        val parentPath = if (currentPath.contains("/", startIndex = 1)) {
+                        val parentPath = if (currentPath.indexOf('/', startIndex = 1) != -1) {
                             // 有父目录：/folder1/subfolder -> /folder1
                             currentPath.substringBeforeLast("/")
                         } else {
@@ -702,17 +702,17 @@ fun MainScreen(
                             
                             isLoading = true
                             coroutineScope.launch {
-                                mediaController.browseFiles(newPath, selectedProtocol, object : MediaController.MediaCallback {
+                                mediaController.browseFiles(parentPath, selectedProtocol, object : MediaController.MediaCallback {
                                     override fun onFilesLoaded(loadedFiles: List<MediaFile>) {
                                         files = loadedFiles
                                         isLoading = false
-                                        addLog("Loaded ${loadedFiles.size} files in $newPath")
+                                        addLog("Loaded ${loadedFiles.size} files in $parentPath")
                                     }
                                     
                                     override fun onError(error: String) {
                                         errorMessage = error
                                         isLoading = false
-                                        addLog("Error browsing $newPath: $error")
+                                        addLog("Error browsing $parentPath: $error")
                                     }
                                     
                                     override fun onPlaybackStateChanged(state: Int) {}
