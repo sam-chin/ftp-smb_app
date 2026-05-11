@@ -34,12 +34,14 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.*
 import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.*
@@ -1938,7 +1940,7 @@ fun ImageViewerScreen(
                     }
                 ) {
                     Icon(
-                        imageVector = if (isThumbnailMode) Icons.Default.Photo else Icons.Default.PhotoSizeSelectLarge,
+                        imageVector = if (isThumbnailMode) Icons.Default.Image else Icons.Default.ZoomIn,
                         contentDescription = if (isThumbnailMode) "Switch to Full Image" else "Switch to Thumbnail",
                         tint = if (isThumbnailMode) Color.Yellow else Color.White
                     )
