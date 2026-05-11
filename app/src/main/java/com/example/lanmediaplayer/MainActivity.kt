@@ -65,6 +65,7 @@ import com.lanmedia.player.controller.MediaFile
 import com.lanmedia.player.controller.NetworkProtocol
 import com.lanmedia.player.ui.theme.LanMediaPlayerTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
