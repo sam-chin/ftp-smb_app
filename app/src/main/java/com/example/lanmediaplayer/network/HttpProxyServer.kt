@@ -119,6 +119,22 @@ class HttpProxyServer(
     }
     
     /**
+     * ✅ 新增: 生成缩略图 URL (只读取前 256KB)
+     */
+    fun getThumbnailUrl(filePath: String): String {
+        val encodedPath = PathManager.encodeForHttp(filePath)
+        
+        val host = if (allowExternalConnections) {
+            getLocalIpAddress()?.hostAddress ?: "127.0.0.1"
+        } else {
+            "127.0.0.1"
+        }
+        
+        // ✅ 添加 thumbnail=1 参数标识缩略图请求
+        return "http://$host:$currentPort/$encodedPath?thumbnail=1"
+    }
+    
+    /**
      * 检查是否允许外部连接
      */
     fun isAllowingExternalConnections(): Boolean = allowExternalConnections
@@ -164,8 +180,23 @@ class HttpProxyServer(
                 }
                 
                 val method = parts[0]
-                val encodedPath = parts[1].substring(1)  // 去掉前导 /
+                val fullPath = parts[1].substring(1)  // 去掉前导 /
+                
+                // ✅ 解析 URL 参数 (如 ?thumbnail=1)
+                val (encodedPath, isThumbnail) = if (fullPath.contains("?")) {
+                    val pathAndQuery = fullPath.split("?", limit = 2)
+                    val queryParams = pathAndQuery.getOrNull(1) ?: ""
+                    val isThumb = queryParams.contains("thumbnail=1")
+                    Pair(pathAndQuery[0], isThumb)
+                } else {
+                    Pair(fullPath, false)
+                }
+                
                 val filePath = PathManager.decodeFromHttp(encodedPath)
+                
+                if (isThumbnail) {
+                    log("🖼️ Thumbnail request: $filePath")
+                }
                 
                 // 读取 Headers
                 val headers = readHeaders(reader)
@@ -184,7 +215,8 @@ class HttpProxyServer(
                 if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                     handleRangeRequest(socket.getOutputStream(), fileProvider, filePath, fileSize, rangeHeader, contentType)
                 } else {
-                    handleFullRequest(socket.getOutputStream(), fileProvider, filePath, fileSize, contentType, method == "HEAD")
+                    // ✅ 如果是缩略图请求,传递 isThumbnail=true
+                    handleFullRequest(socket.getOutputStream(), fileProvider, filePath, fileSize, contentType, method == "HEAD", isThumbnail)
                 }
                 
             } catch (e: Exception) {
@@ -220,11 +252,19 @@ class HttpProxyServer(
         filePath: String,
         fileSize: Long,
         contentType: String,
-        isHead: Boolean
+        isHead: Boolean,
+        isThumbnail: Boolean = false  // ✅ 新增参数: 是否为缩略图请求
     ) {
         // HEAD 请求只返回头信息
         if (isHead) {
             sendHeadersOnly(outputStream, 200, fileSize, contentType)
+            return
+        }
+        
+        // ✅ 缩略图模式: 直接流式读取前 256KB,不等待缓存
+        if (isThumbnail) {
+            log("🖼️ Thumbnail mode: reading first 256KB of $filePath")
+            handleThumbnailRequest(outputStream, fileProvider, filePath, contentType)
             return
         }
         
@@ -340,6 +380,69 @@ class HttpProxyServer(
         } finally {
             try { fileStream.close() } catch (_: Exception) {}
         }
+    }
+    
+    /**
+     * ✅ 新增: 处理缩略图请求 (只读取前 256KB)
+     */
+    private suspend fun handleThumbnailRequest(
+        outputStream: OutputStream,
+        fileProvider: FileProvider,
+        filePath: String,
+        contentType: String
+    ) {
+        val thumbnailSize = 256 * 1024L  // 256KB = 262144 bytes
+        
+        log("🖼️ Thumbnail request: reading first $thumbnailSize bytes of $filePath")
+        
+        val fileStream = fileProvider.getFileStream(filePath)
+        if (fileStream == null) {
+            sendError(outputStream, 404, "File Not Found")
+            return
+        }
+        
+        try {
+            // 发送响应头 (使用固定大小 256KB)
+            val responseHeader = buildResponseHeader(200, "OK", thumbnailSize, contentType)
+            outputStream.write(responseHeader.toByteArray(Charsets.UTF_8))
+            outputStream.flush()
+            
+            // ✅ 只读取前 256KB
+            streamLimitedBytes(outputStream, fileStream, thumbnailSize)
+            
+            log("✅ Thumbnail sent: ${thumbnailSize / 1024}KB from $filePath")
+            
+        } catch (e: IOException) {
+            handleIoException(e, "Thumbnail stream")
+        } finally {
+            try { fileStream.close() } catch (_: Exception) {}
+        }
+    }
+    
+    /**
+     * ✅ 新增: 流式传输指定字节数 (用于缩略图)
+     */
+    private suspend fun streamLimitedBytes(outputStream: OutputStream, inputStream: InputStream, maxBytes: Long) {
+        val buffer = ByteArray(64 * 1024)  // 64KB 缓冲区
+        var totalBytesRead = 0L
+        var bytesRead: Int
+        
+        inputStream.use { input ->
+            while (totalBytesRead < maxBytes) {
+                // 计算本次最多读取多少字节
+                val remaining = maxBytes - totalBytesRead
+                val readSize = minOf(buffer.size.toLong(), remaining).toInt()
+                
+                bytesRead = input.read(buffer, 0, readSize)
+                if (bytesRead == -1) break  // 文件结束
+                
+                outputStream.write(buffer, 0, bytesRead)
+                outputStream.flush()
+                totalBytesRead += bytesRead
+            }
+        }
+        
+        log("📤 Limited stream completed: $totalBytesRead bytes sent (max: $maxBytes)")
     }
     
     /**

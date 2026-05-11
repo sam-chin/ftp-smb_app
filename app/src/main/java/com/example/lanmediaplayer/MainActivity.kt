@@ -874,6 +874,7 @@ fun MainScreen(
             connectionPrefs = connectionPrefs,
             mediaController = mediaController,  // ✅ 传递
             getImageUrl = { path -> mediaController.getLocalImageUrl(path) },
+            getThumbnailUrl = { path -> mediaController.getLocalThumbnailUrl(path) },  // ✅ 新增: 缩略图 URL
             castController = castController,
             onBackClick = {
                 currentScreen = Screen.FileBrowser
@@ -1695,6 +1696,7 @@ fun ImageViewerScreen(
     connectionPrefs: ConnectionPreferences,
     mediaController: MediaController,  // ✅ 新增参数
     getImageUrl: (String) -> String,
+    getThumbnailUrl: (String) -> String,  // ✅ 新增: 缩略图 URL 生成函数
     castController: CastController,
     onBackClick: () -> Unit,
     onError: (String) -> Unit,
@@ -1859,6 +1861,9 @@ fun ImageViewerScreen(
     // ✅ 跟踪当前页面的缩放状态
     var isCurrentPageZoomed by remember { mutableStateOf(false) }
     
+    // ✅ 新增: 缩略图模式开关 (默认为缩略图模式)
+    var isThumbnailMode by remember { mutableStateOf(true) }
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1877,8 +1882,15 @@ fun ImageViewerScreen(
                 userScrollEnabled = !isCurrentPageZoomed  // ✅ 放大时禁用滑动
             ) { page ->
                 // ✅ 关键修复：不缓存URL，每次动态生成以确保URL与HTTP代理状态一致
-                val imageUrl = remember(page, imageFiles[page].path) {
-                    getImageUrl(imageFiles[page].path)
+                // ✅ 新增: 根据模式选择全图或缩略图 URL
+                val imageUrl = remember(page, imageFiles[page].path, isThumbnailMode) {
+                    if (isThumbnailMode) {
+                        // 缩略图模式: 只读取前 256KB
+                        getThumbnailUrl(imageFiles[page].path)
+                    } else {
+                        // 全图模式: 加载完整图片
+                        getImageUrl(imageFiles[page].path)
+                    }
                 }
                 
                 ImageLoader(
@@ -1907,6 +1919,30 @@ fun ImageViewerScreen(
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium
                 )
+                
+                // ✅ 新增: 模式指示器
+                Text(
+                    text = if (isThumbnailMode) "🖼️ 缩略图" else "📷 全图",
+                    color = if (isThumbnailMode) Color.Yellow else Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.background(
+                        Color.Black.copy(alpha = 0.3f),
+                        RoundedCornerShape(4.dp)
+                    ).padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+                
+                // ✅ 新增: 缩略图/全图模式切换按钮
+                IconButton(
+                    onClick = {
+                        isThumbnailMode = !isThumbnailMode
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (isThumbnailMode) Icons.Default.Photo else Icons.Default.PhotoSizeSelectLarge,
+                        contentDescription = if (isThumbnailMode) "Switch to Full Image" else "Switch to Thumbnail",
+                        tint = if (isThumbnailMode) Color.Yellow else Color.White
+                    )
+                }
                 
                 IconButton(
                     onClick = {
