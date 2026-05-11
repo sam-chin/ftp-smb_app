@@ -247,11 +247,11 @@ class HttpProxyServer(
         } else {
             log("⚠️ Cache miss: $filePath (cache size: ${cache?.size ?: 0})")
             
-            // ✅ FTP 友好：如果缓存未命中，等待 500ms 让预加载完成
+            // ✅ FTP/SMB 友好：如果缓存未命中，等待 800ms 让预加载完成
             if (filePath.endsWith(".jpg", true) || filePath.endsWith(".jpeg", true) || 
                 filePath.endsWith(".png", true) || filePath.endsWith(".gif", true)) {
-                log("⏳ Waiting 500ms for preload to complete...")
-                kotlinx.coroutines.delay(500)
+                log("⏳ Waiting 800ms for preload to complete...")
+                kotlinx.coroutines.delay(800)
                 
                 // 再次检查缓存
                 val cacheAfterWait = externalImageCacheProvider?.invoke()

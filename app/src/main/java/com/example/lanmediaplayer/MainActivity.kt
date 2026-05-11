@@ -1724,11 +1724,11 @@ fun ImageViewerScreen(
         
         // ✅ 立即启动预加载，不要延迟（确保HTTP请求时缓存已就绪）
         // kotlinx.coroutines.delay(500)  ← 已移除
-        
-        // ✅ 在后台协程中并行加载，不阻塞UI
+            
+        // ✅ 使用smartPreload进行初始预加载(更智能,自动去重)
         launch {
-            mediaController.preloadImageData(imageFiles, 0, 30)  // ✅ 初始预加载30张（FTP友好）
-            addLog("[ImageViewer] === Initial preload END ===")
+            mediaController.smartPreload(0, imageFiles)  // 从第0张开始预加载±20张
+            addLog("[ImageViewer] === Initial smartPreload END ===")
         }
     }
     
@@ -1742,28 +1742,6 @@ fun ImageViewerScreen(
         if (currentPage % 5 == 0) {
             launch {
                 mediaController.smartPreload(currentPage, imageFiles)
-            }
-        }
-        
-        // ✅ 同时保留批量预加载作为补充(每批30张,在第10张时触发下一批,更早触发)
-        val batchSize = 30
-        val triggerOffset = 10  // 在每批的第10张时触发下一批(更早触发)
-        
-        val currentBatch = currentPage / batchSize
-        val positionInBatch = currentPage % batchSize
-        
-        if (positionInBatch == triggerOffset) {
-            val nextBatchStart = (currentBatch + 1) * batchSize
-            
-            if (nextBatchStart < imageFiles.size && nextBatchStart != lastPreloadIndex) {
-                addLog("[ImageViewer] === Triggering batch ${currentBatch + 1} preload at page $currentPage ===")
-                lastPreloadIndex = nextBatchStart
-                
-                launch {
-                    val count = minOf(batchSize, imageFiles.size - nextBatchStart)
-                    mediaController.preloadImageData(imageFiles, nextBatchStart, count)
-                    addLog("[ImageViewer] === Batch ${currentBatch + 1} preload END ($count images) ===")
-                }
             }
         }
     }

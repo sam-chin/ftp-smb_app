@@ -1369,59 +1369,37 @@ class MediaController(private val context: Context, private val logCallback: ((S
         isPreloading = true
         preloadTaskCount++
         try {
-            // ✅ 严格按顺序串行加载,确保每张图片都缓存成功
+            // ✅ 智能预加载策略: 只加载未缓存的图片,优先加载后面的图片
             val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
             
-            // ✅ 双向预加载策略: 先加载当前及附近关键图片(±5张),再按顺序加载其他
-            val criticalStart = maxOf(start, currentIndex - 5)
-            val criticalEnd = minOf(end, currentIndex + 5)
+            // ✅ 第一步: 收集所有需要加载的图片(跳过已缓存的)
+            val uncachedIndices = mutableListOf<Int>()
+            for (index in start..end) {
+                val path = allImages[index].path
+                if (!localImageCache.containsKey(path)) {
+                    uncachedIndices.add(index)
+                }
+            }
             
-            log("[Controller] 🔄 Two-phase preload started: critical[$criticalStart-$criticalEnd] + sequential[$start-$end]")
+            if (uncachedIndices.isEmpty()) {
+                log("[Controller] ✅ All images in range [$start-$end] already cached, skipping")
+                lastSmartPreloadCenter = currentIndex
+                return
+            }
+            
+            log("[Controller] 🔄 Smart preload: need to load ${uncachedIndices.size}/${end - start + 1} images in range [$start-$end]")
+            
+            // ✅ 第二步: 按优先级排序(当前图片后面优先,然后前面)
+            val sortedIndices = uncachedIndices.sortedBy { 
+                if (it >= currentIndex) it - currentIndex  // 后面的图片: 距离越小越优先
+                else Int.MAX_VALUE - it                     // 前面的图片: 排到后面
+            }
+            
+            log("[Controller] 🎯 Priority order: ${sortedIndices.take(5).joinToString(", ")}...")
             
             withContext(Dispatchers.IO) {
-                // ✅ 第一阶段: 优先加载当前图片及附近关键图片(并发加载,最快速度)
-                log("[Controller] 🚀 Phase 1: Loading critical images (current ±5, concurrent)")
-                
-                val criticalJobs = mutableListOf<kotlinx.coroutines.Deferred<Long>>()
-                for (index in criticalStart..criticalEnd) {
-                    if (coroutineContext[Job]?.isActive != true) {
-                        log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
-                        break
-                    }
-                    
-                    val imageFile = allImages[index]
-                    val path = imageFile.path
-                    
-                    if (localImageCache.containsKey(path)) {
-                        continue
-                    }
-                    
-                    log("[Controller] 📥 [CRITICAL] Loading: $path")
-                    
-                    // ✅ 并发加载关键图片(最多2个并发)
-                    val job = async {
-                        preloadSingleImage(imageFile)
-                    }
-                    criticalJobs.add(job)
-                    
-                    // ✅ 限制并发数为2,保护SMB服务器
-                    if (criticalJobs.size >= 2) {
-                        criticalJobs.removeAt(0).await()  // 等待最早的任务完成
-                    }
-                }
-                
-                // ✅ 等待所有关键图片加载完成
-                criticalJobs.forEach { it.await() }
-                
-                log("[Controller] ✅ Phase 1 completed (${criticalJobs.size} critical images), starting Phase 2: Sequential preload")
-                
-                // ✅ 第二阶段: 按顺序加载剩余图片(带智能延迟)
-                for (index in start..end) {
-                    // ✅ 跳过已加载的关键图片
-                    if (index in criticalStart..criticalEnd) {
-                        continue
-                    }
-                    
+                // ✅ 第三阶段: 按优先级顺序加载(带智能延迟)
+                for ((idx, index) in sortedIndices.withIndex()) {
                     // ✅ 检查协程是否已取消
                     if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
@@ -1432,26 +1410,26 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     val path = imageFile.path
                     val fileSizeKB = imageFile.size / 1024
                     
-                    // ✅ 检查是否已缓存
+                    // ✅ 再次检查是否已缓存(可能在等待期间被其他任务加载了)
                     if (localImageCache.containsKey(path)) {
                         log("[Controller] ✅ [$index/${allImages.size}] Already cached: $path (${fileSizeKB}KB)")
                         continue
                     }
                     
-                    log("[Controller] 📥 [$index/${allImages.size}] Loading: $path (${fileSizeKB}KB)")
+                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] Loading: $path (${fileSizeKB}KB)")
                     
                     // ✅ 调用带重试机制的预加载函数,获取实际耗时
                     val elapsedMs = preloadSingleImage(imageFile)
                     
                     // ✅ 确认缓存成功
                     if (localImageCache.containsKey(path)) {
-                        log("[Controller] ✅ [$index/${allImages.size}] Success: $path (${fileSizeKB}KB)")
+                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Success: $path (${fileSizeKB}KB)")
                     } else {
-                        log("[Controller] ❌ [$index/${allImages.size}] Failed after retries: $path")
+                        log("[Controller] ❌ [${idx + 1}/${sortedIndices.size}] Failed after retries: $path")
                     }
                     
                     // ✅ 智能动态延迟: 根据下载速度自动调整
-                    if (index < end && elapsedMs >= 0) {
+                    if (idx < sortedIndices.size - 1 && elapsedMs >= 0) {
                         // 计算下载速度(KB/s)
                         val speedKBps = if (elapsedMs > 0) (fileSizeKB.toDouble()) / (elapsedMs / 1000.0) else 0.0
                         
