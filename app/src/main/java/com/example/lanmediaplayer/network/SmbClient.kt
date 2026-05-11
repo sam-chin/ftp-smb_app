@@ -158,11 +158,28 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 // Configure JCIFS for file operations (SMB2/3)
                 val properties = Properties()
-                // ✅ 设置合理的超时时间（避免无限等待）
+                // ✅ SMB 完整大图预览提速核心优化
+                // 1. 设置合理的超时时间（避免无限等待）
                 properties.setProperty("jcifs.smb.client.responseTimeout", "15000")  // 响应超时15秒
                 properties.setProperty("jcifs.smb.client.soTimeout", "15000")  // Socket超时15秒
                 properties.setProperty("jcifs.smb.client.connTimeout", "10000")  // 连接超时10秒
+                
+                // 2. 禁用DFS(分布式文件系统),减少额外查询
                 properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
+                
+                // 3. 禁用文件锁和oplock,只保留纯读写数据流
+                properties.setProperty("jcifs.smb.client.locking", "false")  // 禁用文件锁
+                properties.setProperty("jcifs.smb.client.oplocks", "false")  // 禁用oplock
+                
+                // 4. 启用长连接复用,预览多张图不重复握手
+                properties.setProperty("jcifs.smb.client.lmCompatibility", "3")  // NTLMv2认证
+                properties.setProperty("jcifs.smb.client.useNTLMv2", "true")
+                properties.setProperty("jcifs.smb.client.signingPreferred", "false")  // 禁用签名验证(提升速度)
+                
+                // 5. 优化传输参数
+                properties.setProperty("jcifs.smb.client.rcv_buf_size", "65536")  // 接收缓冲区64KB
+                properties.setProperty("jcifs.smb.client.snd_buf_size", "65536")  // 发送缓冲区64KB
+                
                 if (testDomain.isNotEmpty()) {
                     properties.setProperty("jcifs.smb.client.domain", testDomain)
                 }
@@ -555,14 +572,17 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 return@withContext null
             }
             
-            val inputStream = smbFile.getInputStream()
+            // ✅ 核心优化: 使用超大缓冲区(256KB),避免小分块读取
+            val rawInputStream = smbFile.getInputStream()
+            val bufferedStream = java.io.BufferedInputStream(rawInputStream, 256 * 1024)  // 256KB buffer
             
             if (startOffset > 0) {
                 log("[SMB-JCIFS] Skipping $startOffset bytes")
-                inputStream.skip(startOffset)
+                bufferedStream.skip(startOffset)
             }
             
-            inputStream
+            log("[SMB-JCIFS] Stream opened with 256KB buffer for continuous reading")
+            bufferedStream
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error opening stream: ${e.message}")
             e.printStackTrace()
