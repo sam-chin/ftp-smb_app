@@ -241,27 +241,29 @@ class HttpProxyServer(
         
         val cachedData = cache?.get(filePath)
         if (cachedData != null) {
-            log("🚀 Cache hit: $filePath (${cachedData.size / 1024}KB)")
+            log("✅ Cache HIT: $filePath (${cachedData.size / 1024}KB) - NO WAIT")
             sendCachedData(outputStream, cachedData, contentType)
             return
         } else {
-            log("⚠️ Cache miss: $filePath (cache size: ${cache?.size ?: 0})")
+            log("❌ Cache MISS: $filePath (cache size: ${cache?.size ?: 0})")
             
             // ✅ FTP/SMB 友好：如果缓存未命中，等待 800ms 让预加载完成
             if (filePath.endsWith(".jpg", true) || filePath.endsWith(".jpeg", true) || 
                 filePath.endsWith(".png", true) || filePath.endsWith(".gif", true)) {
                 log("⏳ Waiting 800ms for preload to complete...")
+                val waitStart = System.currentTimeMillis()
                 kotlinx.coroutines.delay(800)
+                val waitEnd = System.currentTimeMillis()
                 
                 // 再次检查缓存
                 val cacheAfterWait = externalImageCacheProvider?.invoke()
                 val cachedDataAfterWait = cacheAfterWait?.get(filePath)
                 if (cachedDataAfterWait != null) {
-                    log("🚀 Cache hit after wait: $filePath (${cachedDataAfterWait.size / 1024}KB)")
+                    log("✅ Cache HIT after ${waitEnd - waitStart}ms wait: $filePath (${cachedDataAfterWait.size / 1024}KB)")
                     sendCachedData(outputStream, cachedDataAfterWait, contentType)
                     return
                 }
-                log("⚠️ Still cache miss after wait, falling back to streaming")
+                log("❌ Still cache MISS after ${waitEnd - waitStart}ms wait, FALLBACK to streaming")
             }
         }
         

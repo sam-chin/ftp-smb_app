@@ -75,7 +75,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private var currentLocalCacheSize = 0L
     
     // ✅ 预加载任务管理(防止累积)
-    private var isPreloading = false
+    private var preloadJob: Job? = null  // 当前正在执行的预加载任务
         
     // ✅ 预加载进度跟踪(避免重复预加载同一范围)
     private var lastSmartPreloadCenter = -1
@@ -1348,48 +1348,55 @@ class MediaController(private val context: Context, private val logCallback: ((S
             return
         }
         
-        // ✅ 如果正在预加载,直接返回(防止重复调用)
-        if (isPreloading) {
-            log("[Controller] ⚠️ Preload already in progress, skipping")
-            return
-        }
+        // ✅ 取消旧的预加载任务(如果用户已经滑远了)
+        preloadJob?.cancel()
+        log("[Controller] 🔄 Cancelling previous preload task (if any)")
         
-        // ✅ 计算预加载范围: 当前图片后面的10张
+        // ✅ 计算预加载范围: 当前图片后面的20张(扩大范围,减少miss)
         val start = currentIndex + 1
-        val end = minOf(allImages.size - 1, currentIndex + 10)
+        val end = minOf(allImages.size - 1, currentIndex + 20)
         
         if (start > end) {
             log("[Controller] ✅ No images to preload (at end of list)")
             return
         }
         
-        log("[Controller] 🔄 Smart preload: indices $start to $end (10 images after current: $currentIndex)")
+        log("[Controller] 🔄 Smart preload START: current=$currentIndex, range=[$start-$end], total=${end - start + 1} images")
         
-        isPreloading = true
+        // ✅ 创建新的预加载任务
         preloadTaskCount++
-        try {
+        preloadJob = CoroutineScope(Dispatchers.IO).launch {
+            try {
             // ✅ 收集未缓存的图片索引
             val uncachedIndices = mutableListOf<Int>()
+            var alreadyCachedCount = 0
             for (index in start..end) {
                 val path = allImages[index].path
                 if (!localImageCache.containsKey(path)) {
                     uncachedIndices.add(index)
+                } else {
+                    alreadyCachedCount++
                 }
             }
             
             if (uncachedIndices.isEmpty()) {
-                log("[Controller] ✅ All images in range [$start-$end] already cached, skipping")
+                log("[Controller] ✅ All ${alreadyCachedCount} images in range [$start-$end] already cached, skipping download")
+                lastSmartPreloadCenter = currentIndex
                 return
             }
-            
-            log("[Controller] 🎯 Need to load ${uncachedIndices.size}/${end - start + 1} images")
             
             // ✅ 按距离排序: 离当前越近优先级越高
             val sortedIndices = uncachedIndices.sortedBy { it - currentIndex }
             
-            log("[Controller] 📋 Priority order: ${sortedIndices.take(5).joinToString(", ")}...")
+            log("[Controller] 📊 Cache status: ${alreadyCachedCount} cached, ${uncachedIndices.size} need to load")
+            log("[Controller] 🎯 Priority order: ${sortedIndices.take(5).joinToString(", ")}${if (sortedIndices.size > 5) "..." else ""}")
+            log("[Controller] 🚀 Starting sequential preload (${sortedIndices.size} images)...")
             
             withContext(Dispatchers.IO) {
+                var successCount = 0
+                var failCount = 0
+                var skipCount = 0
+                
                 // ✅ 按优先级顺序加载(带智能延迟)
                 for ((idx, index) in sortedIndices.withIndex()) {
                     // ✅ 检查协程是否已取消
@@ -1404,20 +1411,25 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     
                     // ✅ 再次检查是否已缓存(可能在等待期间被其他任务加载了)
                     if (localImageCache.containsKey(path)) {
-                        log("[Controller] ✅ [$index/${allImages.size}] Already cached: $path (${fileSizeKB}KB)")
+                        skipCount++
+                        log("[Controller] ⏭️ [${idx + 1}/${sortedIndices.size}] Skip (cached): image_$index (${fileSizeKB}KB)")
                         continue
                     }
                     
-                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] Loading: $path (${fileSizeKB}KB)")
+                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] Loading: image_$index (${fileSizeKB}KB)")
                     
                     // ✅ 调用带重试机制的预加载函数,获取实际耗时
+                    val startTime = System.currentTimeMillis()
                     val elapsedMs = preloadSingleImage(imageFile)
+                    val endTime = System.currentTimeMillis()
                     
                     // ✅ 确认缓存成功
                     if (localImageCache.containsKey(path)) {
-                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Success: $path (${fileSizeKB}KB)")
+                        successCount++
+                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Cached: image_$index (${fileSizeKB}KB, ${endTime - startTime}ms)")
                     } else {
-                        log("[Controller] ❌ [${idx + 1}/${sortedIndices.size}] Failed after retries: $path")
+                        failCount++
+                        log("[Controller] ❌ [${idx + 1}/${sortedIndices.size}] Failed: image_$index (after ${endTime - startTime}ms)")
                     }
                     
                     // ✅ 智能动态延迟: 根据下载速度自动调整
@@ -1425,28 +1437,36 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         // 计算下载速度(KB/s)
                         val speedKBps = if (elapsedMs > 0) (fileSizeKB.toDouble()) / (elapsedMs / 1000.0) else 0.0
                         
-                        // 根据速度动态计算延迟
+                        // 根据速度动态计算延迟(缩短等待时间,加快预加载)
                         val delayMs: Int = when {
-                            speedKBps > 500 -> 20   // 超高速: 几乎不等待
-                            speedKBps > 200 -> 50   // 高速: 短暂等待
-                            speedKBps > 100 -> 100  // 中速: 正常等待
-                            speedKBps > 50 -> 150   // 低速: 稍长等待
-                            else -> 200             // 极慢: 充分休息
+                            speedKBps > 500 -> 10   // 超高速: 几乎不等待
+                            speedKBps > 200 -> 30   // 高速: 短暂等待
+                            speedKBps > 100 -> 50   // 中速: 正常等待
+                            speedKBps > 50 -> 80    // 低速: 稍长等待
+                            else -> 100             // 极慢: 充分休息
                         }
                         
                         log("[Controller] ⏳ Speed: ${String.format("%.1f", speedKBps)}KB/s, waiting ${delayMs}ms before next...")
                         kotlinx.coroutines.delay(delayMs.toLong())
                     }
                 }
+                
+                // ✅ 输出预加载统计信息
+                log("[Controller] 📊 Preload summary: ${successCount} success, ${failCount} failed, ${skipCount} skipped (total: ${sortedIndices.size})")
             }
             
-            log("[Controller] ✅ Smart preload completed: $start to $end")
+            log("[Controller] ✅ Smart preload COMPLETED: range [$start-$end]")
             
             // ✅ 更新预加载中心点
             lastSmartPreloadCenter = currentIndex
-        } finally {
-            isPreloading = false
-            preloadTaskCount--
+            } catch (e: CancellationException) {
+                log("[Controller] ⚠️ Preload cancelled by user navigation")
+            } catch (e: Exception) {
+                log("[Controller] ❌ Preload error: ${e.message}")
+            } finally {
+                preloadTaskCount--
+                preloadJob = null
+            }
         }
     }
     
