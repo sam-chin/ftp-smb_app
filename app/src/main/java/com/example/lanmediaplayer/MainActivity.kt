@@ -2322,6 +2322,7 @@ fun ImageLoader(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
+        // ✅ 图片层(始终显示)
         AsyncImage(
             model = imageUrl,
             contentDescription = contentDescription,
@@ -2332,42 +2333,7 @@ fun ImageLoader(
                     scaleY = scale,
                     translationX = offsetX,
                     translationY = offsetY
-                )
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                        
-                        if (newScale > 1.01f) {
-                            // ✅ 放大状态: 处理拖拽
-                            val maxX = (size.width * (newScale - 1)) / 2
-                            val maxY = (size.height * (newScale - 1)) / 2
-                            
-                            offsetX = (offsetX + pan.x * 3f).coerceIn(-maxX, maxX)
-                            offsetY = (offsetY + pan.y * 3f).coerceIn(-maxY, maxY)
-                        } else if (newScale <= 1f && scale > 1f) {
-                            // ✅ 缩小到1倍: 重置位置
-                            offsetX = 0f
-                            offsetY = 0f
-                        }
-                        
-                        scale = newScale
-                    }
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = {
-                            if (scale > 1.1f) {
-                                // ✅ 双击还原
-                                scale = 1f
-                                offsetX = 0f
-                                offsetY = 0f
-                            } else {
-                                // ✅ 双击放大
-                                scale = 2.5f
-                            }
-                        }
-                    )
-                },
+                ),
             contentScale = ContentScale.Fit,
             onState = { state ->
                 when (state) {
@@ -2384,6 +2350,60 @@ fun ImageLoader(
                 }
             }
         )
+        
+        // ✅ 手势层1: 放大状态 - 拦截所有手势
+        if (scale > 1.01f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val newScale = (scale * zoom).coerceIn(1f, 5f)
+                            
+                            if (newScale > 1.01f) {
+                                // ✅ 放大状态: 处理拖拽(3倍灵敏度)
+                                val maxX = (size.width * (newScale - 1)) / 2
+                                val maxY = (size.height * (newScale - 1)) / 2
+                                
+                                offsetX = (offsetX + pan.x * 3f).coerceIn(-maxX, maxX)
+                                offsetY = (offsetY + pan.y * 3f).coerceIn(-maxY, maxY)
+                            } else if (newScale <= 1f && scale > 1f) {
+                                // ✅ 缩小到1倍: 重置位置
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                            
+                            scale = newScale
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                // ✅ 双击还原
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                        )
+                    }
+            )
+        }
+        
+        // ✅ 手势层2: 正常状态 - 仅双击放大,不拦截滑动
+        if (scale <= 1.01f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                // ✅ 双击放大
+                                scale = 2.5f
+                            }
+                        )
+                    }
+            )
+        }
         
         if (isLoading) {
             CircularProgressIndicator(color = Color.White)
