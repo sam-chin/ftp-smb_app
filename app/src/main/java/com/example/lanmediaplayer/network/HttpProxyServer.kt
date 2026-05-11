@@ -383,7 +383,7 @@ class HttpProxyServer(
     }
     
     /**
-     * ✅ 新增: 处理缩略图请求 (只读取前 256KB)
+     * ✅ 新增: 处理缩略图请求 (采样解码生成完整小图)
      */
     private suspend fun handleThumbnailRequest(
         outputStream: OutputStream,
@@ -391,9 +391,7 @@ class HttpProxyServer(
         filePath: String,
         contentType: String
     ) {
-        val thumbnailSize = 256 * 1024L  // 256KB = 262144 bytes
-        
-        log("🖼️ Thumbnail request: reading first $thumbnailSize bytes of $filePath")
+        log("🖼️ Thumbnail request: sampling and decoding $filePath")
         
         val fileStream = fileProvider.getFileStream(filePath)
         if (fileStream == null) {
@@ -402,47 +400,117 @@ class HttpProxyServer(
         }
         
         try {
-            // 发送响应头 (使用固定大小 256KB)
-            val responseHeader = buildResponseHeader(200, "OK", thumbnailSize, contentType)
+            // ✅ 步骤1: 读取前 256KB 数据到内存
+            val buffer = ByteArray(256 * 1024)  // 256KB
+            var bytesRead = 0
+            var totalRead = 0
+            
+            fileStream.use { input ->
+                while (totalRead < buffer.size) {
+                    bytesRead = input.read(buffer, totalRead, buffer.size - totalRead)
+                    if (bytesRead == -1) break
+                    totalRead += bytesRead
+                }
+            }
+            
+            if (totalRead == 0) {
+                sendError(outputStream, 404, "Empty file")
+                return
+            }
+            
+            log("🖼️ Read ${totalRead / 1024}KB, now decoding thumbnail...")
+            
+            // ✅ 步骤2: 使用 BitmapFactory 采样解码生成缩略图
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true  // 先只获取尺寸
+            }
+            android.graphics.BitmapFactory.decodeByteArray(buffer, 0, totalRead, options)
+            
+            val originalWidth = options.outWidth
+            val originalHeight = options.outHeight
+            
+            if (originalWidth <= 0 || originalHeight <= 0) {
+                log("❌ Failed to decode image bounds")
+                sendError(outputStream, 500, "Invalid image format")
+                return
+            }
+            
+            // ✅ 计算采样率 (目标缩略图宽度 300px)
+            val targetWidth = 300
+            val sampleSize = calculateSampleSize(originalWidth, originalHeight, targetWidth)
+            
+            log("🖼️ Original: ${originalWidth}x${originalHeight}, SampleSize: $sampleSize")
+            
+            // ✅ 步骤3: 使用采样率解码生成缩略图
+            val bitmapOptions = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565  // 节省内存
+            }
+            
+            val thumbnailBitmap = android.graphics.BitmapFactory.decodeByteArray(
+                buffer, 0, totalRead, bitmapOptions
+            )
+            
+            if (thumbnailBitmap == null) {
+                log("❌ Failed to decode thumbnail bitmap")
+                sendError(outputStream, 500, "Failed to generate thumbnail")
+                return
+            }
+            
+            log("✅ Thumbnail generated: ${thumbnailBitmap.width}x${thumbnailBitmap.height}")
+            
+            // ✅ 步骤4: 压缩为 JPEG 格式 (质量 80%)
+            val compressedStream = java.io.ByteArrayOutputStream()
+            thumbnailBitmap.compress(
+                android.graphics.Bitmap.CompressFormat.JPEG,
+                80,  // 质量 80%
+                compressedStream
+            )
+            thumbnailBitmap.recycle()  // 释放内存
+            
+            val thumbnailData = compressedStream.toByteArray()
+            compressedStream.close()
+            
+            log("✅ Thumbnail compressed: ${thumbnailData.size / 1024}KB")
+            
+            // ✅ 步骤5: 发送完整的缩略图数据
+            val responseHeader = buildResponseHeader(
+                200, 
+                "OK", 
+                thumbnailData.size.toLong(), 
+                "image/jpeg"  // 统一返回 JPEG 格式
+            )
             outputStream.write(responseHeader.toByteArray(Charsets.UTF_8))
             outputStream.flush()
             
-            // ✅ 只读取前 256KB
-            streamLimitedBytes(outputStream, fileStream, thumbnailSize)
+            outputStream.write(thumbnailData)
+            outputStream.flush()
             
-            log("✅ Thumbnail sent: ${thumbnailSize / 1024}KB from $filePath")
+            log("✅ Thumbnail sent successfully")
             
-        } catch (e: IOException) {
-            handleIoException(e, "Thumbnail stream")
+        } catch (e: Exception) {
+            log("❌ Thumbnail generation error: ${e.message}")
+            e.printStackTrace()
+            try {
+                sendError(outputStream, 500, "Thumbnail generation failed")
+            } catch (_: Exception) {}
         } finally {
             try { fileStream.close() } catch (_: Exception) {}
         }
     }
     
     /**
-     * ✅ 新增: 流式传输指定字节数 (用于缩略图)
+     * ✅ 计算采样率 (inSampleSize 必须是2的幂)
      */
-    private suspend fun streamLimitedBytes(outputStream: OutputStream, inputStream: InputStream, maxBytes: Long) {
-        val buffer = ByteArray(64 * 1024)  // 64KB 缓冲区
-        var totalBytesRead = 0L
-        var bytesRead: Int
+    private fun calculateSampleSize(originalWidth: Int, originalHeight: Int, targetWidth: Int): Int {
+        var sampleSize = 1
+        val maxDimension = maxOf(originalWidth, originalHeight)
         
-        inputStream.use { input ->
-            while (totalBytesRead < maxBytes) {
-                // 计算本次最多读取多少字节
-                val remaining = maxBytes - totalBytesRead
-                val readSize = minOf(buffer.size.toLong(), remaining).toInt()
-                
-                bytesRead = input.read(buffer, 0, readSize)
-                if (bytesRead == -1) break  // 文件结束
-                
-                outputStream.write(buffer, 0, bytesRead)
-                outputStream.flush()
-                totalBytesRead += bytesRead
-            }
+        while (maxDimension / (sampleSize * 2) >= targetWidth) {
+            sampleSize *= 2
         }
         
-        log("📤 Limited stream completed: $totalBytesRead bytes sent (max: $maxBytes)")
+        return sampleSize
     }
     
     /**
