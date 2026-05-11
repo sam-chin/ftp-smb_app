@@ -2306,20 +2306,13 @@ fun ImageLoader(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = contentDescription,
+        // ✅ 使用嵌套Box分离手势层和图片层
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offsetX,
-                    translationY = offsetY
-                )
                 .then(
                     if (scale > 1f) {
-                        // ✅ 放大时: 启用缩放手势,阻止HorizontalPager滑动
+                        // ✅ 放大时: 拦截所有手势
                         Modifier.pointerInput(Unit) {
                             detectTransformGestures { centroid, pan, zoom, rotation ->
                                 // ✅ 计算新的缩放比例
@@ -2352,33 +2345,55 @@ fun ImageLoader(
                             )
                         }
                     } else {
-                        // ✅ 正常状态: 添加双击放大,但不拦截滑动手势
-                        Modifier.pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    // ✅ 双击放大
-                                    scale = 2.5f
-                                }
-                            )
+                        // ✅ 正常状态: 不添加任何手势修饰符,让HorizontalPager处理
+                        Modifier
+                    }
+                )
+        ) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = contentDescription,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offsetX,
+                        translationY = offsetY
+                    ),
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    when (state) {
+                        is AsyncImagePainter.State.Loading -> isLoading = true
+                        is AsyncImagePainter.State.Success -> {
+                            isLoading = false
+                            error = null
                         }
+                        is AsyncImagePainter.State.Error -> {
+                            isLoading = false
+                            error = state.result.throwable.message
+                        }
+                        else -> {}
                     }
-                ),
-            contentScale = ContentScale.Fit,
-            onState = { state ->
-                when (state) {
-                    is AsyncImagePainter.State.Loading -> isLoading = true
-                    is AsyncImagePainter.State.Success -> {
-                        isLoading = false
-                        error = null
-                    }
-                    is AsyncImagePainter.State.Error -> {
-                        isLoading = false
-                        error = state.result.throwable.message
-                    }
-                    else -> {}
                 }
-            }
-        )
+            )
+        }
+        
+        // ✅ 正常状态下的双击放大(单独的手势层,不干扰滑动)
+        if (scale <= 1f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                // ✅ 双击放大
+                                scale = 2.5f
+                            }
+                        )
+                    }
+            )
+        }
         
         if (isLoading) {
             CircularProgressIndicator(color = Color.White)
