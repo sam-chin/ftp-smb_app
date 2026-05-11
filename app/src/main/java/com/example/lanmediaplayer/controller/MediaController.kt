@@ -196,13 +196,13 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             return@launch
                         }
                         
-                        log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex} (attempt 1/3): $path")
+                        log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex}: $path")
                         
                         var loaded = false
                         var lastError: Exception? = null
                         
-                        // ✅ 重试机制：最多尝试3次
-                        for (attempt in 1..3) {
+                        // ✅ 强化重试机制：最多尝试5次,确保每张图片都能缓存成功
+                        for (attempt in 1..5) {
                             try {
                                 val fileData = when (imageFile.protocol) {
                                     is NetworkProtocol.FTP -> {
@@ -288,8 +288,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 val errorMsg = e.message ?: "null message"
                                 val errorCause = e.cause?.message ?: "no cause"
                                 val errorClass = e.javaClass.simpleName
-                                log("[Controller] ⚠️ Attempt $attempt failed for image ${i - startIndex}: [$errorClass] $errorMsg (cause: $errorCause)")
-                                e.printStackTrace()  // ✅ 打印完整堆栈
+                                log("[Controller] ⚠️ Attempt $attempt/5 failed for image ${i - startIndex}: [$errorClass] $errorMsg (cause: $errorCause)")
                                 
                                 // ✅ 如果是协程取消异常，立即退出
                                 if (e is kotlinx.coroutines.CancellationException) {
@@ -297,16 +296,18 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     throw e  // 重新抛出取消异常
                                 }
                                 
-                                // ✅ 快速失败策略:只重试1次,减少等待时间
-                                if (attempt < 2) {
-                                    kotlinx.coroutines.delay(200)  // ✅ 重试间隔200ms,快速失败
+                                // ✅ 递增延迟重试策略: 200ms → 400ms → 800ms → 1600ms
+                                if (attempt < 5) {
+                                    val delayMs = 200 * (1 shl (attempt - 1))  // 指数退避
+                                    log("[Controller] ⏳ Retrying in ${delayMs}ms...")
+                                    kotlinx.coroutines.delay(delayMs.toLong())
                                 }
                             }
                         }
                         
                         if (!loaded) {
                             failCount++
-                            log("[Controller] ❌ Error preloading image ${i - startIndex}: ${lastError?.message}")
+                            log("[Controller] ❌ Failed to preload image ${i - startIndex} after 5 attempts: ${lastError?.message}")
                         }
                     } finally {
                         semaphore.release()
@@ -1323,7 +1324,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ==================== 智能预加载 ====================
     
     /**
-     * 智能预加载:扩大预加载范围至±15张,确保流畅切换
+     * 智能预加载:扩大预加载范围至±20张,确保零等待切换
      */
     suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
         if (allImages.isEmpty()) return
@@ -1341,14 +1342,14 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
         
         // ✅ 检查是否已经预加载过这个中心点附近(避免重复)
-        if (Math.abs(currentIndex - lastSmartPreloadCenter) < 20) {
-            log("[Controller] ✅ Smart preload range already loaded (within 20), skipping")
+        if (Math.abs(currentIndex - lastSmartPreloadCenter) < 15) {
+            log("[Controller] ✅ Smart preload range already loaded (within 15), skipping")
             return
         }
         
-        // ✅ 大幅扩大预加载范围:前后各15张(总共31张)
-        val start = maxOf(0, currentIndex - 15)
-        val end = minOf(allImages.size - 1, currentIndex + 15)
+        // ✅ 大幅扩大预加载范围:前后各20张(总共41张),确保零等待
+        val start = maxOf(0, currentIndex - 20)
+        val end = minOf(allImages.size - 1, currentIndex + 20)
         
         log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex, range: ${end - start + 1})")
         
@@ -1361,8 +1362,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 val maxConcurrent = if (isFtp) 1 else 2
                 val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
                 
+                // ✅ 优先加载当前图片附近的图片(按距离排序)
+                val sortedIndices = (start..end).sortedBy { Math.abs(it - currentIndex) }
+                
                 // ✅ 启动所有预加载任务并等待完成
-                val jobs = (start..end).map { index ->
+                val jobs = sortedIndices.map { index ->
                     async {
                         semaphore.acquire()
                         try {
@@ -1386,7 +1390,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     }
     
     /**
-     * 预加载单张图片
+     * 预加载单张图片(带重试机制)
      */
     private suspend fun preloadSingleImage(imageFile: MediaFile) {
         val path = imageFile.path
@@ -1396,51 +1400,72 @@ class MediaController(private val context: Context, private val logCallback: ((S
             return
         }
         
-        var inputStream: java.io.InputStream? = null
-        try {
-            // ✅ 获取文件流
-            inputStream = when (imageFile.protocol) {
-                is NetworkProtocol.FTP -> {
-                    // ✅ FTP 路径处理：确保以 / 开头
-                    val ftpPath = if (path.startsWith("/")) path else "/$path"
-                    log("[Controller] 📡 FTP preload: $ftpPath")
-                    ftpClient?.getFileStream(ftpPath)
-                }
-                is NetworkProtocol.SMB -> {
-                    // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
-                    log("[Controller] 📡 SMB preload: $path")
-                    smbClient?.getFileStream(path)
-                }
-            }
-            
-            if (inputStream != null) {
-                // ✅ 读取数据
-                val fileData = inputStream.readBytes()
-                
-                if (fileData.isNotEmpty()) {
-                    // ✅ LRU 缓存管理(最多100张或200MB,大幅提升缓存容量)
-                    while (localImageCache.size >= 100 || currentLocalCacheSize + fileData.size > maxLocalCacheSize) {
-                        val oldestKey = localImageCache.keys.first()
-                        val removedSize = localImageCache.remove(oldestKey)?.size ?: 0
-                        currentLocalCacheSize -= removedSize
-                        log("[Controller] 🗑️ Evicted oldest: $oldestKey (${removedSize / 1024}KB)")
-                    }
-                    
-                    localImageCache[path] = fileData
-                    currentLocalCacheSize += fileData.size
-                    log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB, total: ${localImageCache.size} images, ${currentLocalCacheSize / 1024 / 1024}MB)")
-                }
-            }
-        } catch (e: Exception) {
-            log("[Controller] ⚠️ Preload failed: ${e.message}")
-            e.printStackTrace()
-        } finally {
-            // ✅ 确保关闭 InputStream，防止资源泄漏
+        // ✅ 强化重试机制：最多尝试5次,确保图片缓存成功
+        var loaded = false
+        for (attempt in 1..5) {
+            var inputStream: java.io.InputStream? = null
             try {
-                inputStream?.close()
+                // ✅ 获取文件流
+                inputStream = when (imageFile.protocol) {
+                    is NetworkProtocol.FTP -> {
+                        // ✅ FTP 路径处理：确保以 / 开头
+                        val ftpPath = if (path.startsWith("/")) path else "/$path"
+                        log("[Controller] 📡 FTP preload: $ftpPath (attempt $attempt/5)")
+                        ftpClient?.getFileStream(ftpPath)
+                    }
+                    is NetworkProtocol.SMB -> {
+                        // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
+                        log("[Controller] 📡 SMB preload: $path (attempt $attempt/5)")
+                        smbClient?.getFileStream(path)
+                    }
+                }
+                
+                if (inputStream != null) {
+                    // ✅ 读取数据
+                    val fileData = inputStream.readBytes()
+                    
+                    if (fileData.isNotEmpty()) {
+                        // ✅ LRU 缓存管理(最多100张或200MB,大幅提升缓存容量)
+                        while (localImageCache.size >= 100 || currentLocalCacheSize + fileData.size > maxLocalCacheSize) {
+                            val oldestKey = localImageCache.keys.first()
+                            val removedSize = localImageCache.remove(oldestKey)?.size ?: 0
+                            currentLocalCacheSize -= removedSize
+                            log("[Controller] 🗑️ Evicted oldest: $oldestKey (${removedSize / 1024}KB)")
+                        }
+                        
+                        localImageCache[path] = fileData
+                        currentLocalCacheSize += fileData.size
+                        loaded = true
+                        log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB, total: ${localImageCache.size} images, ${currentLocalCacheSize / 1024 / 1024}MB)")
+                        break
+                    }
+                }
             } catch (e: Exception) {
-                log("[Controller] ⚠️ Error closing stream: ${e.message}")
+                log("[Controller] ⚠️ Attempt $attempt/5 failed for $path: ${e.message}")
+                
+                // ✅ 如果是协程取消异常，立即退出
+                if (e is kotlinx.coroutines.CancellationException) {
+                    throw e
+                }
+                
+                // ✅ 递增延迟重试策略: 200ms → 400ms → 800ms → 1600ms
+                if (attempt < 5) {
+                    val delayMs = 200 * (1 shl (attempt - 1))  // 指数退避
+                    log("[Controller] ⏳ Retrying in ${delayMs}ms...")
+                    kotlinx.coroutines.delay(delayMs.toLong())
+                }
+            } finally {
+                // ✅ 确保关闭 InputStream，防止资源泄漏
+                try {
+                    inputStream?.close()
+                } catch (e: Exception) {
+                    log("[Controller] ⚠️ Error closing stream: ${e.message}")
+                }
             }
+        }
+        
+        if (!loaded) {
+            log("[Controller] ❌ Failed to preload $path after 5 attempts")
         }
     }
     

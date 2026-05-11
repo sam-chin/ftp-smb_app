@@ -1738,16 +1738,16 @@ fun ImageViewerScreen(
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 核心修复:每隔10张触发smartPreload(±15张范围),避免频繁触发
-        if (currentPage % 10 == 0) {
+        // ✅ 核心修复:每隔5张触发smartPreload(±20张范围),确保零等待
+        if (currentPage % 5 == 0) {
             launch {
                 mediaController.smartPreload(currentPage, imageFiles)
             }
         }
         
-        // ✅ 同时保留批量预加载作为补充(每批30张,在中间位置触发下一批)
+        // ✅ 同时保留批量预加载作为补充(每批30张,在第10张时触发下一批,更早触发)
         val batchSize = 30
-        val triggerOffset = 15  // 在每批的第15张时触发下一批
+        val triggerOffset = 10  // 在每批的第10张时触发下一批(更早触发)
         
         val currentBatch = currentPage / batchSize
         val positionInBatch = currentPage % batchSize
