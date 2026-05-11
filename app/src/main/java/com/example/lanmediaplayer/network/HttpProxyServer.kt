@@ -119,22 +119,6 @@ class HttpProxyServer(
     }
     
     /**
-     * ✅ 新增: 生成缩略图 URL (只读取前 256KB)
-     */
-    fun getThumbnailUrl(filePath: String): String {
-        val encodedPath = PathManager.encodeForHttp(filePath)
-        
-        val host = if (allowExternalConnections) {
-            getLocalIpAddress()?.hostAddress ?: "127.0.0.1"
-        } else {
-            "127.0.0.1"
-        }
-        
-        // ✅ 添加 thumbnail=1 参数标识缩略图请求
-        return "http://$host:$currentPort/$encodedPath?thumbnail=1"
-    }
-    
-    /**
      * 检查是否允许外部连接
      */
     fun isAllowingExternalConnections(): Boolean = allowExternalConnections
@@ -180,23 +164,8 @@ class HttpProxyServer(
                 }
                 
                 val method = parts[0]
-                val fullPath = parts[1].substring(1)  // 去掉前导 /
-                
-                // ✅ 解析 URL 参数 (如 ?thumbnail=1)
-                val (encodedPath, isThumbnail) = if (fullPath.contains("?")) {
-                    val pathAndQuery = fullPath.split("?", limit = 2)
-                    val queryParams = pathAndQuery.getOrNull(1) ?: ""
-                    val isThumb = queryParams.contains("thumbnail=1")
-                    Pair(pathAndQuery[0], isThumb)
-                } else {
-                    Pair(fullPath, false)
-                }
-                
+                val encodedPath = parts[1].substring(1)  // 去掉前导 /
                 val filePath = PathManager.decodeFromHttp(encodedPath)
-                
-                if (isThumbnail) {
-                    log("🖼️ Thumbnail request: $filePath")
-                }
                 
                 // 读取 Headers
                 val headers = readHeaders(reader)
@@ -215,8 +184,7 @@ class HttpProxyServer(
                 if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                     handleRangeRequest(socket.getOutputStream(), fileProvider, filePath, fileSize, rangeHeader, contentType)
                 } else {
-                    // ✅ 如果是缩略图请求,传递 isThumbnail=true
-                    handleFullRequest(socket.getOutputStream(), fileProvider, filePath, fileSize, contentType, method == "HEAD", isThumbnail)
+                    handleFullRequest(socket.getOutputStream(), fileProvider, filePath, fileSize, contentType, method == "HEAD")
                 }
                 
             } catch (e: Exception) {
@@ -252,19 +220,11 @@ class HttpProxyServer(
         filePath: String,
         fileSize: Long,
         contentType: String,
-        isHead: Boolean,
-        isThumbnail: Boolean = false  // ✅ 新增参数: 是否为缩略图请求
+        isHead: Boolean
     ) {
         // HEAD 请求只返回头信息
         if (isHead) {
             sendHeadersOnly(outputStream, 200, fileSize, contentType)
-            return
-        }
-        
-        // ✅ 缩略图模式: 直接流式读取前 256KB,不等待缓存
-        if (isThumbnail) {
-            log("🖼️ Thumbnail mode: reading first 256KB of $filePath")
-            handleThumbnailRequest(outputStream, fileProvider, filePath, contentType)
             return
         }
         
@@ -380,149 +340,6 @@ class HttpProxyServer(
         } finally {
             try { fileStream.close() } catch (_: Exception) {}
         }
-    }
-    
-    /**
-     * ✅ 新增: 处理缩略图请求 (流式采样解码,自动停止)
-     */
-    private suspend fun handleThumbnailRequest(
-        outputStream: OutputStream,
-        fileProvider: FileProvider,
-        filePath: String,
-        contentType: String
-    ) {
-        log("🖼️ Thumbnail request: streaming decode $filePath")
-        
-        val fileStream = fileProvider.getFileStream(filePath)
-        if (fileStream == null) {
-            sendError(outputStream, 404, "File Not Found")
-            return
-        }
-        
-        try {
-            // ✅ 步骤1: 第一次流式解码 - 只获取尺寸 (inJustDecodeBounds)
-            log("🖼️ Step 1: Getting image dimensions...")
-            
-            val boundsOptions = android.graphics.BitmapFactory.Options().apply {
-                inJustDecodeBounds = true  // 只解析头部,不解码像素
-            }
-            
-            // 使用流式解码,会自动在获取尺寸后停止读取
-            android.graphics.BitmapFactory.decodeStream(fileStream, null, boundsOptions)
-            
-            val originalWidth = boundsOptions.outWidth
-            val originalHeight = boundsOptions.outHeight
-            
-            if (originalWidth <= 0 || originalHeight <= 0) {
-                log("❌ Failed to get image dimensions")
-                sendError(outputStream, 500, "Invalid image format")
-                return
-            }
-            
-            log("✅ Image size: ${originalWidth}x${originalHeight}")
-            
-            // ✅ 步骤2: 计算采样率 (目标缩略图宽度 300px)
-            val targetWidth = 300
-            val sampleSize = calculateSampleSize(originalWidth, originalHeight, targetWidth)
-            
-            log("🖼️ SampleSize: $sampleSize (target: ${targetWidth}px)")
-            
-            // ✅ 步骤3: 关闭旧流,重新打开新流进行第二次解码
-            // 注意: decodeStream会消耗流,所以需要重新打开
-            fileStream.close()
-            
-            val decodeStream = fileProvider.getFileStream(filePath)
-            if (decodeStream == null) {
-                sendError(outputStream, 404, "File Not Found")
-                return
-            }
-            
-            log("🖼️ Step 2: Decoding thumbnail with sampleSize=$sampleSize...")
-            
-            // ✅ 步骤4: 第二次流式解码 - 生成缩略图
-            val decodeOptions = android.graphics.BitmapFactory.Options().apply {
-                inSampleSize = sampleSize  // 采样率
-                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565  // 节省内存
-            }
-            
-            // 🎯 关键: decodeStream会边读边解码,一旦生成完整Bitmap就自动停止读取!
-            val thumbnailBitmap = android.graphics.BitmapFactory.decodeStream(
-                decodeStream, 
-                null, 
-                decodeOptions
-            )
-            
-            // ✅ 立即关闭流,停止网络读取
-            decodeStream.close()
-            
-            if (thumbnailBitmap == null) {
-                log("❌ Failed to decode thumbnail")
-                sendError(outputStream, 500, "Failed to generate thumbnail")
-                return
-            }
-            
-            log("✅ Thumbnail decoded: ${thumbnailBitmap.width}x${thumbnailBitmap.height}")
-            
-            // ✅ 步骤5: 压缩并发送缩略图
-            sendCompressedThumbnail(outputStream, thumbnailBitmap)
-            
-        } catch (e: Exception) {
-            log("❌ Thumbnail generation error: ${e.message}")
-            e.printStackTrace()
-            try {
-                sendError(outputStream, 500, "Thumbnail generation failed")
-            } catch (_: Exception) {}
-        } finally {
-            try { fileStream.close() } catch (_: Exception) {}
-        }
-    }
-    
-    /**
-     * ✅ 辅助方法: 压缩并发送缩略图
-     */
-    private fun sendCompressedThumbnail(outputStream: OutputStream, bitmap: android.graphics.Bitmap) {
-        // 压缩为 JPEG 格式 (质量 80%)
-        val compressedStream = java.io.ByteArrayOutputStream()
-        bitmap.compress(
-            android.graphics.Bitmap.CompressFormat.JPEG,
-            80,  // 质量 80%
-            compressedStream
-        )
-        bitmap.recycle()  // 释放内存
-        
-        val thumbnailData = compressedStream.toByteArray()
-        compressedStream.close()
-        
-        log("✅ Thumbnail compressed: ${thumbnailData.size / 1024}KB")
-        
-        // 发送完整的缩略图数据
-        val responseHeader = buildResponseHeader(
-            200, 
-            "OK", 
-            thumbnailData.size.toLong(), 
-            "image/jpeg"  // 统一返回 JPEG 格式
-        )
-        outputStream.write(responseHeader.toByteArray(Charsets.UTF_8))
-        outputStream.flush()
-        
-        outputStream.write(thumbnailData)
-        outputStream.flush()
-        
-        log("✅ Thumbnail sent successfully")
-    }
-    
-    /**
-     * ✅ 计算采样率 (inSampleSize 必须是2的幂)
-     */
-    private fun calculateSampleSize(originalWidth: Int, originalHeight: Int, targetWidth: Int): Int {
-        var sampleSize = 1
-        val maxDimension = maxOf(originalWidth, originalHeight)
-        
-        while (maxDimension / (sampleSize * 2) >= targetWidth) {
-            sampleSize *= 2
-        }
-        
-        return sampleSize
     }
     
     /**

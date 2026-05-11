@@ -1114,12 +1114,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
         return localProxy!!.getUrl(path)
     }
     
-    // ✅ 新增: 获取本地缩略图URL（只读取前256KB）
-    fun getLocalThumbnailUrl(path: String): String {
-        ensureLocalProxy()
-        return localProxy!!.getThumbnailUrl(path)
-    }
-    
     // ✅ 获取DLNA投屏URL（局域网IP）
     suspend fun getDlnaImageUrl(imageFile: MediaFile, callback: MediaCallback): String? {
         // 确保连接有效
@@ -1132,28 +1126,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
         // 启动 DLNA 代理
         ensureDlnaProxy()
         return dlnaProxy?.getUrl(imageFile.path)
-    }
-    
-    /**
-     * ✅ 新增: 获取缩略图 URL (只读取前 256KB)
-     * @param imageFile 图片文件
-     * @return HTTP 代理 URL,失败返回 null
-     */
-    suspend fun getThumbnailUrl(imageFile: MediaFile, callback: MediaCallback): String? {
-        // 确保连接有效
-        if (!ensureConnection(imageFile.protocol)) {
-            log("❌ Connection not available for thumbnail")
-            callback.onError("Connection lost. Please reconnect.")
-            return null
-        }
-        
-        // 启动本地预览代理
-        ensureLocalProxy()
-        
-        // ✅ 使用 HttpProxyServer 的 getThumbnailUrl 方法 (添加 ?thumbnail=1 参数)
-        val thumbnailUrl = localProxy?.getThumbnailUrl(imageFile.path)
-        log("🖼️ Thumbnail URL generated: $thumbnailUrl")
-        return thumbnailUrl
     }
     
     fun getVideoUrl(): String {
