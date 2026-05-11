@@ -1386,10 +1386,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     // ✅ 智能动态延迟: 根据下载速度自动调整
                     if (index < end && elapsedMs >= 0) {
                         // 计算下载速度(KB/s)
-                        val speedKBps = if (elapsedMs > 0) (fileSizeKB.toDouble()) / (elapsedMs / 1000.0) else 0
+                        val speedKBps = if (elapsedMs > 0) (fileSizeKB.toDouble()) / (elapsedMs / 1000.0) else 0.0
                         
                         // 根据速度动态计算延迟
-                        val delayMs = when {
+                        val delayMs: Int = when {
                             speedKBps > 500 -> 20   // 超高速: 几乎不等待
                             speedKBps > 200 -> 50   // 高速: 短暂等待
                             speedKBps > 100 -> 100  // 中速: 正常等待
