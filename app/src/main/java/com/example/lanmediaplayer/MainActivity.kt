@@ -1733,18 +1733,18 @@ fun ImageViewerScreen(
         addLog("[ImageViewer] === Initial preload will be triggered by LaunchedEffect ===")
     }
     
-    // ✅ 监听页面变化,智能预加载(每3张触发一次,提高频率)
+    // ✅ 监听页面变化,智能预加载(每2张触发一次,提高频率)
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 核心逻辑: 每3张触发一次预加载,每次预加载后面20张
-        // 第0张 → 预加载第1-20张
-        // 第3张 → 预加载第4-23张
-        // 第6张 → 预加载第7-26张
-        // 第9张 → 预加载第10-29张
-        if (currentPage % 3 == 0) {
+        // ✅ 核心逻辑: 每2张触发一次预加载,每次预加载后面5张
+        // 第0张 → 预加载第1-5张
+        // 第2张 → 预加载第3-7张
+        // 第4张 → 预加载第5-9张
+        // 第6张 → 预加载第7-11张
+        if (currentPage % 2 == 0) {
             addLog("[ImageViewer] 🔄 Triggering smartPreload at page $currentPage")
             launch {
                 mediaController.smartPreload(currentPage, imageFiles)

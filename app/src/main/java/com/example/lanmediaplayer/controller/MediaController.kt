@@ -1353,9 +1353,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
         preloadJob?.cancel()
         log("[Controller] 🔄 Cancelling previous preload task (if any)")
         
-        // ✅ 计算预加载范围: 当前图片后面的20张(扩大范围,减少miss)
+        // ✅ 计算预加载范围: 当前图片后面的5张(缩小范围,加快完成)
         val start = currentIndex + 1
-        val end = minOf(allImages.size - 1, currentIndex + 20)
+        val end = minOf(allImages.size - 1, currentIndex + 5)
         
         if (start > end) {
             log("[Controller] ✅ No images to preload (at end of list)")
