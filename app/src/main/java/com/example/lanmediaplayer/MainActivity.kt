@@ -2317,45 +2317,52 @@ fun ImageLoader(
                     translationX = offsetX,
                     translationY = offsetY
                 )
-                .pointerInput(scale) {
-                    // ✅ 只有在放大状态下才启用缩放手势
+                .then(
                     if (scale > 1f) {
-                        detectTransformGestures { centroid, pan, zoom, rotation ->
-                            // ✅ 计算新的缩放比例
-                            val newScale = (scale * zoom).coerceIn(1f, 5f)
-                            
-                            if (newScale > 1f) {
-                                // ✅ 缩放时调整偏移,保持图片在视野内
-                                val maxX = (size.width * (newScale - 1)) / 2
-                                val maxY = (size.height * (newScale - 1)) / 2
+                        // ✅ 放大时: 启用缩放手势,阻止HorizontalPager滑动
+                        Modifier.pointerInput(Unit) {
+                            detectTransformGestures { centroid, pan, zoom, rotation ->
+                                // ✅ 计算新的缩放比例
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
                                 
-                                // ✅ 提高拖动灵敏度: 使用3倍系数
-                                offsetX = (offsetX + pan.x * 3f).coerceIn(-maxX, maxX)
-                                offsetY = (offsetY + pan.y * 3f).coerceIn(-maxY, maxY)
-                            } else {
-                                // ✅ 缩放到1倍时重置位置
-                                offsetX = 0f
-                                offsetY = 0f
+                                if (newScale > 1f) {
+                                    // ✅ 缩放时调整偏移,保持图片在视野内
+                                    val maxX = (size.width * (newScale - 1)) / 2
+                                    val maxY = (size.height * (newScale - 1)) / 2
+                                    
+                                    // ✅ 提高拖动灵敏度: 使用3倍系数
+                                    offsetX = (offsetX + pan.x * 3f).coerceIn(-maxX, maxX)
+                                    offsetY = (offsetY + pan.y * 3f).coerceIn(-maxY, maxY)
+                                } else {
+                                    // ✅ 缩放到1倍时重置位置
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
+                                
+                                scale = newScale
                             }
-                            
-                            scale = newScale
+                        }.pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    // ✅ 双击还原
+                                    scale = 1f
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
+                            )
+                        }
+                    } else {
+                        // ✅ 正常状态: 添加双击放大,但不拦截滑动手势
+                        Modifier.pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    // ✅ 双击放大
+                                    scale = 2.5f
+                                }
+                            )
                         }
                     }
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = {
-                            // ✅ 双击切换缩放/还原
-                            if (scale > 1.1f) {
-                                scale = 1f
-                                offsetX = 0f
-                                offsetY = 0f
-                            } else {
-                                scale = 2.5f
-                            }
-                        }
-                    )
-                },
+                ),
             contentScale = ContentScale.Fit,
             onState = { state ->
                 when (state) {
