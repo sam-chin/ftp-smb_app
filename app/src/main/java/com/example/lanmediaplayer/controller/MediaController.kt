@@ -1400,7 +1400,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 var failCount = 0
                 var skipCount = 0
                 
-                // ✅ 按优先级顺序加载(带智能延迟)
+                // ✅ 按顺序加载(带智能延迟,小图快大图慢)
                 for ((idx, index) in sortedIndices.withIndex()) {
                     // ✅ 检查协程是否已取消
                     if (coroutineContext[Job]?.isActive != true) {
@@ -1411,15 +1411,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     val imageFile = allImages[index]
                     val path = imageFile.path
                     val fileSizeKB = imageFile.size / 1024
+                    val isLargeImage = imageFile.size > 1024 * 1024  // >1MB为大图
                     
-                    // ✅ 再次检查是否已缓存(可能在等待期间被其他任务加载了)
+                    // ✅ 再次检查是否已缓存
                     if (localImageCache.containsKey(path)) {
                         skipCount++
                         log("[Controller] ⏭️ [${idx + 1}/${sortedIndices.size}] Skip (cached): image_$index (${fileSizeKB}KB)")
                         continue
                     }
                     
-                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] Loading: image_$index (${fileSizeKB}KB)")
+                    val sizeLabel = if (isLargeImage) "LARGE" else "small"
+                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] [$sizeLabel] Loading: image_$index (${fileSizeKB}KB)")
                     
                     // ✅ 调用带重试机制的预加载函数,获取实际耗时
                     val startTime = System.currentTimeMillis()
@@ -1435,21 +1437,30 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         log("[Controller] ❌ [${idx + 1}/${sortedIndices.size}] Failed: image_$index (after ${endTime - startTime}ms)")
                     }
                     
-                    // ✅ 智能动态延迟: 根据下载速度自动调整
+                    // ✅ 智能动态延迟: 小图短延迟,大图长延迟
                     if (idx < sortedIndices.size - 1 && elapsedMs >= 0) {
                         // 计算下载速度(KB/s)
                         val speedKBps = if (elapsedMs > 0) (fileSizeKB.toDouble()) / (elapsedMs / 1000.0) else 0.0
                         
-                        // 根据速度动态计算延迟(缩短等待时间,加快预加载)
-                        val delayMs: Int = when {
-                            speedKBps > 500 -> 10   // 超高速: 几乎不等待
-                            speedKBps > 200 -> 30   // 高速: 短暂等待
-                            speedKBps > 100 -> 50   // 中速: 正常等待
-                            speedKBps > 50 -> 80    // 低速: 稍长等待
-                            else -> 100             // 极慢: 充分休息
+                        // 根据图片大小和速度动态计算延迟
+                        val delayMs: Int = if (isLargeImage) {
+                            // 大图: 较长延迟,保护SMB服务器
+                            when {
+                                speedKBps > 500 -> 50
+                                speedKBps > 200 -> 100
+                                else -> 150
+                            }
+                        } else {
+                            // 小图: 短延迟,快速通过
+                            when {
+                                speedKBps > 500 -> 10
+                                speedKBps > 200 -> 20
+                                else -> 30
+                            }
                         }
                         
-                        log("[Controller] ⏳ Speed: ${String.format("%.1f", speedKBps)}KB/s, waiting ${delayMs}ms before next...")
+                        val sizeTag = if (isLargeImage) "[LARGE]" else "[small]"
+                        log("[Controller] ⏳ $sizeTag Speed: ${String.format("%.1f", speedKBps)}KB/s, waiting ${delayMs}ms...")
                         kotlinx.coroutines.delay(delayMs.toLong())
                     }
                 }
