@@ -178,7 +178,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             withContext(Dispatchers.IO) {
                 for (i in startIndex until endIndex) {
                     // ✅ 检查协程是否已取消
-                    if (!isActive) {
+                    if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled at image $i, stopping...")
                         break
                     }
@@ -303,7 +303,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     kotlinx.coroutines.delay(delayMs.toLong())
                                     
                                     // ✅ 延迟后再次检查取消状态
-                                    if (!isActive) {
+                                    if (coroutineContext[Job]?.isActive != true) {
                                         log("[Controller] ⚠️ Preload cancelled during retry delay for image $i")
                                         break
                                     }
@@ -1376,7 +1376,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             withContext(Dispatchers.IO) {
                 for (index in start..end) {
                     // ✅ 检查协程是否已取消
-                    if (!isActive) {
+                    if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
                         break
                     }
@@ -1507,7 +1507,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     kotlinx.coroutines.delay(delayMs.toLong())
                     
                     // ✅ 延迟后再次检查取消状态
-                    if (!isActive) {
+                    if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled during retry delay for $path")
                         return -1L
                     }
