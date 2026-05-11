@@ -1733,22 +1733,35 @@ fun ImageViewerScreen(
         addLog("[ImageViewer] === Initial preload will be triggered by LaunchedEffect ===")
     }
     
-    // ✅ 监听页面变化,智能预加载(每2张触发一次,提高频率)
+    // ✅ 监听页面变化,智能预加载(带防抖,避免快速滑动时频繁取消)
+    var lastPreloadTime = 0L
+    var preloadDebounceJob: Job? = null
+    
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
+        val currentTime = System.currentTimeMillis()
         
-        // ✅ 核心逻辑: 每2张触发一次预加载,每次预加载后面15张
-        // 第0张 → 预加载第1-15张
-        // 第2张 → 预加载第3-17张
-        // 第4张 → 预加载第5-19张
-        // 第6张 → 预加载第7-21张
-        if (currentPage % 2 == 0) {
-            addLog("[ImageViewer] 🔄 Triggering smartPreload at page $currentPage")
-            launch {
-                mediaController.smartPreload(currentPage, imageFiles)
+        // ✅ 防抖策略: 如果距离上次预加载<500ms,延迟触发
+        val timeSinceLastPreload = currentTime - lastPreloadTime
+        
+        // 取消之前的延迟任务
+        preloadDebounceJob?.cancel()
+        
+        if (timeSinceLastPreload < 500) {
+            // 快速滑动: 延迟500ms再触发,等待用户停止滑动
+            preloadDebounceJob = launch {
+                delay(500)  // 等待500ms
+                if (pagerState.currentPage == currentPage) {  // 确认用户停在这个位置
+                    mediaController.smartPreload(currentPage, imageFiles)
+                    lastPreloadTime = System.currentTimeMillis()
+                }
             }
+        } else {
+            // 正常滑动: 立即触发
+            mediaController.smartPreload(currentPage, imageFiles)
+            lastPreloadTime = currentTime
         }
     }
     
