@@ -383,7 +383,7 @@ class HttpProxyServer(
     }
     
     /**
-     * ✅ 新增: 处理缩略图请求 (采样解码生成完整小图)
+     * ✅ 新增: 处理缩略图请求 (流式采样解码,自动停止)
      */
     private suspend fun handleThumbnailRequest(
         outputStream: OutputStream,
@@ -391,7 +391,7 @@ class HttpProxyServer(
         filePath: String,
         contentType: String
     ) {
-        log("🖼️ Thumbnail request: sampling and decoding $filePath")
+        log("🖼️ Thumbnail request: streaming decode $filePath")
         
         val fileStream = fileProvider.getFileStream(filePath)
         if (fileStream == null) {
@@ -400,93 +400,71 @@ class HttpProxyServer(
         }
         
         try {
-            // ✅ 步骤1: 读取前 256KB 数据到内存
-            val buffer = ByteArray(256 * 1024)  // 256KB
-            var bytesRead = 0
-            var totalRead = 0
+            // ✅ 步骤1: 第一次流式解码 - 只获取尺寸 (inJustDecodeBounds)
+            log("🖼️ Step 1: Getting image dimensions...")
             
-            fileStream.use { input ->
-                while (totalRead < buffer.size) {
-                    bytesRead = input.read(buffer, totalRead, buffer.size - totalRead)
-                    if (bytesRead == -1) break
-                    totalRead += bytesRead
-                }
+            val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true  // 只解析头部,不解码像素
             }
             
-            if (totalRead == 0) {
-                sendError(outputStream, 404, "Empty file")
-                return
-            }
+            // 使用流式解码,会自动在获取尺寸后停止读取
+            android.graphics.BitmapFactory.decodeStream(fileStream, null, boundsOptions)
             
-            log("🖼️ Read ${totalRead / 1024}KB, now decoding thumbnail...")
-            
-            // ✅ 步骤2: 使用 BitmapFactory 采样解码生成缩略图
-            val options = android.graphics.BitmapFactory.Options().apply {
-                inJustDecodeBounds = true  // 先只获取尺寸
-            }
-            android.graphics.BitmapFactory.decodeByteArray(buffer, 0, totalRead, options)
-            
-            val originalWidth = options.outWidth
-            val originalHeight = options.outHeight
+            val originalWidth = boundsOptions.outWidth
+            val originalHeight = boundsOptions.outHeight
             
             if (originalWidth <= 0 || originalHeight <= 0) {
-                log("❌ Failed to decode image bounds")
+                log("❌ Failed to get image dimensions")
                 sendError(outputStream, 500, "Invalid image format")
                 return
             }
             
-            // ✅ 计算采样率 (目标缩略图宽度 300px)
+            log("✅ Image size: ${originalWidth}x${originalHeight}")
+            
+            // ✅ 步骤2: 计算采样率 (目标缩略图宽度 300px)
             val targetWidth = 300
             val sampleSize = calculateSampleSize(originalWidth, originalHeight, targetWidth)
             
-            log("🖼️ Original: ${originalWidth}x${originalHeight}, SampleSize: $sampleSize")
+            log("🖼️ SampleSize: $sampleSize (target: ${targetWidth}px)")
             
-            // ✅ 步骤3: 使用采样率解码生成缩略图
-            val bitmapOptions = android.graphics.BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
+            // ✅ 步骤3: 关闭旧流,重新打开新流进行第二次解码
+            // 注意: decodeStream会消耗流,所以需要重新打开
+            fileStream.close()
+            
+            val decodeStream = fileProvider.getFileStream(filePath)
+            if (decodeStream == null) {
+                sendError(outputStream, 404, "File Not Found")
+                return
+            }
+            
+            log("🖼️ Step 2: Decoding thumbnail with sampleSize=$sampleSize...")
+            
+            // ✅ 步骤4: 第二次流式解码 - 生成缩略图
+            val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sampleSize  // 采样率
                 inPreferredConfig = android.graphics.Bitmap.Config.RGB_565  // 节省内存
             }
             
-            val thumbnailBitmap = android.graphics.BitmapFactory.decodeByteArray(
-                buffer, 0, totalRead, bitmapOptions
+            // 🎯 关键: decodeStream会边读边解码,一旦生成完整Bitmap就自动停止读取!
+            val thumbnailBitmap = android.graphics.BitmapFactory.decodeStream(
+                decodeStream, 
+                null, 
+                decodeOptions
             )
             
+            // ✅ 立即关闭流,停止网络读取
+            decodeStream.close()
+            
             if (thumbnailBitmap == null) {
-                log("❌ Failed to decode thumbnail bitmap")
+                log("❌ Failed to decode thumbnail")
                 sendError(outputStream, 500, "Failed to generate thumbnail")
                 return
             }
             
-            log("✅ Thumbnail generated: ${thumbnailBitmap.width}x${thumbnailBitmap.height}")
+            log("✅ Thumbnail decoded: ${thumbnailBitmap.width}x${thumbnailBitmap.height}")
             
-            // ✅ 步骤4: 压缩为 JPEG 格式 (质量 80%)
-            val compressedStream = java.io.ByteArrayOutputStream()
-            thumbnailBitmap.compress(
-                android.graphics.Bitmap.CompressFormat.JPEG,
-                80,  // 质量 80%
-                compressedStream
-            )
-            thumbnailBitmap.recycle()  // 释放内存
-            
-            val thumbnailData = compressedStream.toByteArray()
-            compressedStream.close()
-            
-            log("✅ Thumbnail compressed: ${thumbnailData.size / 1024}KB")
-            
-            // ✅ 步骤5: 发送完整的缩略图数据
-            val responseHeader = buildResponseHeader(
-                200, 
-                "OK", 
-                thumbnailData.size.toLong(), 
-                "image/jpeg"  // 统一返回 JPEG 格式
-            )
-            outputStream.write(responseHeader.toByteArray(Charsets.UTF_8))
-            outputStream.flush()
-            
-            outputStream.write(thumbnailData)
-            outputStream.flush()
-            
-            log("✅ Thumbnail sent successfully")
+            // ✅ 步骤5: 压缩并发送缩略图
+            sendCompressedThumbnail(outputStream, thumbnailBitmap)
             
         } catch (e: Exception) {
             log("❌ Thumbnail generation error: ${e.message}")
@@ -497,6 +475,40 @@ class HttpProxyServer(
         } finally {
             try { fileStream.close() } catch (_: Exception) {}
         }
+    }
+    
+    /**
+     * ✅ 辅助方法: 压缩并发送缩略图
+     */
+    private fun sendCompressedThumbnail(outputStream: OutputStream, bitmap: android.graphics.Bitmap) {
+        // 压缩为 JPEG 格式 (质量 80%)
+        val compressedStream = java.io.ByteArrayOutputStream()
+        bitmap.compress(
+            android.graphics.Bitmap.CompressFormat.JPEG,
+            80,  // 质量 80%
+            compressedStream
+        )
+        bitmap.recycle()  // 释放内存
+        
+        val thumbnailData = compressedStream.toByteArray()
+        compressedStream.close()
+        
+        log("✅ Thumbnail compressed: ${thumbnailData.size / 1024}KB")
+        
+        // 发送完整的缩略图数据
+        val responseHeader = buildResponseHeader(
+            200, 
+            "OK", 
+            thumbnailData.size.toLong(), 
+            "image/jpeg"  // 统一返回 JPEG 格式
+        )
+        outputStream.write(responseHeader.toByteArray(Charsets.UTF_8))
+        outputStream.flush()
+        
+        outputStream.write(thumbnailData)
+        outputStream.flush()
+        
+        log("✅ Thumbnail sent successfully")
     }
     
     /**
