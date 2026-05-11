@@ -1373,8 +1373,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     
                     log("[Controller] 📥 [$index/${allImages.size}] Loading: $path (${fileSizeKB}KB)")
                     
-                    // ✅ 调用带重试机制的预加载函数,确保成功
-                    preloadSingleImage(imageFile)
+                    // ✅ 调用带重试机制的预加载函数,获取实际耗时
+                    val elapsedMs = preloadSingleImage(imageFile)
                     
                     // ✅ 确认缓存成功
                     if (localImageCache.containsKey(path)) {
@@ -1383,23 +1383,21 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         log("[Controller] ❌ [$index/${allImages.size}] Failed after retries: $path")
                     }
                     
-                    // ✅ 智能延迟策略: 根据文件大小动态调整延迟时间
-                    if (index < end) {
-                        // 基础延迟 + 文件大小补偿
-                        val baseDelay = if (isFtp) 50 else 100
-                        val sizeCompensation = when {
-                            fileSizeKB < 100 -> 0      // <100KB: 无额外延迟
-                            fileSizeKB < 500 -> 50     // 100-500KB: +50ms
-                            fileSizeKB < 1000 -> 100   // 500KB-1MB: +100ms
-                            else -> 200                 // >1MB: +200ms
-                        }
-                        val delayMs = baseDelay + sizeCompensation
+                    // ✅ 智能动态延迟: 根据下载速度自动调整
+                    if (index < end && elapsedMs >= 0) {
+                        // 计算下载速度(KB/s)
+                        val speedKBps = if (elapsedMs > 0) (fileSizeKB.toDouble()) / (elapsedMs / 1000.0) else 0
                         
-                        if (fileSizeKB > 500) {
-                            log("[Controller] ⏳ Large file (${fileSizeKB}KB), waiting ${delayMs}ms before next...")
-                        } else {
-                            log("[Controller] ⏳ Waiting ${delayMs}ms before next image...")
+                        // 根据速度动态计算延迟
+                        val delayMs = when {
+                            speedKBps > 500 -> 20   // 超高速: 几乎不等待
+                            speedKBps > 200 -> 50   // 高速: 短暂等待
+                            speedKBps > 100 -> 100  // 中速: 正常等待
+                            speedKBps > 50 -> 150   // 低速: 稍长等待
+                            else -> 200             // 极慢: 充分休息
                         }
+                        
+                        log("[Controller] ⏳ Speed: ${String.format("%.1f", speedKBps)}KB/s, waiting ${delayMs}ms before next...")
                         kotlinx.coroutines.delay(delayMs.toLong())
                     }
                 }
@@ -1417,14 +1415,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     /**
      * 预加载单张图片(带重试机制)
+     * @return 下载耗时(毫秒),失败返回-1
      */
-    private suspend fun preloadSingleImage(imageFile: MediaFile) {
+    private suspend fun preloadSingleImage(imageFile: MediaFile): Long {
         val path = imageFile.path
         
         if (localImageCache.containsKey(path)) {
             log("[Controller] ✅ Already cached: $path")
-            return
+            return 0L  // 已缓存,无需等待
         }
+        
+        val startTime = System.currentTimeMillis()
         
         // ✅ 强化重试机制：最多尝试5次,确保图片缓存成功
         var loaded = false
@@ -1462,7 +1463,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         localImageCache[path] = fileData
                         currentLocalCacheSize += fileData.size
                         loaded = true
-                        log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB, total: ${localImageCache.size} images, ${currentLocalCacheSize / 1024 / 1024}MB)")
+                        val elapsedMs = System.currentTimeMillis() - startTime
+                        val speedKBps = if (elapsedMs > 0) (fileData.size / 1024.0) / (elapsedMs / 1000.0) else 0
+                        log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB, ${elapsedMs}ms, ${String.format("%.1f", speedKBps)}KB/s, total: ${localImageCache.size} images, ${currentLocalCacheSize / 1024 / 1024}MB)")
                         break
                     }
                 }
@@ -1492,7 +1495,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         
         if (!loaded) {
             log("[Controller] ❌ Failed to preload $path after 5 attempts")
+            return -1L
         }
+        
+        return System.currentTimeMillis() - startTime
     }
     
     // ==================== 统一重连逻辑 ====================
