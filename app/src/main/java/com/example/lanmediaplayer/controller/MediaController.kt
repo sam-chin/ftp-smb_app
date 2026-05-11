@@ -177,6 +177,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // ✅ 在 IO 线程执行所有网络操作
             withContext(Dispatchers.IO) {
                 for (i in startIndex until endIndex) {
+                    // ✅ 检查协程是否已取消
+                    if (!isActive) {
+                        log("[Controller] ⚠️ Preload cancelled at image $i, stopping...")
+                        break
+                    }
+                    
                     try {
                         val imageFile = imageFiles[i]
                         val path = imageFile.path
@@ -275,6 +281,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     break
                                 }
                             } catch (e: Exception) {
+                                // ✅ 如果是协程取消异常，立即退出（不记录失败日志）
+                                if (e is kotlinx.coroutines.CancellationException) {
+                                    log("[Controller] ⚠️ Preload cancelled for image $i, stopping...")
+                                    throw e
+                                }
+                                
                                 lastError = e
                                 // ✅ 详细异常信息：message + cause + class name
                                 val errorMsg = e.message ?: "null message"
@@ -282,17 +294,19 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 val errorClass = e.javaClass.simpleName
                                 log("[Controller] ⚠️ Attempt $attempt/5 failed for image ${i - startIndex}: [$errorClass] $errorMsg (cause: $errorCause)")
                                 
-                                // ✅ 如果是协程取消异常，立即退出
-                                if (e is kotlinx.coroutines.CancellationException) {
-                                    log("[Controller] Preload cancelled, stopping...")
-                                    throw e  // 重新抛出取消异常
-                                }
-                                
                                 // ✅ 递增延迟重试策略: 200ms → 400ms → 800ms → 1600ms
                                 if (attempt < 5) {
                                     val delayMs = 200 * (1 shl (attempt - 1))  // 指数退避
                                     log("[Controller] ⏳ Retrying in ${delayMs}ms...")
+                                    
+                                    // ✅ 在延迟前检查是否已取消
                                     kotlinx.coroutines.delay(delayMs.toLong())
+                                    
+                                    // ✅ 延迟后再次检查取消状态
+                                    if (!isActive) {
+                                        log("[Controller] ⚠️ Preload cancelled during retry delay for image $i")
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -1361,6 +1375,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
             
             withContext(Dispatchers.IO) {
                 for (index in start..end) {
+                    // ✅ 检查协程是否已取消
+                    if (!isActive) {
+                        log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
+                        break
+                    }
+                    
                     val imageFile = allImages[index]
                     val path = imageFile.path
                     val fileSizeKB = imageFile.size / 1024
@@ -1470,18 +1490,27 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                 }
             } catch (e: Exception) {
-                log("[Controller] ⚠️ Attempt $attempt/5 failed for $path: ${e.message}")
-                
-                // ✅ 如果是协程取消异常，立即退出
+                // ✅ 如果是协程取消异常，立即退出（不记录失败日志）
                 if (e is kotlinx.coroutines.CancellationException) {
+                    log("[Controller] ⚠️ Preload cancelled for $path, stopping...")
                     throw e
                 }
+                
+                log("[Controller] ⚠️ Attempt $attempt/5 failed for $path: ${e.message}")
                 
                 // ✅ 递增延迟重试策略: 200ms → 400ms → 800ms → 1600ms
                 if (attempt < 5) {
                     val delayMs = 200 * (1 shl (attempt - 1))  // 指数退避
                     log("[Controller] ⏳ Retrying in ${delayMs}ms...")
+                    
+                    // ✅ 在延迟前检查是否已取消
                     kotlinx.coroutines.delay(delayMs.toLong())
+                    
+                    // ✅ 延迟后再次检查取消状态
+                    if (!isActive) {
+                        log("[Controller] ⚠️ Preload cancelled during retry delay for $path")
+                        return -1L
+                    }
                 }
             } finally {
                 // ✅ 确保关闭 InputStream，防止资源泄漏
