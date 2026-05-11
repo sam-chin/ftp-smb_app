@@ -1354,42 +1354,37 @@ class MediaController(private val context: Context, private val logCallback: ((S
         isPreloading = true
         preloadTaskCount++
         try {
-            // ✅ SMB/FTP 都采用严格的串行顺序加载,确保每张图片都缓存成功
+            // ✅ 严格按顺序串行加载,确保每张图片都缓存成功
             val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
             
-            // ✅ 智能排序策略: 先按距离排序,再按文件大小排序(小图优先)
-            val sortedIndices = (start..end)
-                .sortedBy { Math.abs(it - currentIndex) }  // 第一优先级: 距离
-                .sortedBy { allImages[it].size }           // 第二优先级: 文件大小(小图优先)
-            
-            log("[Controller] 🔄 Sequential preload started: ${sortedIndices.size} images (small files first)")
+            log("[Controller] 🔄 Sequential preload started: indices $start to $end (${end - start + 1} images)")
             
             withContext(Dispatchers.IO) {
-                for ((idx, index) in sortedIndices.withIndex()) {
+                for (index in start..end) {
                     val imageFile = allImages[index]
                     val path = imageFile.path
                     val fileSizeKB = imageFile.size / 1024
                     
                     // ✅ 检查是否已缓存
                     if (localImageCache.containsKey(path)) {
-                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Already cached: $path (${fileSizeKB}KB)")
+                        log("[Controller] ✅ [$index/${allImages.size}] Already cached: $path (${fileSizeKB}KB)")
                         continue
                     }
                     
-                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] Loading: $path (${fileSizeKB}KB)")
+                    log("[Controller] 📥 [$index/${allImages.size}] Loading: $path (${fileSizeKB}KB)")
                     
                     // ✅ 调用带重试机制的预加载函数,确保成功
                     preloadSingleImage(imageFile)
                     
                     // ✅ 确认缓存成功
                     if (localImageCache.containsKey(path)) {
-                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Success: $path (${fileSizeKB}KB)")
+                        log("[Controller] ✅ [$index/${allImages.size}] Success: $path (${fileSizeKB}KB)")
                     } else {
-                        log("[Controller] ❌ [${idx + 1}/${sortedIndices.size}] Failed after retries: $path")
+                        log("[Controller] ❌ [$index/${allImages.size}] Failed after retries: $path")
                     }
                     
                     // ✅ 智能延迟策略: 根据文件大小动态调整延迟时间
-                    if (idx < sortedIndices.size - 1) {
+                    if (index < end) {
                         // 基础延迟 + 文件大小补偿
                         val baseDelay = if (isFtp) 50 else 100
                         val sizeCompensation = when {
@@ -1410,7 +1405,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
             }
             
-            log("[Controller] ✅ Sequential preload completed")
+            log("[Controller] ✅ Sequential preload completed: $start to $end")
             
             // ✅ 更新预加载中心点
             lastSmartPreloadCenter = currentIndex
