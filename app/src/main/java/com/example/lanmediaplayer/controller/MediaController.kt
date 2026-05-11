@@ -1320,7 +1320,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
      */
     fun releaseAll() {
         // ✅ 重置预加载状态
-        isPreloading = false
+        preloadJob?.cancel()
+        preloadJob = null
         
         localProxy?.stop()
         dlnaProxy?.stop()
@@ -1382,7 +1383,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
             if (uncachedIndices.isEmpty()) {
                 log("[Controller] ✅ All ${alreadyCachedCount} images in range [$start-$end] already cached, skipping download")
                 lastSmartPreloadCenter = currentIndex
-                return
+                preloadTaskCount--
+                preloadJob = null
+                return@launch
             }
             
             // ✅ 按距离排序: 离当前越近优先级越高
