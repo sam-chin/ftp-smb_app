@@ -1372,10 +1372,42 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // ✅ 严格按顺序串行加载,确保每张图片都缓存成功
             val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
             
-            log("[Controller] 🔄 Sequential preload started: indices $start to $end (${end - start + 1} images)")
+            // ✅ 双向预加载策略: 先加载当前及附近关键图片(±5张),再按顺序加载其他
+            val criticalStart = maxOf(start, currentIndex - 5)
+            val criticalEnd = minOf(end, currentIndex + 5)
+            
+            log("[Controller] 🔄 Two-phase preload started: critical[$criticalStart-$criticalEnd] + sequential[$start-$end]")
             
             withContext(Dispatchers.IO) {
+                // ✅ 第一阶段: 优先加载当前图片及附近关键图片(无延迟,最快速度)
+                log("[Controller] 🚀 Phase 1: Loading critical images (current ±5)")
+                for (index in criticalStart..criticalEnd) {
+                    if (coroutineContext[Job]?.isActive != true) {
+                        log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
+                        break
+                    }
+                    
+                    val imageFile = allImages[index]
+                    val path = imageFile.path
+                    
+                    if (localImageCache.containsKey(path)) {
+                        continue
+                    }
+                    
+                    log("[Controller] 📥 [CRITICAL] Loading: $path")
+                    preloadSingleImage(imageFile)
+                    // ✅ 关键图片之间无延迟,最大化加载速度
+                }
+                
+                log("[Controller] ✅ Phase 1 completed, starting Phase 2: Sequential preload")
+                
+                // ✅ 第二阶段: 按顺序加载剩余图片(带智能延迟)
                 for (index in start..end) {
+                    // ✅ 跳过已加载的关键图片
+                    if (index in criticalStart..criticalEnd) {
+                        continue
+                    }
+                    
                     // ✅ 检查协程是否已取消
                     if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
