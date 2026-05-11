@@ -572,16 +572,16 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 return@withContext null
             }
             
-            // ✅ 核心优化: 使用超大缓冲区(256KB),避免小分块读取
+            // ✅ 核心优化: 使用超大缓冲区(512KB),避免小分块读取
             val rawInputStream = smbFile.getInputStream()
-            val bufferedStream = java.io.BufferedInputStream(rawInputStream, 256 * 1024)  // 256KB buffer
+            val bufferedStream = java.io.BufferedInputStream(rawInputStream, 512 * 1024)  // 512KB buffer
             
             if (startOffset > 0) {
                 log("[SMB-JCIFS] Skipping $startOffset bytes")
                 bufferedStream.skip(startOffset)
             }
             
-            log("[SMB-JCIFS] Stream opened with 256KB buffer for continuous reading")
+            log("[SMB-JCIFS] Stream opened with 512KB buffer for continuous reading")
             bufferedStream
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error opening stream: ${e.message}")

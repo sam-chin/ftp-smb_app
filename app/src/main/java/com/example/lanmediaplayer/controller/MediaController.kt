@@ -1367,9 +1367,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
         
         // ✅ 根据协议类型动态调整预加载数量
         // FTP服务器性能较弱,减少预加载数量防止崩溃
+        // SMB已优化(512KB缓冲+长连接),可以提高预加载数量
         val preloadCount = when {
             allImages.any { it.protocol is NetworkProtocol.FTP } -> 3  // FTP: 只预加载3张
-            else -> 5  // SMB/其他: 预加载5张
+            else -> 8  // SMB/其他: 预加载8张(利用高速缓冲)
         }
         
         // ✅ 计算预加载范围
