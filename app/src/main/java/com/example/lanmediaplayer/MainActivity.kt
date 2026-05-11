@@ -1725,11 +1725,12 @@ fun ImageViewerScreen(
         // ✅ 立即启动预加载，不要延迟（确保HTTP请求时缓存已就绪）
         // kotlinx.coroutines.delay(500)  ← 已移除
             
-        // ✅ 使用smartPreload进行初始预加载(更智能,自动去重)
-        launch {
-            mediaController.smartPreload(0, imageFiles)  // 从第0张开始预加载±20张
-            addLog("[ImageViewer] === Initial smartPreload END ===")
-        }
+        // ✅ 移除初始预加载,由LaunchedEffect在第0张时自动触发(避免重复)
+        // launch {
+        //     mediaController.smartPreload(0, imageFiles)
+        //     addLog("[ImageViewer] === Initial smartPreload END ===")
+        // }
+        addLog("[ImageViewer] === Initial preload will be triggered by LaunchedEffect ===")
     }
     
     // ✅ 监听页面变化,智能预加载(每5张触发一次新批次)
