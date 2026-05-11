@@ -1337,7 +1337,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ==================== 智能预加载 ====================
     
     /**
-     * 智能预加载:扩大预加载范围至±20张,确保零等待切换
+     * 智能预加载: 每次预加载后面10张图片,按距离排序优先级
      */
     suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
         if (allImages.isEmpty()) return
@@ -1354,25 +1354,21 @@ class MediaController(private val context: Context, private val logCallback: ((S
             return
         }
         
-        // ✅ 检查是否已经预加载过这个中心点附近(避免重复)
-        if (Math.abs(currentIndex - lastSmartPreloadCenter) < 15) {
-            log("[Controller] ✅ Smart preload range already loaded (within 15), skipping")
+        // ✅ 计算预加载范围: 当前图片后面的10张
+        val start = currentIndex + 1
+        val end = minOf(allImages.size - 1, currentIndex + 10)
+        
+        if (start > end) {
+            log("[Controller] ✅ No images to preload (at end of list)")
             return
         }
         
-        // ✅ 大幅扩大预加载范围:前后各20张(总共41张),确保零等待
-        val start = maxOf(0, currentIndex - 20)
-        val end = minOf(allImages.size - 1, currentIndex + 20)
-        
-        log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex, range: ${end - start + 1})")
+        log("[Controller] 🔄 Smart preload: indices $start to $end (10 images after current: $currentIndex)")
         
         isPreloading = true
         preloadTaskCount++
         try {
-            // ✅ 智能预加载策略: 只加载未缓存的图片,优先加载后面的图片
-            val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
-            
-            // ✅ 第一步: 收集所有需要加载的图片(跳过已缓存的)
+            // ✅ 收集未缓存的图片索引
             val uncachedIndices = mutableListOf<Int>()
             for (index in start..end) {
                 val path = allImages[index].path
@@ -1383,22 +1379,18 @@ class MediaController(private val context: Context, private val logCallback: ((S
             
             if (uncachedIndices.isEmpty()) {
                 log("[Controller] ✅ All images in range [$start-$end] already cached, skipping")
-                lastSmartPreloadCenter = currentIndex
                 return
             }
             
-            log("[Controller] 🔄 Smart preload: need to load ${uncachedIndices.size}/${end - start + 1} images in range [$start-$end]")
+            log("[Controller] 🎯 Need to load ${uncachedIndices.size}/${end - start + 1} images")
             
-            // ✅ 第二步: 按优先级排序(当前图片后面优先,然后前面)
-            val sortedIndices = uncachedIndices.sortedBy { 
-                if (it >= currentIndex) it - currentIndex  // 后面的图片: 距离越小越优先
-                else Int.MAX_VALUE - it                     // 前面的图片: 排到后面
-            }
+            // ✅ 按距离排序: 离当前越近优先级越高
+            val sortedIndices = uncachedIndices.sortedBy { it - currentIndex }
             
-            log("[Controller] 🎯 Priority order: ${sortedIndices.take(5).joinToString(", ")}...")
+            log("[Controller] 📋 Priority order: ${sortedIndices.take(5).joinToString(", ")}...")
             
             withContext(Dispatchers.IO) {
-                // ✅ 第三阶段: 按优先级顺序加载(带智能延迟)
+                // ✅ 按优先级顺序加载(带智能延迟)
                 for ((idx, index) in sortedIndices.withIndex()) {
                     // ✅ 检查协程是否已取消
                     if (coroutineContext[Job]?.isActive != true) {
@@ -1448,7 +1440,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
             }
             
-            log("[Controller] ✅ Sequential preload completed: $start to $end")
+            log("[Controller] ✅ Smart preload completed: $start to $end")
             
             // ✅ 更新预加载中心点
             lastSmartPreloadCenter = currentIndex

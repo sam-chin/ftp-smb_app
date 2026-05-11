@@ -1732,13 +1732,17 @@ fun ImageViewerScreen(
         }
     }
     
-    // ✅ 监听页面变化,智能预加载(持续触发,确保流畅切换)
+    // ✅ 监听页面变化,智能预加载(每5张触发一次新批次)
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 核心修复:每隔5张触发smartPreload(±20张范围),确保零等待
+        // ✅ 核心逻辑: 每5张触发一次预加载,每次预加载后面10张
+        // 第0张 → 预加载第1-10张
+        // 第5张 → 预加载第11-20张
+        // 第10张 → 预加载第21-30张
+        // 第15张 → 预加载第31-40张
         if (currentPage % 5 == 0) {
             launch {
                 mediaController.smartPreload(currentPage, imageFiles)
