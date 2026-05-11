@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -2296,6 +2297,11 @@ fun ImageLoader(
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     
+    // ✅ 缩放状态
+    var scale by remember { mutableStateOf(1f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+    
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -2303,7 +2309,49 @@ fun ImageLoader(
         AsyncImage(
             model = imageUrl,
             contentDescription = contentDescription,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offsetX,
+                    translationY = offsetY
+                )
+                .pointerInput(Unit) {
+                    detectTransformGestures { centroid, pan, zoom, rotation ->
+                        // ✅ 计算新的缩放比例
+                        val newScale = (scale * zoom).coerceIn(1f, 5f)
+                        
+                        if (newScale > 1f) {
+                            // ✅ 缩放时调整偏移,保持图片在视野内
+                            val maxX = (size.width * (newScale - 1)) / 2
+                            val maxY = (size.height * (newScale - 1)) / 2
+                            
+                            offsetX = (offsetX + pan.x).coerceIn(-maxX, maxX)
+                            offsetY = (offsetY + pan.y).coerceIn(-maxY, maxY)
+                        } else {
+                            // ✅ 缩放到1倍时重置位置
+                            offsetX = 0f
+                            offsetY = 0f
+                        }
+                        
+                        scale = newScale
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            // ✅ 双击切换缩放/还原
+                            if (scale > 1.1f) {
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            } else {
+                                scale = 2.5f
+                            }
+                        }
+                    )
+                },
             contentScale = ContentScale.Fit,
             onState = { state ->
                 when (state) {
@@ -2334,6 +2382,23 @@ fun ImageLoader(
             ) {
                 Text("Error loading image", color = Color.White)
                 Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+            }
+        }
+        
+        // ✅ 显示当前缩放倍数(可选)
+        if (scale > 1.1f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "${String.format("%.1f", scale)}x",
+                    color = Color.White,
+                    fontSize = 12.sp
+                )
             }
         }
     }
