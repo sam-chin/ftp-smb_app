@@ -93,8 +93,8 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 val timestamp = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
                 debugLogs.add("$timestamp - $message")
-                // Keep only last 100 logs to avoid memory issues
-                if (debugLogs.size > 100) {
+                // Keep only last 500 logs to avoid memory issues (increased from 100)
+                if (debugLogs.size > 500) {
                     debugLogs.removeAt(0)
                 }
             }
@@ -1738,9 +1738,9 @@ fun ImageViewerScreen(
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 当预览到第6张（索引5）时，立即触发下一批预加载（更早触发）
-        if (currentPage == 5 && lastPreloadIndex == 0) {
-            addLog("[ImageViewer] === Triggering next batch preload at page 5 ===")
+        // ✅ 当预览到第2张（索引1）时，立即触发下一批预加载（更早触发）
+        if (currentPage == 1 && lastPreloadIndex == 0) {
+            addLog("[ImageViewer] === Triggering next batch preload at page 1 ===")
             lastPreloadIndex = 30
             
             launch {
@@ -1748,9 +1748,9 @@ fun ImageViewerScreen(
             }
         }
         
-        // ✅ 当预览到第36张（索引35）时，触发第三批预加载
-        if (currentPage == 35 && lastPreloadIndex == 30) {
-            addLog("[ImageViewer] === Triggering third batch preload at page 35 ===")
+        // ✅ 当预览到第32张（索引31）时，触发第三批预加载（更早触发）
+        if (currentPage == 31 && lastPreloadIndex == 30) {
+            addLog("[ImageViewer] === Triggering third batch preload at page 31 ===")
             lastPreloadIndex = 60
             
             launch {
