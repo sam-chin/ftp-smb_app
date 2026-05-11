@@ -1365,9 +1365,16 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] ✅ Previous task stopped")
         }
         
-        // ✅ 计算预加载范围: 当前图片后面的5张(极速完成,类似ES的缩略图策略)
+        // ✅ 根据协议类型动态调整预加载数量
+        // FTP服务器性能较弱,减少预加载数量防止崩溃
+        val preloadCount = when {
+            allImages.any { it.protocol is NetworkProtocol.FTP } -> 3  // FTP: 只预加载3张
+            else -> 5  // SMB/其他: 预加载5张
+        }
+        
+        // ✅ 计算预加载范围
         val start = currentIndex + 1
-        val end = minOf(allImages.size - 1, currentIndex + 5)
+        val end = minOf(allImages.size - 1, currentIndex + preloadCount)
         
         if (start > end) {
             log("[Controller] ✅ No images to preload (at end of list)")
@@ -1428,6 +1435,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     val fileSizeKB = imageFile.size / 1024
                     val isLargeImage = imageFile.size > 1024 * 1024  // >1MB为大图
                     
+                    // ✅ FTP专用保护: 每次请求前额外等待,防止服务器崩溃
+                    if (imageFile.protocol is NetworkProtocol.FTP && idx > 0) {
+                        log("[Controller] 🛡️ [FTP] Extra protection delay: 500ms before next request")
+                        kotlinx.coroutines.delay(500)
+                    }
+                    
                     // ✅ 再次检查是否已缓存
                     if (localImageCache.containsKey(path)) {
                         skipCount++
@@ -1460,20 +1473,20 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         // ✅ 根据协议类型和图片大小动态计算延迟
                         val delayMs: Int = when (imageFile.protocol) {
                             is NetworkProtocol.FTP -> {
-                                // ✅ FTP: 更大的延迟间隔,保护FTP服务器
+                                // ✅ FTP: 极大延迟间隔,防止FTP服务器崩溃
                                 if (isLargeImage) {
-                                    // 大图: 较长延迟
+                                    // 大图: 很长延迟(保护FTP服务器)
                                     when {
-                                        speedKBps > 500 -> 100
-                                        speedKBps > 200 -> 200
-                                        else -> 300
+                                        speedKBps > 500 -> 500
+                                        speedKBps > 200 -> 800
+                                        else -> 1000
                                     }
                                 } else {
                                     // 小图: 中等延迟
                                     when {
-                                        speedKBps > 500 -> 50
-                                        speedKBps > 200 -> 100
-                                        else -> 150
+                                        speedKBps > 500 -> 300
+                                        speedKBps > 200 -> 500
+                                        else -> 700
                                     }
                                 }
                             }

@@ -1856,6 +1856,9 @@ fun ImageViewerScreen(
         }
     }
     
+    // ✅ 跟踪当前页面的缩放状态
+    var isCurrentPageZoomed by remember { mutableStateOf(false) }
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1870,7 +1873,8 @@ fun ImageViewerScreen(
             HorizontalPager(
                 state = pagerState,
                 pageCount = imageFiles.size,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = !isCurrentPageZoomed  // ✅ 放大时禁用滑动
             ) { page ->
                 // ✅ 关键修复：不缓存URL，每次动态生成以确保URL与HTTP代理状态一致
                 val imageUrl = remember(page, imageFiles[page].path) {
@@ -1879,7 +1883,13 @@ fun ImageViewerScreen(
                 
                 ImageLoader(
                     imageUrl = imageUrl,
-                    contentDescription = imageFiles[page].name
+                    contentDescription = imageFiles[page].name,
+                    onZoomChange = { zoomed ->
+                        // ✅ 只有当前页面才更新全局状态
+                        if (page == pagerState.currentPage) {
+                            isCurrentPageZoomed = zoomed
+                        }
+                    }
                 )
             }
             
@@ -2292,7 +2302,8 @@ fun CastDeviceDialog(
 @Composable
 fun ImageLoader(
     imageUrl: String,
-    contentDescription: String
+    contentDescription: String,
+    onZoomChange: (Boolean) -> Unit = {}  // ✅ 通知父组件缩放状态变化
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -2302,98 +2313,77 @@ fun ImageLoader(
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
     
+    // ✅ 监听scale变化,通知父组件
+    LaunchedEffect(scale) {
+        onZoomChange(scale > 1.01f)
+    }
+    
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        // ✅ 使用嵌套Box分离手势层和图片层
-        Box(
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = contentDescription,
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (scale > 1f) {
-                        // ✅ 放大时: 拦截所有手势
-                        Modifier.pointerInput(Unit) {
-                            detectTransformGestures { centroid, pan, zoom, rotation ->
-                                // ✅ 计算新的缩放比例
-                                val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                
-                                if (newScale > 1f) {
-                                    // ✅ 缩放时调整偏移,保持图片在视野内
-                                    val maxX = (size.width * (newScale - 1)) / 2
-                                    val maxY = (size.height * (newScale - 1)) / 2
-                                    
-                                    // ✅ 提高拖动灵敏度: 使用3倍系数
-                                    offsetX = (offsetX + pan.x * 3f).coerceIn(-maxX, maxX)
-                                    offsetY = (offsetY + pan.y * 3f).coerceIn(-maxY, maxY)
-                                } else {
-                                    // ✅ 缩放到1倍时重置位置
-                                    offsetX = 0f
-                                    offsetY = 0f
-                                }
-                                
-                                scale = newScale
-                            }
-                        }.pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    // ✅ 双击还原
-                                    scale = 1f
-                                    offsetX = 0f
-                                    offsetY = 0f
-                                }
-                            )
-                        }
-                    } else {
-                        // ✅ 正常状态: 不添加任何手势修饰符,让HorizontalPager处理
-                        Modifier
-                    }
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offsetX,
+                    translationY = offsetY
                 )
-        ) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = contentDescription,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offsetX,
-                        translationY = offsetY
-                    ),
-                contentScale = ContentScale.Fit,
-                onState = { state ->
-                    when (state) {
-                        is AsyncImagePainter.State.Loading -> isLoading = true
-                        is AsyncImagePainter.State.Success -> {
-                            isLoading = false
-                            error = null
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val newScale = (scale * zoom).coerceIn(1f, 5f)
+                        
+                        if (newScale > 1.01f) {
+                            // ✅ 放大状态: 处理拖拽
+                            val maxX = (size.width * (newScale - 1)) / 2
+                            val maxY = (size.height * (newScale - 1)) / 2
+                            
+                            offsetX = (offsetX + pan.x * 3f).coerceIn(-maxX, maxX)
+                            offsetY = (offsetY + pan.y * 3f).coerceIn(-maxY, maxY)
+                        } else if (newScale <= 1f && scale > 1f) {
+                            // ✅ 缩小到1倍: 重置位置
+                            offsetX = 0f
+                            offsetY = 0f
                         }
-                        is AsyncImagePainter.State.Error -> {
-                            isLoading = false
-                            error = state.result.throwable.message
-                        }
-                        else -> {}
+                        
+                        scale = newScale
                     }
                 }
-            )
-        }
-        
-        // ✅ 正常状态下的双击放大(单独的手势层,不干扰滑动)
-        if (scale <= 1f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = {
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (scale > 1.1f) {
+                                // ✅ 双击还原
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            } else {
                                 // ✅ 双击放大
                                 scale = 2.5f
                             }
-                        )
+                        }
+                    )
+                },
+            contentScale = ContentScale.Fit,
+            onState = { state ->
+                when (state) {
+                    is AsyncImagePainter.State.Loading -> isLoading = true
+                    is AsyncImagePainter.State.Success -> {
+                        isLoading = false
+                        error = null
                     }
-            )
-        }
+                    is AsyncImagePainter.State.Error -> {
+                        isLoading = false
+                        error = state.result.throwable.message
+                    }
+                    else -> {}
+                }
+            }
+        )
         
         if (isLoading) {
             CircularProgressIndicator(color = Color.White)
@@ -2411,7 +2401,7 @@ fun ImageLoader(
             }
         }
         
-        // ✅ 显示当前缩放倍数(可选)
+        // ✅ 显示当前缩放倍数
         if (scale > 1.1f) {
             Box(
                 modifier = Modifier
