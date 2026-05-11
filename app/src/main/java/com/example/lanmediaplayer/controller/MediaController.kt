@@ -1349,13 +1349,25 @@ class MediaController(private val context: Context, private val logCallback: ((S
             return
         }
         
-        // ✅ 取消旧的预加载任务(如果用户已经滑远了)
-        preloadJob?.cancel()
-        log("[Controller] 🔄 Cancelling previous preload task (if any)")
+        // ✅ 取消旧的预加载任务并等待其停止
+        val oldJob = preloadJob
+        if (oldJob != null && !oldJob.isCancelled) {
+            oldJob.cancel()
+            log("[Controller] 🔄 Cancelling previous preload task...")
+            // 等待旧任务完全停止(最多100ms)
+            try {
+                withTimeoutOrNull(100) {
+                    oldJob.join()
+                }
+            } catch (e: Exception) {
+                // 忽略超时或异常
+            }
+            log("[Controller] ✅ Previous task stopped")
+        }
         
-        // ✅ 计算预加载范围: 当前图片后面的5张(缩小范围,加快完成)
+        // ✅ 计算预加载范围: 当前图片后面的15张(平衡速度和覆盖率)
         val start = currentIndex + 1
-        val end = minOf(allImages.size - 1, currentIndex + 5)
+        val end = minOf(allImages.size - 1, currentIndex + 15)
         
         if (start > end) {
             log("[Controller] ✅ No images to preload (at end of list)")
@@ -1391,9 +1403,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // ✅ 按距离排序: 离当前越近优先级越高
             val sortedIndices = uncachedIndices.sortedBy { it - currentIndex }
             
-            log("[Controller] 📊 Cache status: ${alreadyCachedCount} cached, ${uncachedIndices.size} need to load")
+            log("[Controller] 📊 Cache status: ${alreadyCachedCount} already cached (skipped), ${uncachedIndices.size} need to load")
+            if (alreadyCachedCount > 0) {
+                log("[Controller] ✅ Deduplication: Skipped $alreadyCachedCount images that were preloaded in previous batch")
+            }
             log("[Controller] 🎯 Priority order: ${sortedIndices.take(5).joinToString(", ")}${if (sortedIndices.size > 5) "..." else ""}")
-            log("[Controller] 🚀 Starting sequential preload (${sortedIndices.size} images)...")
+            log("[Controller] 🚀 Starting sequential preload (${sortedIndices.size} new images)...")
             
             withContext(Dispatchers.IO) {
                 var successCount = 0

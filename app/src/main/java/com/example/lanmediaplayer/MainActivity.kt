@@ -1739,11 +1739,11 @@ fun ImageViewerScreen(
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 核心逻辑: 每2张触发一次预加载,每次预加载后面5张
-        // 第0张 → 预加载第1-5张
-        // 第2张 → 预加载第3-7张
-        // 第4张 → 预加载第5-9张
-        // 第6张 → 预加载第7-11张
+        // ✅ 核心逻辑: 每2张触发一次预加载,每次预加载后面15张
+        // 第0张 → 预加载第1-15张
+        // 第2张 → 预加载第3-17张
+        // 第4张 → 预加载第5-19张
+        // 第6张 → 预加载第7-21张
         if (currentPage % 2 == 0) {
             addLog("[ImageViewer] 🔄 Triggering smartPreload at page $currentPage")
             launch {
