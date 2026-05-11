@@ -1354,34 +1354,63 @@ class MediaController(private val context: Context, private val logCallback: ((S
         isPreloading = true
         preloadTaskCount++
         try {
-            // ✅ SMB串行加载(避免低性能服务器过载),FTP也串行
+            // ✅ SMB/FTP 都采用严格的串行顺序加载,确保每张图片都缓存成功
             val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
             
-            if (isFtp) {
-                // FTP 串行加载
-                withContext(Dispatchers.IO) {
-                    for (index in start..end) {
-                        preloadSingleImage(allImages[index])
-                        // FTP 友好：每张图片之间延迟 50ms
-                        if (index < end) {
-                            kotlinx.coroutines.delay(50)
-                        }
+            // ✅ 智能排序策略: 先按距离排序,再按文件大小排序(小图优先)
+            val sortedIndices = (start..end)
+                .sortedBy { Math.abs(it - currentIndex) }  // 第一优先级: 距离
+                .sortedBy { allImages[it].size }           // 第二优先级: 文件大小(小图优先)
+            
+            log("[Controller] 🔄 Sequential preload started: ${sortedIndices.size} images (small files first)")
+            
+            withContext(Dispatchers.IO) {
+                for ((idx, index) in sortedIndices.withIndex()) {
+                    val imageFile = allImages[index]
+                    val path = imageFile.path
+                    val fileSizeKB = imageFile.size / 1024
+                    
+                    // ✅ 检查是否已缓存
+                    if (localImageCache.containsKey(path)) {
+                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Already cached: $path (${fileSizeKB}KB)")
+                        continue
                     }
-                }
-            } else {
-                // ✅ SMB 串行加载 + 优先加载当前图片附近的图片(按距离排序)
-                val sortedIndices = (start..end).sortedBy { Math.abs(it - currentIndex) }
-                
-                withContext(Dispatchers.IO) {
-                    for ((idx, index) in sortedIndices.withIndex()) {
-                        preloadSingleImage(allImages[index])
-                        // ✅ SMB 友好：每张图片之间延迟 100ms，保护低性能服务器
-                        if (idx < sortedIndices.size - 1) {
-                            kotlinx.coroutines.delay(100)
+                    
+                    log("[Controller] 📥 [${idx + 1}/${sortedIndices.size}] Loading: $path (${fileSizeKB}KB)")
+                    
+                    // ✅ 调用带重试机制的预加载函数,确保成功
+                    preloadSingleImage(imageFile)
+                    
+                    // ✅ 确认缓存成功
+                    if (localImageCache.containsKey(path)) {
+                        log("[Controller] ✅ [${idx + 1}/${sortedIndices.size}] Success: $path (${fileSizeKB}KB)")
+                    } else {
+                        log("[Controller] ❌ [${idx + 1}/${sortedIndices.size}] Failed after retries: $path")
+                    }
+                    
+                    // ✅ 智能延迟策略: 根据文件大小动态调整延迟时间
+                    if (idx < sortedIndices.size - 1) {
+                        // 基础延迟 + 文件大小补偿
+                        val baseDelay = if (isFtp) 50 else 100
+                        val sizeCompensation = when {
+                            fileSizeKB < 100 -> 0      // <100KB: 无额外延迟
+                            fileSizeKB < 500 -> 50     // 100-500KB: +50ms
+                            fileSizeKB < 1000 -> 100   // 500KB-1MB: +100ms
+                            else -> 200                 // >1MB: +200ms
                         }
+                        val delayMs = baseDelay + sizeCompensation
+                        
+                        if (fileSizeKB > 500) {
+                            log("[Controller] ⏳ Large file (${fileSizeKB}KB), waiting ${delayMs}ms before next...")
+                        } else {
+                            log("[Controller] ⏳ Waiting ${delayMs}ms before next image...")
+                        }
+                        kotlinx.coroutines.delay(delayMs.toLong())
                     }
                 }
             }
+            
+            log("[Controller] ✅ Sequential preload completed")
             
             // ✅ 更新预加载中心点
             lastSmartPreloadCenter = currentIndex
