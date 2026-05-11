@@ -1382,7 +1382,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 // ✅ 第一阶段: 优先加载当前图片及附近关键图片(并发加载,最快速度)
                 log("[Controller] 🚀 Phase 1: Loading critical images (current ±5, concurrent)")
                 
-                val criticalJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+                val criticalJobs = mutableListOf<kotlinx.coroutines.Deferred<Long>>()
                 for (index in criticalStart..criticalEnd) {
                     if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
