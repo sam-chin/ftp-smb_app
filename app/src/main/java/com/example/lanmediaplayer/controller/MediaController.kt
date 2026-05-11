@@ -73,8 +73,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private val maxLocalCacheSize = 200 * 1024 * 1024  // 200MB
     private var currentLocalCacheSize = 0L
     
-    // ✅ 预加载任务管理（防止累积）
+    // ✅ 预加载任务管理(防止累积)
     private var isPreloading = false
+        
+    // ✅ 预加载进度跟踪(避免重复预加载同一范围)
+    private var lastSmartPreloadCenter = -1
     
     // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
     suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
@@ -1307,26 +1310,36 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ==================== 智能预加载 ====================
     
     /**
-     * 智能预加载：当前图片 ±2 张
+     * 智能预加载:扩大预加载范围至±15张,确保流畅切换
      */
     suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
         if (allImages.isEmpty()) return
         
-        // ✅ 如果正在预加载，直接返回（防止重复调用）
+        // ✅ 如果正在预加载,直接返回(防止重复调用)
         if (isPreloading) {
             log("[Controller] ⚠️ Preload already in progress, skipping")
             return
         }
         
-        val start = maxOf(0, currentIndex - 2)
-        val end = minOf(allImages.size - 1, currentIndex + 2)
+        // ✅ 检查是否已经预加载过这个中心点附近(避免重复)
+        if (Math.abs(currentIndex - lastSmartPreloadCenter) < 10) {
+            log("[Controller] ✅ Smart preload range already loaded, skipping")
+            return
+        }
         
-        log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex)")
+        // ✅ 大幅扩大预加载范围:前后各15张(总共31张)
+        val start = maxOf(0, currentIndex - 15)
+        val end = minOf(allImages.size - 1, currentIndex + 15)
+        
+        log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex, range: ${end - start + 1})")
         
         isPreloading = true
         try {
             coroutineScope {
-                val semaphore = kotlinx.coroutines.sync.Semaphore(2)
+                // ✅ SMB并行加载(最多2个并发,避免被服务器限制),FTP串行
+                val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
+                val maxConcurrent = if (isFtp) 1 else 2
+                val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
                 
                 // ✅ 启动所有预加载任务并等待完成
                 val jobs = (start..end).map { index ->
@@ -1342,6 +1355,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 
                 // ✅ 等待所有任务完成
                 jobs.forEach { it.await() }
+                
+                // ✅ 更新预加载中心点
+                lastSmartPreloadCenter = currentIndex
             }
         } finally {
             isPreloading = false
@@ -1381,15 +1397,17 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 val fileData = inputStream.readBytes()
                 
                 if (fileData.isNotEmpty()) {
-                    // ✅ LRU 缓存管理（最多10张）
-                    while (localImageCache.size >= 10) {
+                    // ✅ LRU 缓存管理(最多100张或200MB,大幅提升缓存容量)
+                    while (localImageCache.size >= 100 || currentLocalCacheSize + fileData.size > maxLocalCacheSize) {
                         val oldestKey = localImageCache.keys.first()
-                        localImageCache.remove(oldestKey)
-                        log("[Controller] 🗑️ Evicted oldest: $oldestKey")
+                        val removedSize = localImageCache.remove(oldestKey)?.size ?: 0
+                        currentLocalCacheSize -= removedSize
+                        log("[Controller] 🗑️ Evicted oldest: $oldestKey (${removedSize / 1024}KB)")
                     }
                     
                     localImageCache[path] = fileData
-                    log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB)")
+                    currentLocalCacheSize += fileData.size
+                    log("[Controller] 📦 Cached: $path (${fileData.size / 1024}KB, total: ${localImageCache.size} images, ${currentLocalCacheSize / 1024 / 1024}MB)")
                 }
             }
         } catch (e: Exception) {

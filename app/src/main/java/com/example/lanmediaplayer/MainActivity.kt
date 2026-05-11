@@ -1732,29 +1732,36 @@ fun ImageViewerScreen(
         }
     }
     
-    // ✅ 监听页面变化，智能预加载（更早触发，确保缓存就绪）
+    // ✅ 监听页面变化,智能预加载(持续触发,确保流畅切换)
     LaunchedEffect(pagerState.currentPage) {
         if (imageFiles.isEmpty()) return@LaunchedEffect
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 当预览到第2张（索引1）时，立即触发下一批预加载（更早触发）
-        if (currentPage == 1 && lastPreloadIndex == 0) {
-            addLog("[ImageViewer] === Triggering next batch preload at page 1 ===")
-            lastPreloadIndex = 30
-            
-            launch {
-                mediaController.preloadImageData(imageFiles, 30, 30)  // ✅ 第二批预加载30张
-            }
+        // ✅ 核心修复:每次页面切换都触发smartPreload(±15张范围)
+        launch {
+            mediaController.smartPreload(currentPage, imageFiles)
         }
         
-        // ✅ 当预览到第32张（索引31）时，触发第三批预加载（更早触发）
-        if (currentPage == 31 && lastPreloadIndex == 30) {
-            addLog("[ImageViewer] === Triggering third batch preload at page 31 ===")
-            lastPreloadIndex = 60
+        // ✅ 同时保留批量预加载作为补充(每批30张,在中间位置触发下一批)
+        val batchSize = 30
+        val triggerOffset = 15  // 在每批的第15张时触发下一批
+        
+        val currentBatch = currentPage / batchSize
+        val positionInBatch = currentPage % batchSize
+        
+        if (positionInBatch == triggerOffset) {
+            val nextBatchStart = (currentBatch + 1) * batchSize
             
-            launch {
-                mediaController.preloadImageData(imageFiles, 60, 30)  // ✅ 第三批预加载30张
+            if (nextBatchStart < imageFiles.size && nextBatchStart != lastPreloadIndex) {
+                addLog("[ImageViewer] === Triggering batch ${currentBatch + 1} preload at page $currentPage ===")
+                lastPreloadIndex = nextBatchStart
+                
+                launch {
+                    val count = minOf(batchSize, imageFiles.size - nextBatchStart)
+                    mediaController.preloadImageData(imageFiles, nextBatchStart, count)
+                    addLog("[ImageViewer] === Batch ${currentBatch + 1} preload END ($count images) ===")
+                }
             }
         }
     }
