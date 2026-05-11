@@ -81,7 +81,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     // ✅ 预加载队列管理(防止过多任务堆积)
     private var preloadTaskCount = 0
-    private val maxPreloadTasks = 3  // 最多同时3个预加载任务
+    private val maxPreloadTasks = 5  // 最多同时5个预加载任务(平衡性能和资源)
     
     // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
     suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
@@ -1341,8 +1341,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
         
         // ✅ 检查是否已经预加载过这个中心点附近(避免重复)
-        if (Math.abs(currentIndex - lastSmartPreloadCenter) < 10) {
-            log("[Controller] ✅ Smart preload range already loaded, skipping")
+        if (Math.abs(currentIndex - lastSmartPreloadCenter) < 20) {
+            log("[Controller] ✅ Smart preload range already loaded (within 20), skipping")
             return
         }
         

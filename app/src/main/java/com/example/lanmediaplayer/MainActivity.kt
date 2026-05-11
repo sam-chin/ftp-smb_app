@@ -1738,9 +1738,11 @@ fun ImageViewerScreen(
         
         val currentPage = pagerState.currentPage
         
-        // ✅ 核心修复:每次页面切换都触发smartPreload(±15张范围)
-        launch {
-            mediaController.smartPreload(currentPage, imageFiles)
+        // ✅ 核心修复:每隔10张触发smartPreload(±15张范围),避免频繁触发
+        if (currentPage % 10 == 0) {
+            launch {
+                mediaController.smartPreload(currentPage, imageFiles)
+            }
         }
         
         // ✅ 同时保留批量预加载作为补充(每批30张,在中间位置触发下一批)
