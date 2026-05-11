@@ -46,8 +46,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     // Available shares detected during connection
     private var availableShares: List<String> = emptyList()
     
-    // Mutex to synchronize SMB operations
-    private val operationMutex = Mutex()
+    // ✅ Mutex to synchronize SMB operations (only for connection state, not file I/O)
+    private val connectionMutex = Mutex()
     
     private fun log(message: String) {
         // Use Android Log with UTF-8 support
@@ -535,39 +535,38 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
      * @param startOffset The byte offset to start reading from (for Range requests)
      */
     suspend fun getFileStream(remotePath: String, startOffset: Long = 0): InputStream? = withContext(Dispatchers.IO) {
-        operationMutex.withLock {
-            try {
-                log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
-                log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
-                
-                val normalizedPath = normalizePathForSmb(remotePath)
-                log("[SMB-JCIFS] After normalizePathForSmb: '$normalizedPath'")
-                
-                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
-                log("[SMB-JCIFS] After URL decode: '$decodedPath'")
-                
-                val fullPath = buildFullPath(decodedPath)
-                log("[SMB-JCIFS] Full path: $fullPath")
-                
-                val smbFile = SmbFile(fullPath, context)
-                
-                if (!smbFile.exists() || smbFile.isDirectory) {
-                    log("[SMB-JCIFS] File not found or is directory")
-                    return@withContext null
-                }
-                
-                val inputStream = smbFile.getInputStream()
-                
-                if (startOffset > 0) {
-                    log("[SMB-JCIFS] Skipping $startOffset bytes")
-                    inputStream.skip(startOffset)
-                }
-                
-                inputStream
-            } catch (e: Exception) {
-                log("[SMB-JCIFS] Error opening stream: ${e.message}")
-                null
+        try {
+            log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
+            log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
+            
+            val normalizedPath = normalizePathForSmb(remotePath)
+            log("[SMB-JCIFS] After normalizePathForSmb: '$normalizedPath'")
+            
+            val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
+            log("[SMB-JCIFS] After URL decode: '$decodedPath'")
+            
+            val fullPath = buildFullPath(decodedPath)
+            log("[SMB-JCIFS] Full path: $fullPath")
+            
+            val smbFile = SmbFile(fullPath, context)
+            
+            if (!smbFile.exists() || smbFile.isDirectory) {
+                log("[SMB-JCIFS] File not found or is directory")
+                return@withContext null
             }
+            
+            val inputStream = smbFile.getInputStream()
+            
+            if (startOffset > 0) {
+                log("[SMB-JCIFS] Skipping $startOffset bytes")
+                inputStream.skip(startOffset)
+            }
+            
+            inputStream
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error opening stream: ${e.message}")
+            e.printStackTrace()
+            null
         }
     }
     
@@ -575,65 +574,63 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
      * Get file size
      */
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
-        operationMutex.withLock {
-            try {
-                log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
+        try {
+            log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
+            
+            val normalizedPath = normalizePathForSmb(remotePath)
+            val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
+            val fullPath = buildFullPath(decodedPath)
+            
+            log("[SMB-JCIFS] Full path: $fullPath")
+            
+            // ✅ 优化：先尝试直接获取文件大小，失败后再用备用方案
+            val smbFile = SmbFile(fullPath, context)
+            
+            if (smbFile.exists() && !smbFile.isDirectory) {
+                val size = smbFile.length()
+                log("[SMB-JCIFS] File exists, size: $size")
+                return@withContext size
+            }
+            
+            log("[SMB-JCIFS] Direct access failed, trying alternative methods...")
+            
+            // ✅ 备用方案1：从父目录列表中查找
+            if (decodedPath.isNotEmpty()) {
+                val parentPath = decodedPath.substringBeforeLast('/', "")
+                val fileName = decodedPath.substringAfterLast('/')
                 
-                val normalizedPath = normalizePathForSmb(remotePath)
-                val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
-                val fullPath = buildFullPath(decodedPath)
-                
-                log("[SMB-JCIFS] Full path: $fullPath")
-                
-                // ✅ 优化：先尝试直接获取文件大小，失败后再用备用方案
-                val smbFile = SmbFile(fullPath, context)
-                
-                if (smbFile.exists() && !smbFile.isDirectory) {
-                    val size = smbFile.length()
-                    log("[SMB-JCIFS] File exists, size: $size")
-                    return@withContext size
-                }
-                
-                log("[SMB-JCIFS] Direct access failed, trying alternative methods...")
-                
-                // ✅ 备用方案1：从父目录列表中查找
-                if (decodedPath.isNotEmpty()) {
-                    val parentPath = decodedPath.substringBeforeLast('/', "")
-                    val fileName = decodedPath.substringAfterLast('/')
+                if (parentPath.isNotEmpty()) {
+                    val parentFullPath = buildFullPath(parentPath)
+                    log("[SMB-JCIFS] Listing parent directory: $parentFullPath")
                     
-                    if (parentPath.isNotEmpty()) {
-                        val parentFullPath = buildFullPath(parentPath)
-                        log("[SMB-JCIFS] Listing parent directory: $parentFullPath")
-                        
-                        try {
-                            val parentFile = SmbFile(parentFullPath, context)
-                            if (parentFile.exists() && parentFile.isDirectory) {
-                                val files = parentFile.listFiles()
-                                log("[SMB-JCIFS] Found ${files.size} files in parent directory")
-                                
-                                for (f in files) {
-                                    val name = f.name.trimEnd('/')
-                                    if (name == fileName && f.isDirectory == false) {
-                                        val size = f.length()
-                                        log("[SMB-JCIFS] ✅ Found file in parent list: $name, size: $size")
-                                        return@withContext size
-                                    }
+                    try {
+                        val parentFile = SmbFile(parentFullPath, context)
+                        if (parentFile.exists() && parentFile.isDirectory) {
+                            val files = parentFile.listFiles()
+                            log("[SMB-JCIFS] Found ${files.size} files in parent directory")
+                            
+                            for (f in files) {
+                                val name = f.name.trimEnd('/')
+                                if (name == fileName && f.isDirectory == false) {
+                                    val size = f.length()
+                                    log("[SMB-JCIFS] ✅ Found file in parent list: $name, size: $size")
+                                    return@withContext size
                                 }
-                                log("[SMB-JCIFS] File not found in parent directory listing")
                             }
-                        } catch (e: Exception) {
-                            log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
+                            log("[SMB-JCIFS] File not found in parent directory listing")
                         }
+                    } catch (e: Exception) {
+                        log("[SMB-JCIFS] Error listing parent directory: ${e.message}")
                     }
                 }
-                
-                log("[SMB-JCIFS] ⚠️ Could not determine file size, returning 0")
-                0L
-            } catch (e: Exception) {
-                log("[SMB-JCIFS] Error getting file size: ${e.message}")
-                e.printStackTrace()
-                0L
             }
+            
+            log("[SMB-JCIFS] ⚠️ Could not determine file size, returning 0")
+            0L
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error getting file size: ${e.message}")
+            e.printStackTrace()
+            0L
         }
     }
     
@@ -663,11 +660,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     suspend fun rename(remotePath: String, newName: String): Boolean {
-        var result = false
-        operationMutex.withLock {
-            result = renameInternal(remotePath, newName)
-        }
-        return result
+        return renameInternal(remotePath, newName)
     }
     
     private fun renameInternal(remotePath: String, newName: String): Boolean {

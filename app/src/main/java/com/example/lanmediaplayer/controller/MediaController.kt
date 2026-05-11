@@ -79,9 +79,19 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // ✅ 预加载进度跟踪(避免重复预加载同一范围)
     private var lastSmartPreloadCenter = -1
     
+    // ✅ 预加载队列管理(防止过多任务堆积)
+    private var preloadTaskCount = 0
+    private val maxPreloadTasks = 3  // 最多同时3个预加载任务
+    
     // ✅ 预加载图片数据到本地缓存（并行加载，最多2个并发）
     suspend fun preloadImageData(imageFiles: List<MediaFile>, startIndex: Int, count: Int) {
         log("[Controller] === Preloading image data to LOCAL cache ===")
+        
+        // ✅ 检查预加载任务数量,防止过多任务堆积
+        if (preloadTaskCount >= maxPreloadTasks) {
+            log("[Controller] ⚠️ Too many preload tasks ($preloadTaskCount), skipping batch preload")
+            return
+        }
         
         val endIndex = minOf(startIndex + count, imageFiles.size)
         if (endIndex <= startIndex) {
@@ -91,6 +101,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         
         log("[Controller] Preloading $count images from index $startIndex")
         
+        preloadTaskCount++
         var successCount = 0
         var failCount = 0
         
@@ -286,8 +297,9 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     throw e  // 重新抛出取消异常
                                 }
                                 
-                                if (attempt < 3) {
-                                    kotlinx.coroutines.delay(500)  // ✅ 重试间隔500ms，平衡速度和稳定性
+                                // ✅ 快速失败策略:只重试1次,减少等待时间
+                                if (attempt < 2) {
+                                    kotlinx.coroutines.delay(200)  // ✅ 重试间隔200ms,快速失败
                                 }
                             }
                         }
@@ -308,6 +320,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         }
         }  // ✅ 结束 else 块（SMB并行加载）
         
+        preloadTaskCount--
         log("[Controller] === Preload Summary: Success=$successCount, Failed=$failCount ===")
     }
     
@@ -1315,6 +1328,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
     suspend fun smartPreload(currentIndex: Int, allImages: List<MediaFile>) {
         if (allImages.isEmpty()) return
         
+        // ✅ 检查预加载任务数量,防止过多任务堆积
+        if (preloadTaskCount >= maxPreloadTasks) {
+            log("[Controller] ⚠️ Too many preload tasks ($preloadTaskCount), skipping")
+            return
+        }
+        
         // ✅ 如果正在预加载,直接返回(防止重复调用)
         if (isPreloading) {
             log("[Controller] ⚠️ Preload already in progress, skipping")
@@ -1334,6 +1353,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] 🔄 Smart preload: indices $start to $end (current: $currentIndex, range: ${end - start + 1})")
         
         isPreloading = true
+        preloadTaskCount++
         try {
             coroutineScope {
                 // ✅ SMB并行加载(最多2个并发,避免被服务器限制),FTP串行
@@ -1361,6 +1381,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             }
         } finally {
             isPreloading = false
+            preloadTaskCount--
         }
     }
     
