@@ -171,20 +171,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 }
             }
         } else {
-            // ✅ SMB 并行加载（最多2个并发）
-            log("[Controller] 🔄 SMB mode: parallel loading (max 2 concurrent)")
+            // ✅ SMB 串行加载(避免低性能服务器过载)
+            log("[Controller] 🔄 SMB mode: sequential loading (protect low-performance server)")
             
-            // ✅ 使用协程并行加载，最多同时2个请求（平衡速度和SMB负载）
-            val maxConcurrent = 2
-            val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
-        
-        // ✅ 使用coroutineScope创建协程作用域
-        kotlinx.coroutines.coroutineScope {
-            val jobs = mutableListOf<kotlinx.coroutines.Job>()
-            
-            for (i in startIndex until endIndex) {
-                val job = launch {
-                    semaphore.acquire()
+            // ✅ 在 IO 线程执行所有网络操作
+            withContext(Dispatchers.IO) {
+                for (i in startIndex until endIndex) {
                     try {
                         val imageFile = imageFiles[i]
                         val path = imageFile.path
@@ -193,7 +185,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         if (localImageCache.containsKey(path)) {
                             log("[Controller] Image already cached: $path")
                             successCount++
-                            return@launch
+                            continue
                         }
                         
                         log("[Controller] Preloading image ${i - startIndex + 1}/${endIndex - startIndex}: $path")
@@ -309,17 +301,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             failCount++
                             log("[Controller] ❌ Failed to preload image ${i - startIndex} after 5 attempts: ${lastError?.message}")
                         }
-                    } finally {
-                        semaphore.release()
+                        
+                        // ✅ SMB 友好：每张图片之间延迟 100ms，保护低性能服务器
+                        if (i < endIndex - 1) {
+                            kotlinx.coroutines.delay(100)
+                        }
+                    } catch (e: Exception) {
+                        failCount++
+                        // ✅ 详细异常信息
+                        val errorMsg = e.message ?: "null message"
+                        val errorCause = e.cause?.message ?: "no cause"
+                        val errorClass = e.javaClass.simpleName
+                        log("[Controller] ⚠️ Failed: [$errorClass] $errorMsg (cause: $errorCause)")
+                        e.printStackTrace()
                     }
                 }
-                jobs.add(job)
             }
-            
-            // ✅ 等待所有协程完成
-            jobs.forEach { it.join() }
-        }
-        }  // ✅ 结束 else 块（SMB并行加载）
+        }  // ✅ 结束 else 块（SMB串行加载）
         
         preloadTaskCount--
         log("[Controller] === Preload Summary: Success=$successCount, Failed=$failCount ===")
@@ -1356,33 +1354,37 @@ class MediaController(private val context: Context, private val logCallback: ((S
         isPreloading = true
         preloadTaskCount++
         try {
-            coroutineScope {
-                // ✅ SMB并行加载(最多2个并发,避免被服务器限制),FTP串行
-                val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
-                val maxConcurrent = if (isFtp) 1 else 2
-                val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
-                
-                // ✅ 优先加载当前图片附近的图片(按距离排序)
-                val sortedIndices = (start..end).sortedBy { Math.abs(it - currentIndex) }
-                
-                // ✅ 启动所有预加载任务并等待完成
-                val jobs = sortedIndices.map { index ->
-                    async {
-                        semaphore.acquire()
-                        try {
-                            preloadSingleImage(allImages[index])
-                        } finally {
-                            semaphore.release()
+            // ✅ SMB串行加载(避免低性能服务器过载),FTP也串行
+            val isFtp = allImages.firstOrNull()?.protocol is NetworkProtocol.FTP
+            
+            if (isFtp) {
+                // FTP 串行加载
+                withContext(Dispatchers.IO) {
+                    for (index in start..end) {
+                        preloadSingleImage(allImages[index])
+                        // FTP 友好：每张图片之间延迟 50ms
+                        if (index < end) {
+                            kotlinx.coroutines.delay(50)
                         }
                     }
                 }
+            } else {
+                // ✅ SMB 串行加载 + 优先加载当前图片附近的图片(按距离排序)
+                val sortedIndices = (start..end).sortedBy { Math.abs(it - currentIndex) }
                 
-                // ✅ 等待所有任务完成
-                jobs.forEach { it.await() }
-                
-                // ✅ 更新预加载中心点
-                lastSmartPreloadCenter = currentIndex
+                withContext(Dispatchers.IO) {
+                    for ((idx, index) in sortedIndices.withIndex()) {
+                        preloadSingleImage(allImages[index])
+                        // ✅ SMB 友好：每张图片之间延迟 100ms，保护低性能服务器
+                        if (idx < sortedIndices.size - 1) {
+                            kotlinx.coroutines.delay(100)
+                        }
+                    }
+                }
             }
+            
+            // ✅ 更新预加载中心点
+            lastSmartPreloadCenter = currentIndex
         } finally {
             isPreloading = false
             preloadTaskCount--
