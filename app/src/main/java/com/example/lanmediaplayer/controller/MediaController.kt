@@ -1379,8 +1379,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
             log("[Controller] 🔄 Two-phase preload started: critical[$criticalStart-$criticalEnd] + sequential[$start-$end]")
             
             withContext(Dispatchers.IO) {
-                // ✅ 第一阶段: 优先加载当前图片及附近关键图片(无延迟,最快速度)
-                log("[Controller] 🚀 Phase 1: Loading critical images (current ±5)")
+                // ✅ 第一阶段: 优先加载当前图片及附近关键图片(并发加载,最快速度)
+                log("[Controller] 🚀 Phase 1: Loading critical images (current ±5, concurrent)")
+                
+                val criticalJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
                 for (index in criticalStart..criticalEnd) {
                     if (coroutineContext[Job]?.isActive != true) {
                         log("[Controller] ⚠️ Preload cancelled at index $index, stopping...")
@@ -1395,11 +1397,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     }
                     
                     log("[Controller] 📥 [CRITICAL] Loading: $path")
-                    preloadSingleImage(imageFile)
-                    // ✅ 关键图片之间无延迟,最大化加载速度
+                    
+                    // ✅ 并发加载关键图片(最多2个并发)
+                    val job = async {
+                        preloadSingleImage(imageFile)
+                    }
+                    criticalJobs.add(job)
+                    
+                    // ✅ 限制并发数为2,保护SMB服务器
+                    if (criticalJobs.size >= 2) {
+                        criticalJobs.removeAt(0).await()  // 等待最早的任务完成
+                    }
                 }
                 
-                log("[Controller] ✅ Phase 1 completed, starting Phase 2: Sequential preload")
+                // ✅ 等待所有关键图片加载完成
+                criticalJobs.forEach { it.await() }
+                
+                log("[Controller] ✅ Phase 1 completed (${criticalJobs.size} critical images), starting Phase 2: Sequential preload")
                 
                 // ✅ 第二阶段: 按顺序加载剩余图片(带智能延迟)
                 for (index in start..end) {
