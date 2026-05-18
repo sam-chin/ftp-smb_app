@@ -92,7 +92,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     // ✅ 检查连接是否仍然有效
     fun isConnected(): Boolean {
         return try {
-            context != null && baseUrl.isNotEmpty() && auth != null
+            // ✅ 关键修复：只要context和auth存在就认为连接有效
+            // baseUrl可能为空（未选择共享时），但不影响连接状态
+            context != null && auth != null
         } catch (e: Exception) {
             false
         }
@@ -435,6 +437,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 return@withContext emptyList()
             }
             
+            // ✅ 关键修复：检查是否已选择共享目录
+            if (baseUrl.isEmpty()) {
+                log("[SMB-JCIFS] ❌ No share selected! Please select a share first.")
+                log("[SMB-JCIFS] Available shares: ${availableShares.joinToString(", ")}")
+                return@withContext emptyList()
+            }
+            
             val files = mutableListOf<SmbFileInfo>()
             
             // 规范化路径：移除开头的斜杠，因为baseUrl已经包含了共享名
@@ -593,6 +602,13 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 throw SmbConnectionLostException("SMB connection lost")
             }
             
+            // ✅ 关键修复：检查是否已选择共享目录
+            if (baseUrl.isEmpty()) {
+                log("[SMB-JCIFS] ❌ No share selected! Please select a share first.")
+                log("[SMB-JCIFS] Available shares: ${availableShares.joinToString(", ")}")
+                return@withContext null
+            }
+            
             val normalizedPath = normalizePathForSmb(remotePath)
             log("[SMB-JCIFS] After normalizePathForSmb: '$normalizedPath'")
             
@@ -651,6 +667,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         try {
             log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
+            
+            // ✅ 关键修复：检查是否已选择共享目录
+            if (baseUrl.isEmpty()) {
+                log("[SMB-JCIFS] ❌ No share selected! Please select a share first.")
+                return@withContext 0L
+            }
             
             val normalizedPath = normalizePathForSmb(remotePath)
             val decodedPath = URLDecoder.decode(normalizedPath, "UTF-8")
