@@ -276,12 +276,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 return@withContext true
             } else if (availableShares.isNotEmpty()) {
                 // 成功枚举到共享目录，但没有选择具体共享
+                // ❌ 关键修复：不设置share为空，而是返回false，让上层代码提示用户选择共享
                 this@SmbClient.share = ""
                 this@SmbClient.domain = detectedDomain
-                log("[SMB-JCIFS] === Share enumeration successful, no share selected ===")
+                baseUrl = ""  // 清空baseUrl，避免后续操作使用无效URL
+                log("[SMB-JCIFS] === Share enumeration successful, but no share selected ===")
                 log("[SMB-JCIFS] Available shares: ${availableShares.joinToString(", ")}")
-                // 返回true表示连接成功，让上层代码处理共享选择
-                return@withContext true
+                log("[SMB-JCIFS] ⚠️ Please reconnect and specify a share name from the list above")
+                // 返回false表示需要用户重新选择共享目录
+                return@withContext false
             } else {
                 log("[SMB-JCIFS] === Connection failed ===")
                 return@withContext false

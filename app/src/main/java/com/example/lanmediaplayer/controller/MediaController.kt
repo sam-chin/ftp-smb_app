@@ -599,13 +599,6 @@ class MediaController(private val context: Context, private val logCallback: ((S
             currentSmbBaseUrl = smbClient?.getBaseUrl() ?: ""
             log("[Controller] Saved current SMB baseUrl: '$currentSmbBaseUrl'")
             
-            if (!connected) {
-                log("[Controller] === SMB connection failed ===")
-                return Pair(false, "Failed to connect to SMB server (network/auth error)")
-            }
-            
-            log("[Controller] SMB connection successful")
-            
             // If no share was specified, list available shares
             if (share.isEmpty()) {
                 log("[Controller] No share specified, listing available shares...")
@@ -634,10 +627,15 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         Pair(true, "Connected! Available shares: $sharesList")
                     } else {
                         log("[Controller] No shares found")
-                        Pair(true, "Connected but no shares found")
+                        Pair(false, "Connected but no shares found. Please check server configuration.")
                     }
                 }
+            } else if (!connected) {
+                // ❌ 关键修复：指定了共享名但连接失败
+                log("[Controller] === SMB connection failed ===")
+                return Pair(false, "Failed to connect to SMB server (network/auth error)")
             } else {
+                // 指定了共享名且连接成功
                 log("[Controller] === SMB Connection established to share ===")
                 Pair(true, "Success")
             }
