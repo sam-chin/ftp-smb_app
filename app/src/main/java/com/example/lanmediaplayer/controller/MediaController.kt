@@ -1740,6 +1740,12 @@ class MediaController(private val context: Context, private val logCallback: ((S
     private fun createFileProvider(): HttpProxyServer.FileProvider {
         return object : HttpProxyServer.FileProvider {
             override suspend fun getFileStream(path: String, startOffset: Long): InputStream? {
+                // ✅ 关键修复：检查currentMediaFile是否为null
+                if (currentMediaFile == null) {
+                    log("[Controller] ❌ ERROR: currentMediaFile is null! Cannot get file stream.")
+                    return null
+                }
+                
                 return when (currentMediaFile?.protocol) {
                     is NetworkProtocol.FTP -> {
                         // ✅ FTP 路径处理：确保以 / 开头
@@ -1773,11 +1779,20 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             null
                         }
                     }
-                    else -> null
+                    else -> {
+                        log("[Controller] ❌ ERROR: Unknown protocol or currentMediaFile is null")
+                        null
+                    }
                 }
             }
             
             override suspend fun getFileSize(path: String): Long {
+                // ✅ 关键修复：检查currentMediaFile是否为null
+                if (currentMediaFile == null) {
+                    log("[Controller] ❌ ERROR: currentMediaFile is null! Cannot get file size.")
+                    return 0L
+                }
+                
                 return when (currentMediaFile?.protocol) {
                     is NetworkProtocol.FTP -> {
                         // ✅ FTP 路径处理：确保以 / 开头
@@ -1811,7 +1826,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
                             0L
                         }
                     }
-                    else -> 0L
+                    else -> {
+                        log("[Controller] ❌ ERROR: Unknown protocol or currentMediaFile is null")
+                        0L
+                    }
                 }
             }
         }
