@@ -92,9 +92,9 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     // ✅ 检查连接是否仍然有效
     fun isConnected(): Boolean {
         return try {
-            // ✅ 关键修复：只要context和auth存在就认为连接有效
-            // baseUrl可能为空（未选择共享时），但不影响连接状态
-            context != null && auth != null
+            // ✅ 恢复原始逻辑：检查context、baseUrl和auth
+            // baseUrl为空表示未选择共享，此时不应认为连接完全有效
+            context != null && baseUrl.isNotEmpty() && auth != null
         } catch (e: Exception) {
             false
         }

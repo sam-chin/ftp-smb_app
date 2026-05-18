@@ -859,8 +859,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 
                                 // 创建新客户端并重连
                                 smbClient = com.lanmedia.player.network.SmbClient(logCallback)
-                                val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
-                                val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+                                val reconnected = smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
                                 if (reconnected == true) {
                                     log("[Controller] ✅ SMB reconnection successful, retrying browse...")
                                     // 重试浏览操作
@@ -998,8 +997,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     // 创建新的SMB客户端
                                     smbClient = SmbClient(logCallback)
                                     
-                                    val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
-                                    val reconnected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+                                    val reconnected = smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
                                     if (reconnected == true) {
                                         log("[Controller] ✅ SMB auto-reconnect successful")
                                     } else {
@@ -1712,10 +1710,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // 创建全新的客户端实例
             smbClient = SmbClient(logCallback)
             
-            val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
-            log("[Controller] Connecting to: $smbUrl")
-            
-            val connected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+            val connected = smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
             
             if (connected == true) {
                 log("[Controller] ✅ SMB reconnected successfully")
