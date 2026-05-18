@@ -1685,7 +1685,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
      * 确保SMB连接有效
      */
     private suspend fun ensureSmbConnection(): Boolean {
-        if (smbClient?.isConnected() == true) return true
+        // ✅ 更严格的连接检查
+        if (smbClient?.isConnected() == true) {
+            log("[Controller] ✅ SMB connection is valid")
+            return true
+        }
         
         if (currentSmbHost.isEmpty()) {
             log("[Controller] ❌ SMB config not saved")
@@ -1695,18 +1699,33 @@ class MediaController(private val context: Context, private val logCallback: ((S
         log("[Controller] 🔄 SMB reconnecting...")
         
         try {
-            smbClient?.disconnect()
+            // ✅ 强制断开并清理所有资源
+            smbClient?.forceDisconnect()
+            smbClient = null
+            
+            // 创建全新的客户端实例
             smbClient = SmbClient(logCallback)
             
             val smbUrl = "smb://${currentSmbHost}/${currentSmbShareParam}"
+            log("[Controller] Connecting to: $smbUrl")
+            
             val connected = smbClient?.connect(smbUrl, currentSmbUsername, currentSmbPassword, currentSmbDomain)
             
             if (connected == true) {
-                log("[Controller] ✅ SMB reconnected")
+                log("[Controller] ✅ SMB reconnected successfully")
                 return true
+            } else {
+                log("[Controller] ❌ SMB connect returned false")
+                // 连接失败,清理资源
+                smbClient?.forceDisconnect()
+                smbClient = null
             }
         } catch (e: Exception) {
             log("[Controller] ❌ SMB reconnect failed: ${e.message}")
+            e.printStackTrace()
+            // 异常时也要清理
+            smbClient?.forceDisconnect()
+            smbClient = null
         }
         
         return false
@@ -1730,7 +1749,28 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     is NetworkProtocol.SMB -> {
                         // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
                         log("[Controller] 📡 SMB getFileStream: $path")
-                        smbClient?.getFileStream(path, startOffset)
+                        
+                        // ✅ 尝试获取流,如果连接断开则自动重连
+                        try {
+                            smbClient?.getFileStream(path, startOffset)
+                        } catch (e: com.lanmedia.player.network.SmbConnectionLostException) {
+                            log("[Controller] ⚠️ SMB connection lost during stream, reconnecting...")
+                            
+                            // 自动重连
+                            val reconnected = ensureSmbConnection()
+                            if (reconnected) {
+                                log("[Controller] ✅ SMB reconnected, retrying stream...")
+                                // 重试获取流
+                                smbClient?.getFileStream(path, startOffset)
+                            } else {
+                                log("[Controller] ❌ SMB reconnection failed")
+                                null
+                            }
+                        } catch (e: Exception) {
+                            log("[Controller] ❌ SMB stream error: ${e.message}")
+                            e.printStackTrace()
+                            null
+                        }
                     }
                     else -> null
                 }
@@ -1747,7 +1787,28 @@ class MediaController(private val context: Context, private val logCallback: ((S
                     is NetworkProtocol.SMB -> {
                         // ✅ SMB 路径处理：listFiles 返回的路径已经不含共享名
                         log("[Controller] 📡 SMB getFileSize: $path")
-                        smbClient?.getFileSize(path) ?: 0L
+                        
+                        // ✅ 尝试获取文件大小,如果连接断开则自动重连
+                        try {
+                            smbClient?.getFileSize(path) ?: 0L
+                        } catch (e: com.lanmedia.player.network.SmbConnectionLostException) {
+                            log("[Controller] ⚠️ SMB connection lost during size check, reconnecting...")
+                            
+                            // 自动重连
+                            val reconnected = ensureSmbConnection()
+                            if (reconnected) {
+                                log("[Controller] ✅ SMB reconnected, retrying size check...")
+                                // 重试获取大小
+                                smbClient?.getFileSize(path) ?: 0L
+                            } else {
+                                log("[Controller] ❌ SMB reconnection failed")
+                                0L
+                            }
+                        } catch (e: Exception) {
+                            log("[Controller] ❌ SMB size error: ${e.message}")
+                            e.printStackTrace()
+                            0L
+                        }
                     }
                     else -> 0L
                 }

@@ -92,9 +92,29 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     // ✅ 检查连接是否仍然有效
     fun isConnected(): Boolean {
         return try {
-            context != null && baseUrl.isNotEmpty()
+            context != null && baseUrl.isNotEmpty() && auth != null
         } catch (e: Exception) {
             false
+        }
+    }
+    
+    // ✅ 强制断开并清理所有资源
+    fun forceDisconnect() {
+        log("[SMB-JCIFS] Force disconnecting and cleaning up resources")
+        try {
+            auth = null
+            context = null
+            baseUrl = ""
+            host = ""
+            share = ""
+            username = ""
+            password = ""
+            domain = ""
+            serverEncoding = null
+            availableShares = emptyList()
+            log("[SMB-JCIFS] All resources cleaned up")
+        } catch (e: Exception) {
+            log("[SMB-JCIFS] Error during force disconnect: ${e.message}")
         }
     }
     
@@ -556,6 +576,12 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
             log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
             
+            // ✅ 检查连接状态
+            if (!isConnected()) {
+                log("[SMB-JCIFS] ⚠️ Connection lost before opening stream")
+                throw SmbConnectionLostException("SMB connection lost")
+            }
+            
             val normalizedPath = normalizePathForSmb(remotePath)
             log("[SMB-JCIFS] After normalizePathForSmb: '$normalizedPath'")
             
@@ -583,7 +609,25 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             
             log("[SMB-JCIFS] Stream opened with 512KB buffer for continuous reading")
             bufferedStream
+        } catch (e: SmbConnectionLostException) {
+            // ✅ 直接抛出连接断开异常
+            throw e
         } catch (e: Exception) {
+            // ✅ 检测是否为连接断开异常
+            val isConnectionLost = e.message?.let { msg ->
+                msg.contains("connection", ignoreCase = true) ||
+                msg.contains("timeout", ignoreCase = true) ||
+                msg.contains("closed", ignoreCase = true) ||
+                msg.contains("reset", ignoreCase = true) ||
+                msg.contains("abort", ignoreCase = true) ||
+                msg.contains("broken pipe", ignoreCase = true)
+            } ?: false
+            
+            if (isConnectionLost) {
+                log("[SMB-JCIFS] ⚠️ Connection lost detected: ${e.message}")
+                throw SmbConnectionLostException("SMB connection lost: ${e.message}")
+            }
+            
             log("[SMB-JCIFS] Error opening stream: ${e.message}")
             e.printStackTrace()
             null
