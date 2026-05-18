@@ -312,10 +312,17 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     }
     
     suspend fun selectShare(shareName: String): Boolean = withContext(Dispatchers.IO) {
-        if (shareName !in availableShares) {
-            log("[SMB-JCIFS] Share '$shareName' not in available shares")
+        // ✅ 关键修复：移除严格的availableShares检查，允许选择任何共享名
+        // 原因：availableShares可能为空（连接时未列出），但用户仍然可以选择共享
+        if (shareName.isEmpty()) {
+            log("[SMB-JCIFS] Share name is empty")
             return@withContext false
         }
+        
+        log("[SMB-JCIFS] === selectShare START ===")
+        log("[SMB-JCIFS] shareName: '$shareName'")
+        log("[SMB-JCIFS] host: '$host'")
+        log("[SMB-JCIFS] context is null: ${context == null}")
         
         try {
             share = shareName
@@ -331,7 +338,7 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Share exists: $exists")
             
             if (!exists) {
-                log("[SMB-JCIFS] Share is not accessible")
+                log("[SMB-JCIFS] ❌ Share is not accessible")
                 return@withContext false
             }
             
@@ -340,14 +347,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             log("[SMB-JCIFS] Is directory: $isDir")
             
             if (isDir) {
-                log("[SMB-JCIFS] Share is accessible")
+                log("[SMB-JCIFS] ✅ Share is accessible")
                 return@withContext true
             } else {
-                log("[SMB-JCIFS] Share is not a directory")
+                log("[SMB-JCIFS] ❌ Share is not a directory")
                 return@withContext false
             }
         } catch (e: Exception) {
-            log("[SMB-JCIFS] Error selecting share: ${e.message}")
+            log("[SMB-JCIFS] ❌ Error selecting share: ${e.message}")
+            log("[SMB-JCIFS] Exception type: ${e.javaClass.simpleName}")
             e.printStackTrace()
             return@withContext false
         }

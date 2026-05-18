@@ -653,7 +653,15 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     suspend fun selectShare(shareName: String): Boolean {
         log("[Controller] Selecting share: $shareName")
-        return smbClient?.selectShare(shareName) ?: false
+        val success = smbClient?.selectShare(shareName) ?: false
+        
+        // ✅ 关键修复：选择共享后，更新currentSmbShareParam用于自动重连
+        if (success) {
+            currentSmbShareParam = shareName
+            log("[Controller] Updated currentSmbShareParam to: $shareName")
+        }
+        
+        return success
     }
 
     suspend fun getSharesList(): List<MediaFile> {
