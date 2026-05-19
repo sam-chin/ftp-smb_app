@@ -1906,8 +1906,8 @@ fun ImageViewerScreen(
     
     // ✅ 音频文件选择器
     val audioPickerLauncher = rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-        onResult = { uri ->
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri: android.net.Uri? ->
             if (uri != null) {
                 backgroundMusicUri = uri
                 // 配置MediaPlayer
