@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1918,7 +1919,7 @@ fun ImageViewerScreen(
                     )
                     
                     // 设置数据源并准备播放
-                    val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
+                    val mediaItem = androidx.media3.common.MediaItem.fromUri(uri.toString())
                     mediaPlayer.setMediaItem(mediaItem)
                     mediaPlayer.prepare()
                     mediaPlayer.repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE  // 单曲循环

@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.lanmedia.player
 
 import androidx.compose.foundation.background
