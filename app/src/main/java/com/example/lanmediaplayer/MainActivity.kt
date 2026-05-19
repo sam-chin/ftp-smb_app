@@ -81,7 +81,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import androidx.compose.ui.window.rememberWindowState
 import android.view.WindowManager
 
 class MainActivity : ComponentActivity() {

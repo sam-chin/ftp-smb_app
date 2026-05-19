@@ -456,15 +456,35 @@ fun TextReaderScreen(
                             }
                         }
                         
-                        // ✅ 左右滑动翻页手势
+                        // ✅ 左右滑动翻页手势（避开系统手势区域）
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .pointerInput(currentPage, totalPages) {
                                     detectHorizontalDragGestures(
-                                        onDragStart = { },
+                                        onDragStart = { offset ->
+                                            // ✅ 关键修复：检测手势起始位置
+                                            val screenWidth = size.width
+                                            val edgeThreshold = screenWidth * 0.2f  // 边缘20%区域
+                                            
+                                            // 如果在屏幕边缘，不消费事件，让系统处理返回手势
+                                            if (offset.x < edgeThreshold || offset.x > screenWidth - edgeThreshold) {
+                                                // 在边缘区域，不拦截手势
+                                                return@detectHorizontalDragGestures
+                                            }
+                                        },
                                         onDragEnd = { },
                                         onHorizontalDrag = { change, dragAmount ->
+                                            // ✅ 只在中间80%区域响应翻页
+                                            val screenWidth = size.width
+                                            val edgeThreshold = screenWidth * 0.2f
+                                            val currentX = change.position.x
+                                            
+                                            // 如果当前位置在边缘区域，不处理
+                                            if (currentX < edgeThreshold || currentX > screenWidth - edgeThreshold) {
+                                                return@detectHorizontalDragGestures
+                                            }
+                                            
                                             change.consume()
                                             if (Math.abs(dragAmount) > 30) {  // ✅ 降低阈值到30，更灵敏
                                                 if (dragAmount > 0 && currentPage > 0) {
