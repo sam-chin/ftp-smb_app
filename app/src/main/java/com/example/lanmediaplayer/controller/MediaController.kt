@@ -40,6 +40,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
     
     private var ftpClient: FtpClient? = null
     private var smbClient: SmbClient? = null
+    
+    // ✅ 新增：获取SMB客户端实例（用于TextReaderScreen检查连接状态）
+    fun getSmbClient(): SmbClient? {
+        return smbClient
+    }
     private var currentMediaFile: MediaFile? = null
     private var currentVideoUrl: String = ""
     private var currentSmbShare: String = ""  // ✅ 保存当前SMB共享目录

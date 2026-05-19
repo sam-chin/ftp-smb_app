@@ -143,6 +143,11 @@ class SmbClient(
         }
     }
     
+    // ✅ 关键新增：检查是否已选择共享目录
+    fun hasSelectedShare(): Boolean {
+        return baseUrl.isNotEmpty() && share.isNotEmpty()
+    }
+    
     // ✅ 强制断开并清理所有资源
     fun forceDisconnect() {
         log("[SMB-JCIFS] Force disconnecting and cleaning up resources")

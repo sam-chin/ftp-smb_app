@@ -133,9 +133,14 @@ class MainActivity : ComponentActivity() {
             var isDarkTheme by remember { mutableStateOf(true) }
             
             LanMediaPlayerTheme(darkTheme = isDarkTheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                // ✅ 关键修复：在整个应用级别设置背景色，避免白屏
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (isDarkTheme) MaterialTheme.colorScheme.background
+                            else MaterialTheme.colorScheme.background
+                        )
                 ) {
                     // ✅ 启动画面状态
                     var showSplash by remember { mutableStateOf(true) }

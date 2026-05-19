@@ -65,13 +65,41 @@ fun TextReaderScreen(
         
         try {
             addLog("[TextReader] Loading file: ${textFile.name}")
+            addLog("[TextReader] File path: ${textFile.path}")
+            
+            // ✅ 关键修复：检查SMB连接状态
+            if (selectedProtocol is com.lanmedia.player.controller.NetworkProtocol.SMB) {
+                val smbClient = mediaController.getSmbClient()
+                if (smbClient == null) {
+                    errorMessage = "SMB client not initialized"
+                    isLoading = false
+                    addLog("[TextReader] ❌ SMB client is null")
+                    return@LaunchedEffect
+                }
+                
+                if (!smbClient.isConnected()) {
+                    errorMessage = "SMB connection lost, please reconnect"
+                    isLoading = false
+                    addLog("[TextReader] ❌ SMB connection lost")
+                    return@LaunchedEffect
+                }
+                
+                // ✅ 检查是否已选择共享目录
+                if (!smbClient.hasSelectedShare()) {
+                    errorMessage = "No share selected. Please select a shared folder first."
+                    isLoading = false
+                    addLog("[TextReader] ❌ No SMB share selected")
+                    return@LaunchedEffect
+                }
+            }
             
             // 获取文件流
             val inputStream = mediaController.getFileStream(textFile.path, selectedProtocol)
             
             if (inputStream == null) {
-                errorMessage = "Failed to open file"
+                errorMessage = "Failed to open file (returned null stream)"
                 isLoading = false
+                addLog("[TextReader] ❌ getFileStream returned null")
                 return@LaunchedEffect
             }
             
