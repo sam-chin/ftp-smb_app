@@ -81,6 +81,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.ui.window.rememberWindowState
+import android.view.WindowManager
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
@@ -98,6 +100,19 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             android.util.Log.e("LAN Media", "Failed to set preferIPv4Stack", e)
         }
+        
+        // ✅ 关键修复：设置全屏模式，消除顶部和底部空白
+        window.decorView.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        )
+        
+        // ✅ 设置窗口标志，确保内容延伸到系统栏后面
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         
         // ✅ 检查网络状态（针对小米澎湃OS优化）
         checkNetworkStatus()

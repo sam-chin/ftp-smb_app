@@ -34,11 +34,12 @@ import java.io.ByteArrayInputStream
 import java.io.SequenceInputStream
 import java.io.InputStreamReader
 import java.nio.charset.Charset
+import org.mozilla.universalchardet.UniversalDetector
 
-// ✅ 智能文本编码检测和读取函数(增强版:支持多种编码)
+// ✅ 智能文本编码检测和读取函数(使用专业编码检测库)
 private fun detectAndReadText(inputStream: InputStream): String {
-    // 第一步：读取前2KB用于编码检测
-    val probeSize = 2048
+    // 第一步：读取前10KB用于编码检测
+    val probeSize = 10240
     val probeBuffer = ByteArrayOutputStream()
     val tempBuffer = ByteArray(probeSize)
     var totalBytesRead = 0
@@ -56,52 +57,24 @@ private fun detectAndReadText(inputStream: InputStream): String {
         return ""
     }
     
-    // 第二步：检测BOM (Byte Order Mark)
-    val bomEncoding = when {
-        // UTF-8 BOM: EF BB BF
-        probeData.size >= 3 && 
-        probeData[0].toInt() == 0xEF && 
-        probeData[1].toInt() == 0xBB && 
-        probeData[2].toInt() == 0xBF -> "UTF-8"
-        
-        // UTF-16 LE BOM: FF FE
-        probeData.size >= 2 && 
-        probeData[0].toInt() == 0xFF && 
-        probeData[1].toInt() == 0xFE -> "UTF-16LE"
-        
-        // UTF-16 BE BOM: FE FF
-        probeData.size >= 2 && 
-        probeData[0].toInt() == 0xFE && 
-        probeData[1].toInt() == 0xFF -> "UTF-16BE"
-        
-        // UTF-32 LE BOM: FF FE 00 00
-        probeData.size >= 4 && 
-        probeData[0].toInt() == 0xFF && 
-        probeData[1].toInt() == 0xFE && 
-        probeData[2].toInt() == 0x00 && 
-        probeData[3].toInt() == 0x00 -> "UTF-32LE"
-        
-        // UTF-32 BE BOM: 00 00 FE FF
-        probeData.size >= 4 && 
-        probeData[0].toInt() == 0x00 && 
-        probeData[1].toInt() == 0x00 && 
-        probeData[2].toInt() == 0xFE && 
-        probeData[3].toInt() == 0xFF -> "UTF-32BE"
-        
-        else -> null
-    }
+    // 第二步：✅ 使用 UniversalDetector 准确检测编码
+    val detector = UniversalDetector(null)
+    detector.handleData(probeData, 0, probeData.size)
+    detector.dataEnd()
     
-    // 第三步：根据BOM或智能检测选择编码
-    val charsetName = if (bomEncoding != null) {
-        bomEncoding
+    val detectedCharset = detector.detectedCharset
+    detector.reset()
+    
+    val charsetName = if (detectedCharset != null) {
+        android.util.Log.d("TextReader", "Detected encoding: $detectedCharset")
+        detectedCharset
     } else {
-        // 没有BOM，使用统计方法检测
-        detectEncodingByStatistics(probeData)
+        // 如果检测失败，默认使用GBK（中文环境最常见）
+        android.util.Log.w("TextReader", "Detection failed, default to GBK")
+        "GBK"
     }
     
-    android.util.Log.d("TextReader", "Detected encoding: $charsetName")
-    
-    // 第四步：分块流式读取
+    // 第三步：分块流式读取
     val remainingStream = SequenceInputStream(
         ByteArrayInputStream(probeData),
         inputStream
@@ -118,103 +91,6 @@ private fun detectAndReadText(inputStream: InputStream): String {
     
     reader.close()
     return stringBuilder.toString()
-}
-
-// ✅ 基于统计的编码检测方法
-private fun detectEncodingByStatistics(data: ByteArray): String {
-    // 检查是否为纯ASCII
-    var isAscii = true
-    for (byte in data) {
-        if (byte.toInt() < 0 || byte.toInt() > 127) {
-            isAscii = false
-            break
-        }
-    }
-    if (isAscii) return "UTF-8"  // ASCII是UTF-8的子集
-    
-    // 尝试UTF-8解码
-    try {
-        val utf8Content = String(data, Charsets.UTF_8)
-        // 检查是否包含替换字符
-        if (!utf8Content.contains('\uFFFD')) {
-            // 进一步验证：检查是否有有效的多字节UTF-8序列
-            var hasMultiByte = false
-            var i = 0
-            while (i < data.size) {
-                val b = data[i].toInt() and 0xFF
-                if (b > 127) {
-                    hasMultiByte = true
-                    // 检查是否是有效的UTF-8多字节序列
-                    when {
-                        b in 0xC0..0xDF -> { // 2字节
-                            if (i + 1 < data.size && (data[i + 1].toInt() and 0xC0) == 0x80) {
-                                i += 2
-                            } else break
-                        }
-                        b in 0xE0..0xEF -> { // 3字节
-                            if (i + 2 < data.size && 
-                                (data[i + 1].toInt() and 0xC0) == 0x80 &&
-                                (data[i + 2].toInt() and 0xC0) == 0x80) {
-                                i += 3
-                            } else break
-                        }
-                        b in 0xF0..0xF7 -> { // 4字节
-                            if (i + 3 < data.size && 
-                                (data[i + 1].toInt() and 0xC0) == 0x80 &&
-                                (data[i + 2].toInt() and 0xC0) == 0x80 &&
-                                (data[i + 3].toInt() and 0xC0) == 0x80) {
-                                i += 4
-                            } else break
-                        }
-                        else -> break
-                    }
-                } else {
-                    i++
-                }
-            }
-            if (hasMultiByte && i >= data.size - 10) {
-                return "UTF-8"  // 有效的UTF-8
-            }
-        }
-    } catch (e: Exception) {
-        // UTF-8解码失败
-    }
-    
-    // 尝试GBK/GB2312检测（中文常用）
-    try {
-        val gbkContent = String(data, Charset.forName("GBK"))
-        // GBK中文字符通常在特定范围内
-        var chineseCharCount = 0
-        for (char in gbkContent) {
-            if (char.toInt() in 0x4E00..0x9FFF) {  // CJK统一汉字
-                chineseCharCount++
-            }
-        }
-        if (chineseCharCount > 10) {
-            return "GBK"  // 检测到较多中文字符
-        }
-    } catch (e: Exception) {
-        // GBK解码失败
-    }
-    
-    // 尝试Big5（繁体中文）
-    try {
-        val big5Content = String(data, Charset.forName("Big5"))
-        var traditionalChineseCount = 0
-        for (char in big5Content) {
-            if (char.toInt() in 0x4E00..0x9FFF) {
-                traditionalChineseCount++
-            }
-        }
-        if (traditionalChineseCount > 10) {
-            return "Big5"
-        }
-    } catch (e: Exception) {
-        // Big5解码失败
-    }
-    
-    // 默认返回UTF-8
-    return "UTF-8"
 }
 
 // ✅ 文本阅读器主题枚举
@@ -814,28 +690,13 @@ fun TextReaderScreen(
                 title = { Text("目录 (${tableOfContents.size}章)") },
                 text = {
                     Column {
-                        // ✅ 阅读进度条
-                        if (readMode == "PAGE" && totalPages > 0) {
-                            Column(modifier = Modifier.padding(bottom = 8.dp)) {
-                                Text(
-                                    text = "阅读进度: ${currentPage + 1} / $totalPages 页",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                LinearProgressIndicator(
-                                    progress = (currentPage + 1).toFloat() / totalPages,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        } else if (textLines.isNotEmpty()) {
-                            // 滑动模式显示行进度
+                        // ✅ 目录滚动进度指示器
+                        if (tableOfContents.size > 10) {  // 只有章节较多时才显示
                             Text(
-                                text = "总行数: ${textLines.size}",
+                                text = "共 ${tableOfContents.size} 章，滚动查看更多",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(bottom = 8.dp)
+                                modifier = Modifier.padding(bottom = 4.dp)
                             )
                         }
                         
