@@ -23,6 +23,8 @@ import com.lanmedia.player.controller.MediaController
 import com.lanmedia.player.controller.MediaFile
 import com.lanmedia.player.controller.NetworkProtocol
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 // ✅ 文本阅读器主题枚举
 enum class TextReaderTheme {
@@ -60,15 +62,17 @@ fun TextReaderScreen(
     // ✅ 本地日志列表（用于在界面上显示）
     var localLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     
-    // ✅ 包装addLog，同时更新本地日志
-    val wrappedAddLog: (String) -> Unit = { message ->
-        addLog(message)  // 调用外部的addLog（添加到MainActivity的debugLogs）
-        // ✅ 同时添加到本地日志列表
-        localLogs = localLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+    // ✅ 添加日志的辅助函数
+    fun addLocalLog(message: String) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())
+        val logEntry = "$timestamp - $message"
+        localLogs = localLogs + logEntry
         // 保持最近100条日志
         if (localLogs.size > 100) {
             localLogs = localLogs.drop(localLogs.size - 100)
         }
+        // 同时发送到全局日志
+        addLog(message)
     }
     
     // 加载文本文件
@@ -76,7 +80,7 @@ fun TextReaderScreen(
         if (textFile == null) {
             errorMessage = "No file selected"
             isLoading = false
-            wrappedAddLog("[TextReader] ❌ textFile is null")
+            addLocalLog("[TextReader] ❌ textFile is null")
             return@LaunchedEffect
         }
         
@@ -84,9 +88,9 @@ fun TextReaderScreen(
         errorMessage = null
         
         try {
-            wrappedAddLog("[TextReader] Loading file: ${textFile.name}")
-            wrappedAddLog("[TextReader] File path: ${textFile.path}")
-            wrappedAddLog("[TextReader] Protocol: $selectedProtocol")
+            addLocalLog("[TextReader] Loading file: ${textFile.name}")
+            addLocalLog("[TextReader] File path: ${textFile.path}")
+            addLocalLog("[TextReader] Protocol: $selectedProtocol")
             
             // ✅ 关键修复：检查SMB连接状态
             if (selectedProtocol is com.lanmedia.player.controller.NetworkProtocol.SMB) {
@@ -94,14 +98,14 @@ fun TextReaderScreen(
                 if (smbClient == null) {
                     errorMessage = "SMB client not initialized"
                     isLoading = false
-                    wrappedAddLog("[TextReader] ❌ SMB client is null")
+                    addLocalLog("[TextReader] ❌ SMB client is null")
                     return@LaunchedEffect
                 }
                 
                 if (!smbClient.isConnected()) {
                     errorMessage = "SMB connection lost, please reconnect"
                     isLoading = false
-                    wrappedAddLog("[TextReader] ❌ SMB connection lost")
+                    addLocalLog("[TextReader] ❌ SMB connection lost")
                     return@LaunchedEffect
                 }
                 
@@ -109,16 +113,16 @@ fun TextReaderScreen(
                 if (!smbClient.hasSelectedShare()) {
                     errorMessage = "No share selected. Please select a shared folder first."
                     isLoading = false
-                    wrappedAddLog("[TextReader] ❌ No SMB share selected")
+                    addLocalLog("[TextReader] ❌ No SMB share selected")
                     return@LaunchedEffect
                 }
             }
             
             // ✅ 关键修复：在IO线程执行网络操作，避免NetworkOnMainThreadException
-            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 try {
                     // 获取文件流
-                    wrappedAddLog("[TextReader] Calling getFileStream with path: ${textFile.path}")
+                    addLocalLog("[TextReader] Calling getFileStream with path: ${textFile.path}")
                     val inputStream = mediaController.getFileStream(textFile.path, selectedProtocol)
                     
                     if (inputStream == null) {
@@ -138,7 +142,7 @@ fun TextReaderScreen(
             if (error != null) {
                 errorMessage = error
                 isLoading = false
-                wrappedAddLog("[TextReader] ❌ $error")
+                addLocalLog("[TextReader] ❌ $error")
                 return@LaunchedEffect
             }
             
@@ -158,16 +162,16 @@ fun TextReaderScreen(
                 tableOfContents = toc
                 
                 isLoading = false
-                wrappedAddLog("[TextReader] File loaded: ${lines.size} lines, ${toc.size} chapters")
+                addLocalLog("[TextReader] File loaded: ${lines.size} lines, ${toc.size} chapters")
             }
             
         } catch (e: Exception) {
             val errorMsg = e.message ?: "Unknown error (${e.javaClass.simpleName})"
             errorMessage = "Error loading file: $errorMsg\nFile: ${textFile.name}"
             isLoading = false
-            wrappedAddLog("[TextReader] Error: $errorMsg")
-            wrappedAddLog("[TextReader] Exception type: ${e.javaClass.name}")
-            wrappedAddLog("[TextReader] File path: ${textFile.path}")
+            addLocalLog("[TextReader] Error: $errorMsg")
+            addLocalLog("[TextReader] Exception type: ${e.javaClass.name}")
+            addLocalLog("[TextReader] File path: ${textFile.path}")
             e.printStackTrace()
         }
     }
