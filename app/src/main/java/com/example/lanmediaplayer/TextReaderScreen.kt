@@ -146,6 +146,11 @@ fun TextReaderScreen(
     // ✅ 目录(简单实现:按章节标题提取)
     var tableOfContents by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
     
+    // ✅ 目录分页状态
+    var tocCurrentPage by remember { mutableStateOf(0) }  // 当前目录页
+    val tocPageSize = 100  // 每页显示100章
+    var tocJumpInput by remember { mutableStateOf("") }  // 快速跳转输入
+    
     // ✅ 本地日志列表（用于在界面上显示）
     var localLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     
@@ -730,26 +735,98 @@ fun TextReaderScreen(
         
         // ✅ 目录对话框
         if (showToc && tableOfContents.isNotEmpty()) {
+            // ✅ 计算总页数和当前页的章节
+            val totalTocPages = (tableOfContents.size + tocPageSize - 1) / tocPageSize
+            val startIndex = tocCurrentPage * tocPageSize
+            val endIndex = minOf(startIndex + tocPageSize, tableOfContents.size)
+            val currentPageChapters = tableOfContents.subList(startIndex, endIndex)
+            
             AlertDialog(
                 onDismissRequest = { showToc = false },
                 title = { Text("目录 (${tableOfContents.size}章)") },
                 text = {
                     Column {
-                        // ✅ 目录滚动进度指示器
-                        if (tableOfContents.size > 10) {  // 只有章节较多时才显示
-                            Text(
-                                text = "共 ${tableOfContents.size} 章，滚动查看更多",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(bottom = 4.dp)
+                        // ✅ 快速跳转到指定章节
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = tocJumpInput,
+                                onValueChange = { 
+                                    if (it.isEmpty() || it.all { char -> char.isDigit() }) {
+                                        tocJumpInput = it
+                                    }
+                                },
+                                label = { Text("章节号") },
+                                placeholder = { Text("1-${tableOfContents.size}") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                keyboardOptions = androidx.compose.ui.text.input.KeyboardOptions(
+                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                )
                             )
+                            Button(
+                                onClick = {
+                                    val chapterNum = tocJumpInput.toIntOrNull()
+                                    if (chapterNum != null && chapterNum in 1..tableOfContents.size) {
+                                        val (title, lineNumber) = tableOfContents[chapterNum - 1]
+                                        // 跳转到对应章节
+                                        if (readMode == "PAGE") {
+                                            val targetPage = lineNumber / 20
+                                            currentPage = targetPage.coerceIn(0, totalPages - 1)
+                                        }
+                                        addLog("[TextReader] Jump to chapter $chapterNum: '$title'")
+                                        showToc = false
+                                        tocJumpInput = ""
+                                    } else {
+                                        addLog("[TextReader] Invalid chapter number: $tocJumpInput")
+                                    }
+                                },
+                                enabled = tocJumpInput.isNotEmpty()
+                            ) {
+                                Text("跳转")
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        // ✅ 目录分页指示器
+                        if (totalTocPages > 1) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "第 ${tocCurrentPage + 1} / $totalTocPages 页",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    IconButton(
+                                        onClick = { if (tocCurrentPage > 0) tocCurrentPage-- },
+                                        enabled = tocCurrentPage > 0
+                                    ) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = "上一页")
+                                    }
+                                    IconButton(
+                                        onClick = { if (tocCurrentPage < totalTocPages - 1) tocCurrentPage++ },
+                                        enabled = tocCurrentPage < totalTocPages - 1
+                                    ) {
+                                        Icon(Icons.Default.ArrowForward, contentDescription = "下一页")
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
                         }
                         
                         LazyColumn(
                             modifier = Modifier.heightIn(max = 400.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(tableOfContents) { (title, lineNumber) ->
+                            items(currentPageChapters) { (title, lineNumber) ->
                                 Text(
                                     text = title,
                                     fontSize = 14.sp,
@@ -776,7 +853,11 @@ fun TextReaderScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showToc = false }) {
+                    TextButton(onClick = { 
+                        showToc = false
+                        tocCurrentPage = 0  // 重置目录页
+                        tocJumpInput = ""   // 清空输入
+                    }) {
                         Text("关闭")
                     }
                 }

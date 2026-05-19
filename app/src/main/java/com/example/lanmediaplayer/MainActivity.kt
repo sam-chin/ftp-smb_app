@@ -1642,6 +1642,12 @@ fun PlayerScreen(
     var showCastDialog by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }  // 控制按钮显示状态
     
+    // ✅ 关键修复：拦截系统返回手势，实现逐级返回
+    BackHandler(enabled = true) {
+        mediaController.stopPlayback()
+        onBackClick()
+    }
+    
     // 添加状态用于显示拖动进度提示
     var isDragging by remember { mutableStateOf(false) }
     var dragStartPosition by remember { mutableStateOf(0f) }  // ✅ 记录起始位置
@@ -1685,10 +1691,15 @@ fun PlayerScreen(
         }
     }
     
+    // ✅ 关键修复：使用WindowInsets添加安全区域，避免内容被系统栏遮挡
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .padding(
+                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            )
     ) {
         AndroidView(
             factory = { ctx ->
@@ -1949,6 +1960,11 @@ fun ImageViewerScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     
+    // ✅ 关键修复：拦截系统返回手势，实现逐级返回
+    BackHandler(enabled = true) {
+        onBackClick()
+    }
+    
     // ✅ MediaPlayer实例
     val mediaPlayer = remember { androidx.media3.exoplayer.ExoPlayer.Builder(context).build() }
     
@@ -2150,10 +2166,15 @@ fun ImageViewerScreen(
     // ✅ 跟踪当前页面的缩放状态
     var isCurrentPageZoomed by remember { mutableStateOf(false) }
     
+    // ✅ 关键修复：使用WindowInsets添加安全区域，避免内容被系统栏遮挡
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .padding(
+                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            )
     ) {
         if (imageFiles.isEmpty()) {
             Text(
