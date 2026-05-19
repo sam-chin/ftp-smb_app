@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -236,25 +238,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ✅ 启动画面 - 带Logo和加载动画
+// ✅ 启动画面 - 极速模式，不增加启动时间
 @Composable
 fun SplashScreen(onSplashFinished: () -> Unit) {
     val alpha = remember { Animatable(0f) }
-    val scale = remember { Animatable(0.5f) }
     
     LaunchedEffect(Unit) {
-        // 淡入动画
+        // ✅ 快速淡入动画（300ms）
         alpha.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
         )
-        // 缩放动画
-        scale.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
-        )
-        // 显示2秒后消失
-        delay(2000)
+        // ✅ 立即消失，不等待（总耗时约300-500ms）
         onSplashFinished()
     }
     
@@ -266,42 +261,24 @@ fun SplashScreen(onSplashFinished: () -> Unit) {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Logo图标 (使用mipmap中的ic_launcher)
             Image(
                 painter = androidx.compose.ui.res.painterResource(id = R.mipmap.ic_launcher),
                 contentDescription = "App Logo",
                 modifier = Modifier
-                    .size(120.dp)
-                    .graphicsLayer(
-                        alpha = alpha.value,
-                        scaleX = scale.value,
-                        scaleY = scale.value
-                    ),
+                    .size(100.dp)
+                    .graphicsLayer(alpha = alpha.value),
                 contentScale = ContentScale.Fit
             )
             
             // App名称
             Text(
                 text = "LAN Media Player",
-                fontSize = 28.sp,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.graphicsLayer(alpha = alpha.value)
-            )
-            
-            // 加载动画
-            CircularProgressIndicator(
-                modifier = Modifier.size(48.dp),
-                color = Color(0xFF6C63FF),
-                strokeWidth = 4.dp
-            )
-            
-            Text(
-                text = "正在启动...",
-                fontSize = 14.sp,
-                color = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.graphicsLayer(alpha = alpha.value)
             )
         }
@@ -351,6 +328,9 @@ fun MainScreen(
     
     var imageFiles by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var initialImageIndex by remember { mutableStateOf(0) }
+    
+    // ✅ 文本阅读器状态
+    var currentTextFile by remember { mutableStateOf<MediaFile?>(null) }
     
     var selectedFile by remember { mutableStateOf<MediaFile?>(null) }
     var showFileMenu by remember { mutableStateOf(false) }
@@ -756,6 +736,9 @@ fun MainScreen(
                     // ✅ 支持更多图片格式
                     val isImage = extension in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "svg", "ico", "heic", "heif", "raw", "cr2", "nef", "arw", "dng")
                     
+                    // ✅ 支持文本文件
+                    val isText = extension in listOf("txt")
+                    
                     if (isImage) {
                         val allImageFiles = files.filter { f ->
                             val ext = f.name.substringAfterLast('.', "").lowercase()
@@ -770,6 +753,11 @@ fun MainScreen(
                         addLog("Set currentMediaFile for image preview: ${file.name}")
                         
                         currentScreen = Screen.ImageViewer
+                    } else if (isText) {
+                        // ✅ 打开文本阅读器
+                        currentTextFile = file
+                        currentScreen = Screen.TextReader
+                        addLog("Opening text file: ${file.name}")
                     } else {
                         mediaController.playMedia(file, object : MediaController.MediaCallback {
                             override fun onFilesLoaded(files: List<MediaFile>) {}
@@ -1000,6 +988,20 @@ fun MainScreen(
                 debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
             }
         )
+        
+        // ✅ 文本阅读器
+        Screen.TextReader -> TextReaderScreen(
+            textFile = currentTextFile,
+            mediaController = mediaController,
+            selectedProtocol = selectedProtocol,
+            onBackClick = {
+                currentScreen = Screen.FileBrowser
+            },
+            onError = onError,
+            addLog = { message ->
+                debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+            }
+        )
     }
     
     if (showFileMenu && selectedFile != null) {
@@ -1074,7 +1076,8 @@ enum class Screen {
     Connection,
     FileBrowser,
     Player,
-    ImageViewer
+    ImageViewer,
+    TextReader  // ✅ 新增：文本阅读器
 }
 
 @Composable
@@ -1890,8 +1893,46 @@ fun ImageViewerScreen(
     var slideshowInterval by remember { mutableStateOf(2) }  // ✅ 默认2秒
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showCastDialog by remember { mutableStateOf(false) }
+    
+    // ✅ 背景音乐功能
+    var backgroundMusicUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var isMusicPlaying by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    
+    // ✅ MediaPlayer实例
+    val mediaPlayer = remember { androidx.media3.exoplayer.ExoPlayer.Builder(context).build() }
+    
+    // ✅ 音频文件选择器
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            if (uri != null) {
+                backgroundMusicUri = uri
+                // 配置MediaPlayer
+                try {
+                    // 获取持久化权限
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                    
+                    // 设置数据源并准备播放
+                    val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
+                    mediaPlayer.setMediaItem(mediaItem)
+                    mediaPlayer.prepare()
+                    mediaPlayer.repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE  // 单曲循环
+                    mediaPlayer.playWhenReady = true
+                    isMusicPlaying = true
+                    
+                    addLog("[Slideshow] Background music loaded successfully")
+                } catch (e: Exception) {
+                    addLog("[Slideshow] Failed to load music: ${e.message}")
+                    e.printStackTrace()
+                }
+            }
+        }
+    )
     
     // ✅ 保存当前投屏设备（用于幻灯片模式自动切换）
     var castingDevice by remember { mutableStateOf<CastDevice?>(null) }
@@ -1953,6 +1994,17 @@ fun ImageViewerScreen(
     
     LaunchedEffect(isSlideshowPlaying, slideshowInterval) {
         if (isSlideshowPlaying && imageFiles.isNotEmpty()) {
+            // ✅ 如果选择了背景音乐且未在播放，开始播放
+            if (backgroundMusicUri != null && !isMusicPlaying && !mediaPlayer.isPlaying) {
+                try {
+                    mediaPlayer.play()
+                    isMusicPlaying = true
+                    addLog("[Slideshow] Background music started")
+                } catch (e: Exception) {
+                    addLog("[Slideshow] Failed to start music: ${e.message}")
+                }
+            }
+            
             while (isSlideshowPlaying) {
                 delay(slideshowInterval * 1000L)
                 if (isSlideshowPlaying) {
@@ -2037,6 +2089,12 @@ fun ImageViewerScreen(
             castingDevice = null
             // ✅ 清除投屏活跃状态
             (context as? MainActivity)?.setCastingState(false)
+            
+            // ✅ 停止背景音乐
+            if (mediaPlayer.isPlaying) {
+                mediaPlayer.stop()
+            }
+            mediaPlayer.release()
         }
     }
     
@@ -2119,6 +2177,20 @@ fun ImageViewerScreen(
                                 mediaController.stopDlnaService()
                                 mediaController.stopCasting()  // ✅ 关键修复：恢复本地预览
                                 (context as? MainActivity)?.setCastingState(false)
+                                
+                                // ✅ 停止背景音乐
+                                if (mediaPlayer.isPlaying) {
+                                    mediaPlayer.pause()
+                                    isMusicPlaying = false
+                                    addLog("[Slideshow] Background music paused")
+                                }
+                            } else {
+                                // ✅ 开始幻灯片时，如果有音乐则播放
+                                if (backgroundMusicUri != null && !mediaPlayer.isPlaying) {
+                                    mediaPlayer.play()
+                                    isMusicPlaying = true
+                                    addLog("[Slideshow] Background music resumed")
+                                }
                             }
                         },
                         modifier = Modifier.size(40.dp)
@@ -2140,6 +2212,37 @@ fun ImageViewerScreen(
                             imageVector = Icons.Default.Timer,
                             contentDescription = "Settings",
                             tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    
+                    // ✅ 背景音乐按钮
+                    IconButton(
+                        onClick = {
+                            if (backgroundMusicUri == null) {
+                                // 选择音乐文件
+                                audioPickerLauncher.launch(arrayOf("audio/*"))
+                            } else {
+                                // 切换播放/暂停
+                                if (isMusicPlaying) {
+                                    mediaPlayer.pause()
+                                    isMusicPlaying = false
+                                } else {
+                                    mediaPlayer.play()
+                                    isMusicPlaying = true
+                                }
+                            }
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                backgroundMusicUri == null -> Icons.Default.Add
+                                isMusicPlaying -> Icons.Default.MusicNote
+                                else -> Icons.Default.MusicNote
+                            },
+                            contentDescription = "Background Music",
+                            tint = if (backgroundMusicUri != null) Color(0xFF00D9FF) else Color.White,
                             modifier = Modifier.size(28.dp)
                         )
                     }
