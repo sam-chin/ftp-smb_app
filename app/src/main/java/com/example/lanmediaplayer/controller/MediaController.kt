@@ -1710,13 +1710,16 @@ class MediaController(private val context: Context, private val logCallback: ((S
             // 创建全新的客户端实例
             smbClient = SmbClient(logCallback)
             
-            val connected = smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+            // ✅ 关键修复：给整个连接过程添加超时保护，最多等待15秒
+            val connected = withTimeoutOrNull(15000) {
+                smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
+            }
             
             if (connected == true) {
                 log("[Controller] ✅ SMB reconnected successfully")
                 return true
             } else {
-                log("[Controller] ❌ SMB connect returned false")
+                log("[Controller] ❌ SMB connect returned false or timed out")
                 // 连接失败,清理资源
                 smbClient?.forceDisconnect()
                 smbClient = null

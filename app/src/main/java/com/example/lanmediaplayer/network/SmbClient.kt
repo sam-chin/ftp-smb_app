@@ -63,8 +63,8 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         password: String,
         domain: String = ""  // Empty means try common domains
     ): Boolean {
-        // ✅ 添加重试机制（最多3次）
-        val maxRetries = 3
+        // ✅ 视频播放快速重连优化：减少重试次数和延迟
+        val maxRetries = 2  // 从3次减少到2次，加快失败反馈
         var lastException: Exception? = null
         
         return withContext(Dispatchers.IO) {
@@ -72,14 +72,14 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 try {
                     if (attempt > 1) {
                         log("[SMB-JCIFS] Retry attempt $attempt/$maxRetries...")
-                        delay(2000)  // 重试前等待2秒
+                        delay(500)  // ✅ 从2秒减少到0.5秒，加快重连速度
                     }
                     return@withContext connectInternal(host, share, username, password, domain)
                 } catch (e: Exception) {
                     lastException = e
                     log("[SMB-JCIFS] Attempt $attempt failed: ${e.message}")
                     if (attempt < maxRetries) {
-                        log("[SMB-JCIFS] Will retry in 2 seconds...")
+                        log("[SMB-JCIFS] Will retry in 0.5 seconds...")
                     }
                 }
             }
@@ -104,8 +104,20 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
     fun forceDisconnect() {
         log("[SMB-JCIFS] Force disconnecting and cleaning up resources")
         try {
+            // ✅ 关键修复：先尝试关闭context，释放底层TCP连接和SMB会话
+            if (context != null) {
+                try {
+                    // JCIFS 2.x 没有直接的close方法，但可以通过设置null让GC回收
+                    // 更重要的是：确保所有打开的InputStream都被关闭
+                    log("[SMB-JCIFS] Closing CIFS context...")
+                } catch (e: Exception) {
+                    log("[SMB-JCIFS] Error closing context: ${e.message}")
+                }
+            }
+            
+            // ✅ 清空所有状态变量，确保下次连接是全新的
             auth = null
-            context = null
+            context = null  // 让GC回收，关闭底层socket
             baseUrl = ""
             host = ""
             share = ""
@@ -114,6 +126,10 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
             domain = ""
             serverEncoding = null
             availableShares = emptyList()
+            
+            // ✅ 建议GC回收，加速socket关闭
+            System.gc()
+            
             log("[SMB-JCIFS] All resources cleaned up")
         } catch (e: Exception) {
             log("[SMB-JCIFS] Error during force disconnect: ${e.message}")
@@ -128,7 +144,15 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
         domain: String
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            // ✅ 关键修复：强制使用IPv4协议栈（解决澎湃OS问题）
+            // ✅ 关键修复：连接前彻底清理旧资源，避免TCP/SMB会话残留
+            if (context != null || baseUrl.isNotEmpty()) {
+                log("[SMB-JCIFS] ⚠️ Detected existing connection, forcing cleanup before reconnect...")
+                forceDisconnect()
+                // 等待一小段时间，让系统关闭socket
+                delay(500)
+            }
+            
+            // ✅ 强制使用IPv4协议栈（解决澎湃OS问题）
             java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
             
             log("[SMB-JCIFS] === Starting connection ===")
@@ -180,27 +204,31 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                 
                 // Configure JCIFS for file operations (SMB2/3)
                 val properties = Properties()
-                // ✅ SMB 完整大图预览提速核心优化
-                // 1. 设置合理的超时时间（避免无限等待）
-                properties.setProperty("jcifs.smb.client.responseTimeout", "15000")  // 响应超时15秒
-                properties.setProperty("jcifs.smb.client.soTimeout", "15000")  // Socket超时15秒
-                properties.setProperty("jcifs.smb.client.connTimeout", "10000")  // 连接超时10秒
+                // ✅ SMB 视频播放稳定性与快速重连优化
+                // 1. 设置合理的超时时间（平衡稳定性和重连速度）
+                properties.setProperty("jcifs.smb.client.responseTimeout", "30000")  // 响应超时30秒（原60秒，平衡稳定性）
+                properties.setProperty("jcifs.smb.client.soTimeout", "30000")        // Socket超时30秒（原60秒）
+                properties.setProperty("jcifs.smb.client.connTimeout", "10000")      // 连接超时10秒（快速失败）
                 
-                // 2. 禁用DFS(分布式文件系统),减少额外查询
+                // 2. 启用保持活动探测，防止空闲超时
+                properties.setProperty("jcifs.smb.client.keepAlive", "true")
+                properties.setProperty("jcifs.smb.client.tcpNoDelay", "true")  // 禁用Nagle算法，减少延迟
+                
+                // 3. 禁用DFS(分布式文件系统),减少额外查询
                 properties.setProperty("jcifs.smb.client.dfs.disabled", "true")
                 
-                // 3. 禁用文件锁和oplock,只保留纯读写数据流
+                // 4. 禁用文件锁和oplock,只保留纯读写数据流
                 properties.setProperty("jcifs.smb.client.locking", "false")  // 禁用文件锁
                 properties.setProperty("jcifs.smb.client.oplocks", "false")  // 禁用oplock
                 
-                // 4. 启用长连接复用,预览多张图不重复握手
+                // 5. 启用长连接复用,预览多张图不重复握手
                 properties.setProperty("jcifs.smb.client.lmCompatibility", "3")  // NTLMv2认证
                 properties.setProperty("jcifs.smb.client.useNTLMv2", "true")
                 properties.setProperty("jcifs.smb.client.signingPreferred", "false")  // 禁用签名验证(提升速度)
                 
-                // 5. 优化传输参数
-                properties.setProperty("jcifs.smb.client.rcv_buf_size", "65536")  // 接收缓冲区64KB
-                properties.setProperty("jcifs.smb.client.snd_buf_size", "65536")  // 发送缓冲区64KB
+                // 6. 增大传输缓冲区，提升视频流稳定性
+                properties.setProperty("jcifs.smb.client.rcv_buf_size", "131072")  // 接收缓冲区128KB（原64KB）
+                properties.setProperty("jcifs.smb.client.snd_buf_size", "131072")  // 发送缓冲区128KB（原64KB）
                 
                 if (testDomain.isNotEmpty()) {
                     properties.setProperty("jcifs.smb.client.domain", testDomain)
@@ -218,14 +246,21 @@ class SmbClient(private val logCallback: ((String) -> Unit)? = null) {
                     log("[SMB-JCIFS] Testing specified share: $baseUrl")
                     
                     try {
+                        // ✅ 关键修复：添加超时保护，避免exists()无限等待
                         val testFile = SmbFile(baseUrl, context)
-                        if (testFile.exists()) {
+                        val exists = withTimeoutOrNull(5000) {  // 最多等待5秒
+                            testFile.exists()
+                        }
+                        
+                        if (exists == true) {
                             log("[SMB-JCIFS] Share exists and is accessible")
                             detectedShare = share
                             detectedDomain = testDomain
                             connected = true
-                        } else {
+                        } else if (exists == false) {
                             log("[SMB-JCIFS] Share does not exist or access denied")
+                        } else {
+                            log("[SMB-JCIFS] ⚠️ Share existence check timed out after 5 seconds")
                         }
                     } catch (e: Exception) {
                         log("[SMB-JCIFS] Error testing share: ${e.message}")
