@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -31,6 +32,7 @@ import java.io.ByteArrayOutputStream
 import java.io.ByteArrayInputStream
 import java.io.SequenceInputStream
 import java.io.InputStreamReader
+import java.nio.charset.Charset
 
 // ✅ 智能文本编码检测和读取函数(优化版:快速检测+流式读取)
 private fun detectAndReadText(inputStream: InputStream): String {
@@ -104,10 +106,10 @@ private fun detectAndReadText(inputStream: InputStream): String {
     val charBuffer = CharArray(8192)  // 8KB字符缓冲区
     val stringBuilder = StringBuilder(32768)  // 预分配32KB初始容量，减少扩容
     
-    var charsRead: Int
     var totalChars = 0
     val startTime = System.currentTimeMillis()
     
+    var charsRead: Int
     while (reader.read(charBuffer).also { charsRead = it } != -1) {
         stringBuilder.append(charBuffer, 0, charsRead)
         totalChars += charsRead
@@ -474,21 +476,27 @@ fun TextReaderScreen(
                         }
                         
                         // ✅ 左右滑动翻页手势
-                        detectHorizontalDragGestures(
-                            onDragStart = { },
-                            onDragEnd = { },
-                            onHorizontalDrag = { change, dragAmount ->
-                                change.consume()
-                                if (Math.abs(dragAmount) > 50) {  // 滑动阈值
-                                    if (dragAmount > 0 && currentPage > 0) {
-                                        // 向右滑动 → 上一页
-                                        currentPage--
-                                    } else if (dragAmount < 0 && currentPage < totalPages - 1) {
-                                        // 向左滑动 → 下一页
-                                        currentPage++
-                                    }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(currentPage, totalPages) {
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { },
+                                        onDragEnd = { },
+                                        onHorizontalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            if (Math.abs(dragAmount) > 50) {  // 滑动阈值
+                                                if (dragAmount > 0 && currentPage > 0) {
+                                                    // 向右滑动 → 上一页
+                                                    currentPage--
+                                                } else if (dragAmount < 0 && currentPage < totalPages - 1) {
+                                                    // 向左滑动 → 下一页
+                                                    currentPage++
+                                                }
+                                            }
+                                        }
+                                    )
                                 }
-                            }
                         )
                         
                         // 页码指示器
