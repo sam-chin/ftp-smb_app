@@ -114,37 +114,52 @@ fun TextReaderScreen(
                 }
             }
             
-            // 获取文件流
-            wrappedAddLog("[TextReader] Calling getFileStream with path: ${textFile.path}")
-            val inputStream = mediaController.getFileStream(textFile.path, selectedProtocol)
+            // ✅ 关键修复：在IO线程执行网络操作，避免NetworkOnMainThreadException
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    // 获取文件流
+                    wrappedAddLog("[TextReader] Calling getFileStream with path: ${textFile.path}")
+                    val inputStream = mediaController.getFileStream(textFile.path, selectedProtocol)
+                    
+                    if (inputStream == null) {
+                        null to "Failed to open file: ${textFile.name}\nPath: ${textFile.path}"
+                    } else {
+                        // 读取文本内容(支持UTF-8)
+                        val content = inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        content to null
+                    }
+                } catch (e: Exception) {
+                    null to "Error: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
             
-            if (inputStream == null) {
-                errorMessage = "Failed to open file: ${textFile.name}\nPath: ${textFile.path}"
+            val (content, error) = result
+            
+            if (error != null) {
+                errorMessage = error
                 isLoading = false
-                wrappedAddLog("[TextReader] ❌ getFileStream returned null for path: ${textFile.path}")
-                wrappedAddLog("[TextReader] File name: ${textFile.name}")
-                wrappedAddLog("[TextReader] Protocol: $selectedProtocol")
+                wrappedAddLog("[TextReader] ❌ $error")
                 return@LaunchedEffect
             }
             
-            // 读取文本内容(支持UTF-8)
-            val content = inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            textContent = content
-            
-            // 提取目录(简单实现:查找以数字开头的行)
-            val toc = mutableListOf<Pair<String, Int>>()
-            val lines = content.lines()
-            for ((index, line) in lines.withIndex()) {
-                if (line.matches(Regex("^\\s*第[一二三四五六七八九十百千万0-9]+章.*")) ||
-                    line.matches(Regex("^\\s*Chapter\\s+\\d+.*")) ||
-                    line.matches(Regex("^\\s*\\d+[\\.、].*"))) {
-                    toc.add(Pair(line.trim(), index))
+            if (content != null) {
+                textContent = content
+                
+                // 提取目录(简单实现:查找以数字开头的行)
+                val toc = mutableListOf<Pair<String, Int>>()
+                val lines = content.lines()
+                for ((index, line) in lines.withIndex()) {
+                    if (line.matches(Regex("^\\s*第[一二三四五六七八九十百千万0-9]+章.*")) ||
+                        line.matches(Regex("^\\s*Chapter\\s+\\d+.*")) ||
+                        line.matches(Regex("^\\s*\\d+[\\.、].*"))) {
+                        toc.add(Pair(line.trim(), index))
+                    }
                 }
+                tableOfContents = toc
+                
+                isLoading = false
+                wrappedAddLog("[TextReader] File loaded: ${lines.size} lines, ${toc.size} chapters")
             }
-            tableOfContents = toc
-            
-            isLoading = false
-            wrappedAddLog("[TextReader] File loaded: ${lines.size} lines, ${toc.size} chapters")
             
         } catch (e: Exception) {
             val errorMsg = e.message ?: "Unknown error (${e.javaClass.simpleName})"
