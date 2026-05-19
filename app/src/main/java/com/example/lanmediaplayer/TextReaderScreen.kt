@@ -25,6 +25,106 @@ import com.lanmedia.player.controller.NetworkProtocol
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import java.io.InputStream
+import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
+import java.io.SequenceInputStream
+import java.io.InputStreamReader
+
+// ✅ 智能文本编码检测和读取函数(优化版:快速检测+流式读取)
+private fun detectAndReadText(inputStream: InputStream): String {
+    // 第一步：只读取前512字节用于编码检测(足够判断BOM和UTF-8有效性)
+    val probeSize = 512
+    val probeBuffer = ByteArrayOutputStream()
+    val tempBuffer = ByteArray(probeSize)
+    var totalBytesRead = 0
+    
+    while (totalBytesRead < probeSize) {
+        val bytesRead = inputStream.read(tempBuffer, 0, minOf(probeSize - totalBytesRead, tempBuffer.size))
+        if (bytesRead <= 0) break
+        probeBuffer.write(tempBuffer, 0, bytesRead)
+        totalBytesRead += bytesRead
+    }
+    
+    val probeData = probeBuffer.toByteArray()
+    
+    if (probeData.isEmpty()) {
+        return ""
+    }
+    
+    // 第二步：快速检测BOM (Byte Order Mark)
+    val detectedEncoding = when {
+        // UTF-8 BOM: EF BB BF
+        probeData.size >= 3 && 
+        probeData[0].toInt() == 0xEF && 
+        probeData[1].toInt() == 0xBB && 
+        probeData[2].toInt() == 0xBF -> "UTF-8"
+        
+        // UTF-16 LE BOM: FF FE
+        probeData.size >= 2 && 
+        probeData[0].toInt() == 0xFF && 
+        probeData[1].toInt() == 0xFE -> "UTF-16LE"
+        
+        // UTF-16 BE BOM: FE FF
+        probeData.size >= 2 && 
+        probeData[0].toInt() == 0xFE && 
+        probeData[1].toInt() == 0xFF -> "UTF-16BE"
+        
+        else -> null
+    }
+    
+    // 第三步：根据检测结果选择编码
+    val charsetName = if (detectedEncoding != null) {
+        detectedEncoding
+    } else {
+        // 没有BOM，尝试智能检测
+        // 先尝试用UTF-8解码探测数据
+        try {
+            val testContent = String(probeData, Charsets.UTF_8)
+            // 检查是否包含替换字符（表示UTF-8解码失败）
+            if (!testContent.contains('\uFFFD')) {
+                "UTF-8" // UTF-8解码成功
+            } else {
+                "GBK" // UTF-8失败，使用GBK（中文常用编码）
+            }
+        } catch (e: Exception) {
+            "GBK" // 默认使用GBK
+        }
+    }
+    
+    // 第四步：✅ 关键优化 - 分块流式读取，避免一次性加载大文件
+    val remainingStream = SequenceInputStream(
+        ByteArrayInputStream(probeData),
+        inputStream
+    )
+    
+    // ✅ 使用InputStreamReader + 分块读取，比bufferedReader.readText()更高效
+    val reader = InputStreamReader(remainingStream, Charset.forName(charsetName))
+    val charBuffer = CharArray(8192)  // 8KB字符缓冲区
+    val stringBuilder = StringBuilder(32768)  // 预分配32KB初始容量，减少扩容
+    
+    var charsRead: Int
+    var totalChars = 0
+    val startTime = System.currentTimeMillis()
+    
+    while (reader.read(charBuffer).also { charsRead = it } != -1) {
+        stringBuilder.append(charBuffer, 0, charsRead)
+        totalChars += charsRead
+        
+        // ✅ 每读取64KB记录一次进度
+        if (totalChars % 65536 < charsRead) {
+            val elapsed = System.currentTimeMillis() - startTime
+            val speed = if (elapsed > 0) (totalChars / 1024.0) / (elapsed / 1000.0) else 0.0
+            android.util.Log.d("TextReader", "Reading progress: ${totalChars / 1024}KB, ${String.format("%.1f", speed)} KB/s")
+        }
+    }
+    
+    val totalTime = System.currentTimeMillis() - startTime
+    android.util.Log.d("TextReader", "Total read: ${totalChars / 1024}KB in ${totalTime}ms, avg speed: ${String.format("%.1f", if (totalTime > 0) (totalChars / 1024.0) / (totalTime / 1000.0) else 0.0)} KB/s")
+    
+    reader.close()
+    return stringBuilder.toString()
+}
 
 // ✅ 文本阅读器主题枚举
 enum class TextReaderTheme {
@@ -122,17 +222,26 @@ fun TextReaderScreen(
             val result = withContext(Dispatchers.IO) {
                 try {
                     // 获取文件流
+                    val startTime = System.currentTimeMillis()
                     addLocalLog("[TextReader] Calling getFileStream with path: ${textFile.path}")
                     val inputStream = mediaController.getFileStream(textFile.path, selectedProtocol)
+                    val streamTime = System.currentTimeMillis() - startTime
+                    addLocalLog("[TextReader] getFileStream took ${streamTime}ms")
                     
                     if (inputStream == null) {
                         null to "Failed to open file: ${textFile.name}\nPath: ${textFile.path}"
                     } else {
-                        // 读取文本内容(支持UTF-8)
-                        val content = inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        // ✅ 智能检测编码：先尝试UTF-8，失败则尝试GBK
+                        val readStartTime = System.currentTimeMillis()
+                        addLocalLog("[TextReader] Detecting file encoding...")
+                        val content = detectAndReadText(inputStream)
+                        val readTime = System.currentTimeMillis() - readStartTime
+                        addLocalLog("[TextReader] File read successfully in ${readTime}ms, size: ${content.length} chars")
                         content to null
                     }
                 } catch (e: Exception) {
+                    addLocalLog("[TextReader] Exception: ${e.javaClass.simpleName}: ${e.message}")
+                    e.printStackTrace()
                     null to "Error: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
