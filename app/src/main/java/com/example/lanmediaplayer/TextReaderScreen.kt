@@ -4,6 +4,7 @@ package com.lanmedia.player
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -149,12 +150,23 @@ fun TextReaderScreen(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     
+    // ✅ 关键优化：将文本按行分割，用于LazyColumn懒加载
+    var textLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    
     // ✅ 阅读设置
     var currentTheme by remember { mutableStateOf(TextReaderTheme.LIGHT) }
     var fontSize by remember { mutableStateOf(16) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showLogs by remember { mutableStateOf(false) }  // ✅ 新增：日志显示开关
+    
+    // ✅ 阅读模式：PAGE(翻页) 或 SCROLL(滑动)
+    var readMode by remember { mutableStateOf("SCROLL") }  // "PAGE" 或 "SCROLL"
+    
+    // ✅ 翻页模式的状态
+    var currentPage by remember { mutableStateOf(0) }
+    var totalPages by remember { mutableStateOf(1) }
+    var pages by remember { mutableStateOf<List<List<String>>>(emptyList()) }  // 每页的行列表
     
     // ✅ 目录(简单实现:按章节标题提取)
     var tableOfContents by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
@@ -258,9 +270,19 @@ fun TextReaderScreen(
             if (content != null) {
                 textContent = content
                 
+                // ✅ 关键优化：按行分割，用于LazyColumn懒加载
+                val lines = content.lines()
+                textLines = lines
+                
+                // ✅ 计算分页（每页约20行，根据屏幕高度动态调整）
+                val linesPerPage = 20  // 默认每页20行
+                val calculatedPages = lines.chunked(linesPerPage)
+                pages = calculatedPages
+                totalPages = calculatedPages.size
+                currentPage = 0  // 重置到第一页
+                
                 // 提取目录(简单实现:查找以数字开头的行)
                 val toc = mutableListOf<Pair<String, Int>>()
-                val lines = content.lines()
                 for ((index, line) in lines.withIndex()) {
                     if (line.matches(Regex("^\\s*第[一二三四五六七八九十百千万0-9]+章.*")) ||
                         line.matches(Regex("^\\s*Chapter\\s+\\d+.*")) ||
@@ -423,22 +445,86 @@ fun TextReaderScreen(
                     )
                 )
                 
-                // 文本内容区域
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    Text(
-                        text = textContent,
-                        color = textColor,
-                        fontSize = fontSize.sp,
-                        lineHeight = (fontSize * 1.8).sp,
+                // ✅ 根据阅读模式显示不同UI
+                if (readMode == "PAGE") {
+                    // ✅ 翻页模式：显示当前页，支持左右滑动翻页
+                    Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(16.dp)
-                    )
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        // 当前页内容
+                        if (pages.isNotEmpty() && currentPage < pages.size) {
+                            val currentPageLines = pages[currentPage]
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                currentPageLines.forEach { line ->
+                                    Text(
+                                        text = if (line.isEmpty()) " " else line,
+                                        color = textColor,
+                                        fontSize = fontSize.sp,
+                                        lineHeight = (fontSize * 1.8).sp,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // ✅ 左右滑动翻页手势
+                        detectHorizontalDragGestures(
+                            onDragStart = { },
+                            onDragEnd = { },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                if (Math.abs(dragAmount) > 50) {  // 滑动阈值
+                                    if (dragAmount > 0 && currentPage > 0) {
+                                        // 向右滑动 → 上一页
+                                        currentPage--
+                                    } else if (dragAmount < 0 && currentPage < totalPages - 1) {
+                                        // 向左滑动 → 下一页
+                                        currentPage++
+                                    }
+                                }
+                            }
+                        )
+                        
+                        // 页码指示器
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 8.dp)
+                                .background(Color.Black.copy(alpha = 0.5f))
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${currentPage + 1} / $totalPages",
+                                color = Color.White,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                } else {
+                    // ✅ 滑动模式：使用LazyColumn上下滑动
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        items(textLines) { line ->
+                            Text(
+                                text = if (line.isEmpty()) " " else line,
+                                color = textColor,
+                                fontSize = fontSize.sp,
+                                lineHeight = (fontSize * 1.8).sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
                 
                 // ✅ 日志显示面板
@@ -481,15 +567,24 @@ fun TextReaderScreen(
                         fontSize = 12.sp
                     )
                     
-                    Text(
-                        text = when (currentTheme) {
-                            TextReaderTheme.LIGHT -> "白天"
-                            TextReaderTheme.DARK -> "夜晚"
-                            TextReaderTheme.EYE_CARE -> "护眼"
-                        },
-                        color = textColor.copy(alpha = 0.6f),
-                        fontSize = 12.sp
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // ✅ 显示阅读模式
+                        Text(
+                            text = if (readMode == "PAGE") "翻页" else "滑动",
+                            color = textColor.copy(alpha = 0.6f),
+                            fontSize = 12.sp
+                        )
+                        
+                        Text(
+                            text = when (currentTheme) {
+                                TextReaderTheme.LIGHT -> "白天"
+                                TextReaderTheme.DARK -> "夜晚"
+                                TextReaderTheme.EYE_CARE -> "护眼"
+                            },
+                            color = textColor.copy(alpha = 0.6f),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         }
@@ -501,6 +596,25 @@ fun TextReaderScreen(
                 title = { Text("阅读设置") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        // ✅ 阅读模式选择
+                        Text("阅读模式", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ThemeButton(
+                                label = "滑动",
+                                isSelected = readMode == "SCROLL",
+                                onClick = { readMode = "SCROLL" },
+                                backgroundColor = if (readMode == "SCROLL") MaterialTheme.colorScheme.primary else Color.Gray,
+                                textColor = Color.White
+                            )
+                            ThemeButton(
+                                label = "翻页",
+                                isSelected = readMode == "PAGE",
+                                onClick = { readMode = "PAGE" },
+                                backgroundColor = if (readMode == "PAGE") MaterialTheme.colorScheme.primary else Color.Gray,
+                                textColor = Color.White
+                            )
+                        }
+                        
                         // 主题选择
                         Text("主题模式", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
