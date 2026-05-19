@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -82,6 +83,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import android.view.WindowManager
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 
 class MainActivity : ComponentActivity() {
     private lateinit var mediaController: MediaController
@@ -1396,7 +1401,20 @@ fun FileBrowserScreen(
     isDarkTheme: Boolean = true,  // ✅ 新增：主题状态
     onThemeToggle: () -> Unit = {}  // ✅ 新增：主题切换回调
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    // ✅ 关键修复：拦截系统返回手势，实现逐级返回
+    BackHandler(enabled = showBackButton) {
+        onBackClick()
+    }
+    
+    // ✅ 关键修复：使用WindowInsets添加安全区域，避免内容被系统栏遮挡
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            )
+    ) {
         TopAppBar(
             title = { Text(title) },
             navigationIcon = {

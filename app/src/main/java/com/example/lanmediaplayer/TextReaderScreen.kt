@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -160,6 +162,20 @@ fun TextReaderScreen(
         addLog(message)
     }
     
+    // ✅ 关键修复：拦截系统返回手势，实现逐级返回
+    BackHandler(enabled = true) {
+        // 如果有对话框打开，先关闭对话框
+        when {
+            showSettings -> {
+                saveSettings()
+                showSettings = false
+            }
+            showToc -> showToc = false
+            showLogs -> showLogs = false
+            else -> onBackClick()  // 否则返回上一级
+        }
+    }
+    
     // ✅ 保存用户设置
     fun saveSettings() {
         prefs.edit()
@@ -303,7 +319,16 @@ fun TextReaderScreen(
         TextReaderTheme.EYE_CARE -> Color(0xFF5C4B37)
     }
     
-    Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
+    // ✅ 关键修复：使用WindowInsets添加安全区域，避免内容被系统栏遮挡
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor)
+            .padding(
+                top = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                bottom = androidx.compose.foundation.layout.WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            )
+    ) {
         if (isLoading) {
             // ✅ 加载指示器 - 添加返回按钮
             Column(modifier = Modifier.fillMaxSize()) {
