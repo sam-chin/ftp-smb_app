@@ -585,7 +585,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                 log("[Controller] WARNING: Password is empty!")
             }
             
-            smbClient = SmbClient(logCallback)
+            smbClient = SmbClient(logCallback, connectionPrefs)
             
             // 保存当前共享目录（用于DLNA投屏）
             currentSmbShare = share
@@ -858,7 +858,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 smbClient = null
                                 
                                 // 创建新客户端并重连
-                                smbClient = com.lanmedia.player.network.SmbClient(logCallback)
+                                smbClient = com.lanmedia.player.network.SmbClient(logCallback, connectionPrefs)
                                 val reconnected = smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
                                 if (reconnected == true) {
                                     log("[Controller] ✅ SMB reconnection successful, retrying browse...")
@@ -995,7 +995,7 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                     smbClient = null
                                     
                                     // 创建新的SMB客户端
-                                    smbClient = SmbClient(logCallback)
+                                    smbClient = SmbClient(logCallback, connectionPrefs)
                                     
                                     val reconnected = smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
                                     if (reconnected == true) {
@@ -1708,10 +1708,10 @@ class MediaController(private val context: Context, private val logCallback: ((S
             smbClient = null
             
             // 创建全新的客户端实例
-            smbClient = SmbClient(logCallback)
+            smbClient = SmbClient(logCallback, connectionPrefs)
             
-            // ✅ 关键修复：给整个连接过程添加超时保护，最多等待15秒
-            val connected = withTimeoutOrNull(15000) {
+            // ✅ 关键修复：视频播放时快速重连，最多等待8秒（原15秒）
+            val connected = withTimeoutOrNull(8000) {
                 smbClient?.connect(currentSmbHost, currentSmbShareParam, currentSmbUsername, currentSmbPassword, currentSmbDomain)
             }
             

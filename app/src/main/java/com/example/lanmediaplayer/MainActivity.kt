@@ -23,8 +23,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
@@ -33,8 +35,11 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -119,27 +124,41 @@ class MainActivity : ComponentActivity() {
         connectionPrefs = ConnectionPreferences(this)
         
         setContent {
-            LanMediaPlayerTheme {
+            // ✅ 主题状态管理
+            var isDarkTheme by remember { mutableStateOf(true) }
+            
+            LanMediaPlayerTheme(darkTheme = isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(
-                        mediaController = mediaController,
-                        castController = castController,
-                        connectionPrefs = connectionPrefs,
-                        getDebugLogs = { debugLogs.toList() },
-                        onDownloadComplete = { path ->
-                            runOnUiThread {
-                                Toast.makeText(this@MainActivity, "Downloaded: $path", Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        onError = { error ->
-                            runOnUiThread {
-                                Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    )
+                    // ✅ 启动画面状态
+                    var showSplash by remember { mutableStateOf(true) }
+                    
+                    if (showSplash) {
+                        SplashScreen(onSplashFinished = {
+                            showSplash = false
+                        })
+                    } else {
+                        MainScreen(
+                            mediaController = mediaController,
+                            castController = castController,
+                            connectionPrefs = connectionPrefs,
+                            getDebugLogs = { debugLogs.toList() },
+                            onDownloadComplete = { path ->
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "Downloaded: $path", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            onError = { error ->
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            isDarkTheme = isDarkTheme,
+                            onThemeToggle = { isDarkTheme = !isDarkTheme }
+                        )
+                    }
                 }
             }
         }
@@ -216,6 +235,97 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// ✅ 启动画面 - 带Logo和加载动画
+@Composable
+fun SplashScreen(onSplashFinished: () -> Unit) {
+    val alpha = remember { Animatable(0f) }
+    val scale = remember { Animatable(0.5f) }
+    
+    LaunchedEffect(Unit) {
+        // 淡入动画
+        alpha.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
+        )
+        // 缩放动画
+        scale.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
+        )
+        // 显示2秒后消失
+        delay(2000)
+        onSplashFinished()
+    }
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackgroundGradient),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // Logo图标 (使用mipmap中的ic_launcher)
+            Image(
+                painter = androidx.compose.ui.res.painterResource(id = R.mipmap.ic_launcher),
+                contentDescription = "App Logo",
+                modifier = Modifier
+                    .size(120.dp)
+                    .graphicsLayer(
+                        alpha = alpha.value,
+                        scaleX = scale.value,
+                        scaleY = scale.value
+                    ),
+                contentScale = ContentScale.Fit
+            )
+            
+            // App名称
+            Text(
+                text = "LAN Media Player",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.graphicsLayer(alpha = alpha.value)
+            )
+            
+            // 加载动画
+            CircularProgressIndicator(
+                modifier = Modifier.size(48.dp),
+                color = Color(0xFF6C63FF),
+                strokeWidth = 4.dp
+            )
+            
+            Text(
+                text = "正在启动...",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.graphicsLayer(alpha = alpha.value)
+            )
+        }
+    }
+}
+
+// ✅ 主题切换按钮组件
+@Composable
+fun ThemeToggleButton(
+    isDarkTheme: Boolean,
+    onThemeToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    IconButton(
+        onClick = onThemeToggle,
+        modifier = modifier
+    ) {
+        Icon(
+            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+            contentDescription = if (isDarkTheme) "切换到浅色模式" else "切换到深色模式",
+            tint = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
 @Composable
 fun MainScreen(
     mediaController: MediaController,
@@ -223,7 +333,9 @@ fun MainScreen(
     connectionPrefs: ConnectionPreferences,
     getDebugLogs: () -> List<String>,
     onDownloadComplete: (String) -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    isDarkTheme: Boolean = true,
+    onThemeToggle: () -> Unit = {}
 ) {
     var currentScreen by remember { mutableStateOf(Screen.Connection) }
     var files by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
@@ -1269,6 +1381,12 @@ fun FileBrowserScreen(
                 }
             },
             actions = {
+                // ✅ 主题切换按钮
+                ThemeToggleButton(
+                    isDarkTheme = isDarkTheme,
+                    onThemeToggle = onThemeToggle
+                )
+                
                 // SMB根目录时显示刷新按钮
                 if (isAtSmbRoot && selectedProtocol is NetworkProtocol.SMB && onRefreshShares != null) {
                     IconButton(onClick = onRefreshShares) {
@@ -1387,14 +1505,31 @@ fun FileListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    // ✅ 悬停和点击动画状态
+    var isHovered by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (isHovered) 1.02f else 1f,
+        animationSpec = tween(durationMillis = 200)
+    )
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
+            .graphicsLayer(scaleX = scale, scaleY = scale)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
-            )
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isHovered) 
+                MaterialTheme.colorScheme.surfaceVariant 
+            else 
+                MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (isHovered) 8.dp else 2.dp
+        )
     ) {
         Row(
             modifier = Modifier
@@ -1402,10 +1537,32 @@ fun FileListItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // ✅ 根据文件类型显示不同图标
+            val iconVector = when {
+                file.isDirectory -> Icons.Default.Folder
+                file.name.endsWith(".mp4", ignoreCase = true) || 
+                file.name.endsWith(".mkv", ignoreCase = true) ||
+                file.name.endsWith(".avi", ignoreCase = true) -> Icons.Default.PlayArrow
+                file.name.endsWith(".jpg", ignoreCase = true) ||
+                file.name.endsWith(".png", ignoreCase = true) ||
+                file.name.endsWith(".jpeg", ignoreCase = true) -> Icons.Default.Image
+                else -> Icons.Default.PlayArrow
+            }
+            
+            val iconTint = when {
+                file.isDirectory -> Color(0xFFFFB74D) // 文件夹用橙色
+                file.name.endsWith(".mp4", ignoreCase = true) || 
+                file.name.endsWith(".mkv", ignoreCase = true) -> Color(0xFF6C63FF) // 视频用紫色
+                file.name.endsWith(".jpg", ignoreCase = true) ||
+                file.name.endsWith(".png", ignoreCase = true) -> Color(0xFF00D9FF) // 图片用青色
+                else -> MaterialTheme.colorScheme.primary
+            }
+            
             Icon(
-                imageVector = if (file.isDirectory) Icons.Default.Folder else Icons.Default.PlayArrow,
+                imageVector = iconVector,
                 contentDescription = null,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(32.dp),
+                tint = iconTint
             )
             
             Spacer(modifier = Modifier.width(16.dp))
@@ -1413,7 +1570,8 @@ fun FileListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = file.name,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (file.isDirectory) FontWeight.Bold else FontWeight.Normal
                 )
                 if (!file.isDirectory) {
                     Text(
@@ -1597,20 +1755,39 @@ fun PlayerScreen(
             }
         }
         
-        // 显示拖动进度提示（在屏幕中央）
+        // ✅ 显示拖动进度提示（在屏幕中央）- 毛玻璃效果
         if (isDragging && dragPositionText.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                    .padding(16.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.6f),
+                        RoundedCornerShape(16.dp)
+                    )
+                    .padding(horizontal = 32.dp, vertical = 20.dp)
             ) {
-                Text(
-                    text = dragPositionText,
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = dragPositionText,
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "正在快进/快退",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                }
             }
         }
         
@@ -1895,79 +2072,117 @@ fun ImageViewerScreen(
                 )
             }
             
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // ✅ 底部控制栏 - 毛玻璃效果
+            AnimatedVisibility(
+                visible = !isCurrentPageZoomed,
+                enter = fadeIn(animationSpec = tween(300)),
+                exit = fadeOut(animationSpec = tween(300)),
+                modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                Text(
-                    text = "${pagerState.currentPage + 1} / ${imageFiles.size}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                
-                IconButton(
-                    onClick = {
-                        isSlideshowPlaying = !isSlideshowPlaying
-                        // ✅ 停止幻灯片时清除投屏设备并切换回本地模式
-                        if (!isSlideshowPlaying) {
-                            castingDevice = null
-                            mediaController.stopDlnaService()
-                            mediaController.stopCasting()  // ✅ 关键修复：恢复本地预览
-                            (context as? MainActivity)?.setCastingState(false)
-                        }
+                Row(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .background(
+                            Color.Black.copy(alpha = 0.4f),
+                            RoundedCornerShape(24.dp)
+                        )
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 页码指示器
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${imageFiles.size}",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    // 分隔线
+                    Divider(
+                        color = Color.White.copy(alpha = 0.3f),
+                        modifier = Modifier.height(24.dp).width(1.dp)
+                    )
+                    
+                    // 播放/暂停按钮
+                    IconButton(
+                        onClick = {
+                            isSlideshowPlaying = !isSlideshowPlaying
+                            // ✅ 停止幻灯片时清除投屏设备并切换回本地模式
+                            if (!isSlideshowPlaying) {
+                                castingDevice = null
+                                mediaController.stopDlnaService()
+                                mediaController.stopCasting()  // ✅ 关键修复：恢复本地预览
+                                (context as? MainActivity)?.setCastingState(false)
+                            }
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isSlideshowPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isSlideshowPlaying) "Pause" else "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = if (isSlideshowPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isSlideshowPlaying) "Pause" else "Play",
-                        tint = Color.White
-                    )
+                    
+                    // 设置按钮
+                    IconButton(
+                        onClick = { showSettingsDialog = true },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = "Settings",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
-                
-                IconButton(
-                    onClick = { showSettingsDialog = true }
-                ) {
+            }
+        }
+        
+        // ✅ 返回按钮 - 毛玻璃效果
+        AnimatedVisibility(
+            visible = !isCurrentPageZoomed,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(300)),
+            modifier = Modifier.align(Alignment.TopStart)
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            ) {
+                IconButton(onClick = onBackClick) {
                     Icon(
-                        imageVector = Icons.Default.Timer,
-                        contentDescription = "Settings",
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back",
                         tint = Color.White
                     )
                 }
             }
         }
         
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+        // ✅ 投屏按钮 - 毛玻璃效果
+        AnimatedVisibility(
+            visible = !isCurrentPageZoomed,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(300)),
+            modifier = Modifier.align(Alignment.TopEnd)
         ) {
-            IconButton(onClick = onBackClick) {
-                Icon(
-                    Icons.Default.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White
-                )
-            }
-        }
-        
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-        ) {
-            IconButton(onClick = { showCastDialog = true }) {
-                Icon(
-                    Icons.Default.Cast,
-                    contentDescription = "Cast",
-                    tint = Color.White
-                )
+            Box(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            ) {
+                IconButton(onClick = { showCastDialog = true }) {
+                    Icon(
+                        Icons.Default.Cast,
+                        contentDescription = "Cast",
+                        tint = Color.White
+                    )
+                }
             }
         }
     }
@@ -2407,36 +2622,91 @@ fun ImageLoader(
             )
         }
         
-        if (isLoading) {
-            CircularProgressIndicator(color = Color.White)
+        // ✅ 加载指示器 - 带动画
+        AnimatedVisibility(
+            visible = isLoading,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(300))
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 4.dp,
+                    modifier = Modifier.size(64.dp)
+                )
+            }
         }
 
-        error?.let { errorMsg ->
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("Error loading image", color = Color.White)
-                Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+        // ✅ 错误提示 - 毛玻璃效果
+        AnimatedVisibility(
+            visible = error != null,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(300))
+        ) {
+            error?.let { errorMsg ->
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Error,
+                        contentDescription = null,
+                        tint = Color(0xFFFF4757),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Text(
+                        text = "加载失败",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = errorMsg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.7f),
+                        maxLines = 2
+                    )
+                }
             }
         }
         
-        // ✅ 显示当前缩放倍数
-        if (scale > 1.1f) {
+        // ✅ 显示当前缩放倍数 - 毛玻璃效果
+        AnimatedVisibility(
+            visible = scale > 1.1f,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(200))
+        ) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Text(
-                    text = "${String.format("%.1f", scale)}x",
-                    color = Color.White,
-                    fontSize = 12.sp
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ZoomIn,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "${String.format("%.1f", scale)}x",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
