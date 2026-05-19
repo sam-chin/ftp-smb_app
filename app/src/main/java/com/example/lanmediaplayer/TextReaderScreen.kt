@@ -755,6 +755,7 @@ fun TextReaderScreen(
                             OutlinedTextField(
                                 value = tocJumpInput,
                                 onValueChange = { 
+                                    // ✅ 只允许输入数字
                                     if (it.isEmpty() || it.all { char -> char.isDigit() }) {
                                         tocJumpInput = it
                                     }
@@ -762,10 +763,7 @@ fun TextReaderScreen(
                                 label = { Text("章节号") },
                                 placeholder = { Text("1-${tableOfContents.size}") },
                                 modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                keyboardOptions = androidx.compose.ui.text.input.KeyboardOptions(
-                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                                )
+                                singleLine = true
                             )
                             Button(
                                 onClick = {
