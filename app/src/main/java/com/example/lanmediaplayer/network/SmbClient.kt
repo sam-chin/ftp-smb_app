@@ -135,10 +135,16 @@ class SmbClient(
     // ✅ 检查连接是否仍然有效
     fun isConnected(): Boolean {
         return try {
-            // ✅ 关键修复：只检查context和baseUrl，不检查auth
-            // 现代JCIFS通过Properties传递认证信息，不需要单独的auth对象
-            context != null && baseUrl.isNotEmpty()
+            // ✅ 关键修复：不仅检查context，还要尝试访问服务器验证连接
+            if (context == null || baseUrl.isEmpty()) {
+                return false
+            }
+            
+            // ✅ 尝试访问根目录来验证连接是否真的可用
+            val testFile = SmbFile(baseUrl, context)
+            testFile.exists()  // 这会触发网络请求，验证连接
         } catch (e: Exception) {
+            log("[SMB-JCIFS] Connection check failed: ${e.message}")
             false
         }
     }
@@ -514,6 +520,25 @@ class SmbClient(
             log("[SMB-JCIFS] Input remotePath: '$remotePath'")
             log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
             
+            // ✅ 检查连接状态，如果断开则尝试重连
+            if (!isConnected()) {
+                log("[SMB-JCIFS] ⚠️ Connection lost in listFiles, attempting to reconnect...")
+                
+                // ✅ 尝试自动重连
+                if (host.isNotEmpty() && username.isNotEmpty()) {
+                    log("[SMB-JCIFS] Auto-reconnecting to $host...")
+                    val reconnected = connectInternal(host, share, username, password, domain)
+                    if (!reconnected) {
+                        log("[SMB-JCIFS] ❌ Auto-reconnect failed in listFiles")
+                        return@withContext emptyList()
+                    }
+                    log("[SMB-JCIFS] ✅ Auto-reconnect successful in listFiles")
+                } else {
+                    log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
+                    return@withContext emptyList()
+                }
+            }
+            
             // ✅ 检查context是否已初始化
             if (context == null) {
                 log("[SMB-JCIFS] ERROR: context is null! Connection may not be established.")
@@ -682,10 +707,23 @@ class SmbClient(
             log("[SMB-JCIFS] Opening stream for: '$remotePath' (offset: $startOffset)")
             log("[SMB-JCIFS] baseUrl: '$baseUrl', share: '$share'")
             
-            // ✅ 检查连接状态
+            // ✅ 检查连接状态，如果断开则尝试重连
             if (!isConnected()) {
-                log("[SMB-JCIFS] ⚠️ Connection lost before opening stream")
-                throw SmbConnectionLostException("SMB connection lost")
+                log("[SMB-JCIFS] ⚠️ Connection lost, attempting to reconnect...")
+                
+                // ✅ 尝试自动重连
+                if (host.isNotEmpty() && username.isNotEmpty()) {
+                    log("[SMB-JCIFS] Auto-reconnecting to $host...")
+                    val reconnected = connectInternal(host, share, username, password, domain)
+                    if (!reconnected) {
+                        log("[SMB-JCIFS] ❌ Auto-reconnect failed")
+                        throw SmbConnectionLostException("SMB connection lost and auto-reconnect failed")
+                    }
+                    log("[SMB-JCIFS] ✅ Auto-reconnect successful")
+                } else {
+                    log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
+                    throw SmbConnectionLostException("SMB connection lost")
+                }
             }
             
             // ✅ 关键修复：检查是否已选择共享目录
