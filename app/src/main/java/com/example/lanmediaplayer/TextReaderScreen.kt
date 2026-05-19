@@ -846,6 +846,8 @@ fun TextReaderScreen(
                             items(tableOfContents) { (title, lineNumber) ->
                                 Text(
                                     text = title,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
@@ -861,10 +863,9 @@ fun TextReaderScreen(
                                             }
                                             showToc = false
                                         }
-                                        .padding(8.dp),
-                                    fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                                        .padding(8.dp)
+                                )
+                            }
                         }
                     }
                 },
