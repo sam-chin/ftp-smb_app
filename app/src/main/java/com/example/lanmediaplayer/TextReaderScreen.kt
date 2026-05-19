@@ -162,6 +162,16 @@ fun TextReaderScreen(
         addLog(message)
     }
     
+    // ✅ 保存用户设置
+    fun saveSettings() {
+        prefs.edit()
+            .putInt("font_size", fontSize)
+            .putString("theme", currentTheme.name)
+            .putString("read_mode", readMode)
+            .apply()
+        addLocalLog("[TextReader] Settings saved: fontSize=$fontSize, theme=${currentTheme.name}, mode=$readMode")
+    }
+    
     // ✅ 关键修复：拦截系统返回手势，实现逐级返回
     BackHandler(enabled = true) {
         // 如果有对话框打开，先关闭对话框
@@ -174,16 +184,6 @@ fun TextReaderScreen(
             showLogs -> showLogs = false
             else -> onBackClick()  // 否则返回上一级
         }
-    }
-    
-    // ✅ 保存用户设置
-    fun saveSettings() {
-        prefs.edit()
-            .putInt("font_size", fontSize)
-            .putString("theme", currentTheme.name)
-            .putString("read_mode", readMode)
-            .apply()
-        addLocalLog("[TextReader] Settings saved: fontSize=$fontSize, theme=${currentTheme.name}, mode=$readMode")
     }
     
     // 加载文本文件
