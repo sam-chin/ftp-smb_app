@@ -38,6 +38,56 @@ import java.io.InputStreamReader
 import java.nio.charset.Charset
 import org.mozilla.universalchardet.UniversalDetector
 
+// ✅ 中文数字转阿拉伯数字
+private fun chineseToArabic(chineseNum: String): Int {
+    val charMap = mapOf(
+        '零' to 0, '一' to 1, '二' to 2, '三' to 3, '四' to 4,
+        '五' to 5, '六' to 6, '七' to 7, '八' to 8, '九' to 9,
+        '十' to 10, '百' to 100, '千' to 1000, '万' to 10000
+    )
+    
+    var result = 0
+    var temp = 0
+    var unit = 1
+    
+    for (char in chineseNum.reversed()) {
+        when (char) {
+            '十', '百', '千', '万' -> {
+                unit = charMap[char] ?: 1
+                if (temp == 0) temp = 1
+            }
+            else -> {
+                val digit = charMap[char] ?: 0
+                temp += digit
+                if (unit > 1) {
+                    result += temp * unit
+                    temp = 0
+                    unit = 1
+                }
+            }
+        }
+    }
+    result += temp
+    return result
+}
+
+// ✅ 从章节标题中提取数字(支持中文和阿拉伯数字)
+private fun extractChapterNumber(title: String): Int? {
+    // 尝试提取阿拉伯数字
+    val arabicMatch = Regex("(\\d+)").find(title)
+    if (arabicMatch != null) {
+        return arabicMatch.groupValues[1].toIntOrNull()
+    }
+    
+    // 尝试提取中文数字(第X章格式)
+    val chineseMatch = Regex("第([零一二三四五六七八九十百千万]+)章").find(title)
+    if (chineseMatch != null) {
+        return chineseToArabic(chineseMatch.groupValues[1])
+    }
+    
+    return null
+}
+
 // ✅ 智能文本编码检测和读取函数(使用专业编码检测库)
 private fun detectAndReadText(inputStream: InputStream): String {
     // 第一步：读取前10KB用于编码检测
@@ -150,6 +200,7 @@ fun TextReaderScreen(
     var tocCurrentPage by remember { mutableStateOf(0) }  // 当前目录页
     val tocPageSize = 100  // 每页显示100章
     var tocJumpInput by remember { mutableStateOf("") }  // 快速跳转输入
+    var searchedChapterIndex by remember { mutableStateOf<Int?>(null) }  // ✅ 搜索到的章节索引
     
     // ✅ 本地日志列表（用于在界面上显示）
     var localLogs by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -746,7 +797,7 @@ fun TextReaderScreen(
                 title = { Text("目录 (${tableOfContents.size}章)") },
                 text = {
                     Column {
-                        // ✅ 快速跳转到指定章节
+                        // ✅ 模糊搜索章节
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -755,36 +806,77 @@ fun TextReaderScreen(
                             OutlinedTextField(
                                 value = tocJumpInput,
                                 onValueChange = { 
-                                    // ✅ 只允许输入数字
-                                    if (it.isEmpty() || it.all { char -> char.isDigit() }) {
-                                        tocJumpInput = it
-                                    }
+                                    // ✅ 允许输入任意字符，用于模糊搜索
+                                    tocJumpInput = it
                                 },
-                                label = { Text("章节号") },
-                                placeholder = { Text("1-${tableOfContents.size}") },
+                                label = { Text("搜索章节") },
+                                placeholder = { Text("输入章节名或编号") },
                                 modifier = Modifier.weight(1f),
-                                singleLine = true
+                                singleLine = true,
+                                trailingIcon = {
+                                    if (tocJumpInput.isNotEmpty()) {
+                                        IconButton(onClick = { tocJumpInput = "" }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                        }
+                                    }
+                                }
                             )
                             Button(
                                 onClick = {
-                                    val chapterNum = tocJumpInput.toIntOrNull()
+                                    if (tocJumpInput.isEmpty()) return@Button
+                                    
+                                    // ✅ 智能搜索：支持阿拉伯数字、中文数字、章节名
+                                    val searchQuery = tocJumpInput.trim()
+                                    var foundIndex = -1
+                                    
+                                    // 1. 尝试精确匹配编号(阿拉伯数字)
+                                    val chapterNum = searchQuery.toIntOrNull()
                                     if (chapterNum != null && chapterNum in 1..tableOfContents.size) {
-                                        val (title, lineNumber) = tableOfContents[chapterNum - 1]
-                                        // 跳转到对应章节
-                                        if (readMode == "PAGE") {
-                                            val targetPage = lineNumber / 20
-                                            currentPage = targetPage.coerceIn(0, totalPages - 1)
-                                        }
-                                        addLog("[TextReader] Jump to chapter $chapterNum: '$title'")
-                                        showToc = false
-                                        tocJumpInput = ""
+                                        foundIndex = chapterNum - 1
                                     } else {
-                                        addLog("[TextReader] Invalid chapter number: $tocJumpInput")
+                                        // 2. 智能匹配：提取章节标题中的数字进行比较
+                                        val searchNum = searchQuery.toIntOrNull()
+                                        if (searchNum != null) {
+                                            // 用户输入的是数字，尝试匹配所有章节的数字
+                                            for ((index, chapter) in tableOfContents.withIndex()) {
+                                                val chapterNumInTitle = extractChapterNumber(chapter.first)
+                                                if (chapterNumInTitle == searchNum) {
+                                                    foundIndex = index
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        
+                                        // 3. 如果还没找到，尝试模糊匹配章节名
+                                        if (foundIndex < 0) {
+                                            for ((index, chapter) in tableOfContents.withIndex()) {
+                                                if (chapter.first.contains(searchQuery, ignoreCase = true)) {
+                                                    foundIndex = index
+                                                    break
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (foundIndex >= 0) {
+                                        val (title, lineNumber) = tableOfContents[foundIndex]
+                                        // ✅ 计算该章节在目录的哪一页
+                                        val targetTocPage = foundIndex / tocPageSize
+                                        tocCurrentPage = targetTocPage
+                                        searchedChapterIndex = foundIndex  // ✅ 保存搜索结果
+                                        
+                                        addLog("[TextReader] Found chapter '$title' at page ${targetTocPage + 1}")
+                                        
+                                        // ✅ 不进入正文，只是定位到目录页
+                                        // 用户需要手动点击章节标题才能跳转
+                                    } else {
+                                        searchedChapterIndex = null  // ✅ 清空搜索结果
+                                        addLog("[TextReader] Chapter not found: '$searchQuery'")
                                     }
                                 },
                                 enabled = tocJumpInput.isNotEmpty()
                             ) {
-                                Text("跳转")
+                                Text("搜索")
                             }
                         }
                         
@@ -825,12 +917,20 @@ fun TextReaderScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(currentPageChapters) { (title, lineNumber) ->
+                                // ✅ 计算当前章节的全局索引
+                                val globalIndex = startIndex + currentPageChapters.indexOf(Pair(title, lineNumber))
+                                val isSearched = searchedChapterIndex == globalIndex
+                                
                                 Text(
                                     text = title,
                                     fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = if (isSearched) FontWeight.Bold else FontWeight.Normal,  // ✅ 搜索结果加粗
+                                    color = if (isSearched) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,  // ✅ 搜索结果用不同颜色
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .background(
+                                            if (isSearched) MaterialTheme.colorScheme.error.copy(alpha = 0.1f) else Color.Transparent  // ✅ 搜索结果添加背景
+                                        )
                                         .clickable {
                                             // ✅ 跳转到对应章节
                                             if (readMode == "PAGE") {
@@ -843,6 +943,7 @@ fun TextReaderScreen(
                                                 addLog("[TextReader] Jump to chapter '$title' at line $lineNumber")
                                             }
                                             showToc = false
+                                            searchedChapterIndex = null  // ✅ 清空搜索结果
                                         }
                                         .padding(8.dp)
                                 )
@@ -855,6 +956,7 @@ fun TextReaderScreen(
                         showToc = false
                         tocCurrentPage = 0  // 重置目录页
                         tocJumpInput = ""   // 清空输入
+                        searchedChapterIndex = null  // ✅ 清空搜索结果
                     }) {
                         Text("关闭")
                     }
