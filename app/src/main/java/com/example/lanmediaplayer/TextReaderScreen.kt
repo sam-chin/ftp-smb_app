@@ -14,6 +14,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,10 +35,10 @@ import java.io.SequenceInputStream
 import java.io.InputStreamReader
 import java.nio.charset.Charset
 
-// ✅ 智能文本编码检测和读取函数(优化版:快速检测+流式读取)
+// ✅ 智能文本编码检测和读取函数(增强版:支持多种编码)
 private fun detectAndReadText(inputStream: InputStream): String {
-    // 第一步：只读取前512字节用于编码检测(足够判断BOM和UTF-8有效性)
-    val probeSize = 512
+    // 第一步：读取前2KB用于编码检测
+    val probeSize = 2048
     val probeBuffer = ByteArrayOutputStream()
     val tempBuffer = ByteArray(probeSize)
     var totalBytesRead = 0
@@ -55,8 +56,8 @@ private fun detectAndReadText(inputStream: InputStream): String {
         return ""
     }
     
-    // 第二步：快速检测BOM (Byte Order Mark)
-    val detectedEncoding = when {
+    // 第二步：检测BOM (Byte Order Mark)
+    val bomEncoding = when {
         // UTF-8 BOM: EF BB BF
         probeData.size >= 3 && 
         probeData[0].toInt() == 0xEF && 
@@ -73,60 +74,147 @@ private fun detectAndReadText(inputStream: InputStream): String {
         probeData[0].toInt() == 0xFE && 
         probeData[1].toInt() == 0xFF -> "UTF-16BE"
         
+        // UTF-32 LE BOM: FF FE 00 00
+        probeData.size >= 4 && 
+        probeData[0].toInt() == 0xFF && 
+        probeData[1].toInt() == 0xFE && 
+        probeData[2].toInt() == 0x00 && 
+        probeData[3].toInt() == 0x00 -> "UTF-32LE"
+        
+        // UTF-32 BE BOM: 00 00 FE FF
+        probeData.size >= 4 && 
+        probeData[0].toInt() == 0x00 && 
+        probeData[1].toInt() == 0x00 && 
+        probeData[2].toInt() == 0xFE && 
+        probeData[3].toInt() == 0xFF -> "UTF-32BE"
+        
         else -> null
     }
     
-    // 第三步：根据检测结果选择编码
-    val charsetName = if (detectedEncoding != null) {
-        detectedEncoding
+    // 第三步：根据BOM或智能检测选择编码
+    val charsetName = if (bomEncoding != null) {
+        bomEncoding
     } else {
-        // 没有BOM，尝试智能检测
-        // 先尝试用UTF-8解码探测数据
-        try {
-            val testContent = String(probeData, Charsets.UTF_8)
-            // 检查是否包含替换字符（表示UTF-8解码失败）
-            if (!testContent.contains('\uFFFD')) {
-                "UTF-8" // UTF-8解码成功
-            } else {
-                "GBK" // UTF-8失败，使用GBK（中文常用编码）
-            }
-        } catch (e: Exception) {
-            "GBK" // 默认使用GBK
-        }
+        // 没有BOM，使用统计方法检测
+        detectEncodingByStatistics(probeData)
     }
     
-    // 第四步：✅ 关键优化 - 分块流式读取，避免一次性加载大文件
+    android.util.Log.d("TextReader", "Detected encoding: $charsetName")
+    
+    // 第四步：分块流式读取
     val remainingStream = SequenceInputStream(
         ByteArrayInputStream(probeData),
         inputStream
     )
     
-    // ✅ 使用InputStreamReader + 分块读取，比bufferedReader.readText()更高效
     val reader = InputStreamReader(remainingStream, Charset.forName(charsetName))
-    val charBuffer = CharArray(8192)  // 8KB字符缓冲区
-    val stringBuilder = StringBuilder(32768)  // 预分配32KB初始容量，减少扩容
-    
-    var totalChars = 0
-    val startTime = System.currentTimeMillis()
+    val charBuffer = CharArray(8192)
+    val stringBuilder = StringBuilder(32768)
     
     var charsRead: Int
     while (reader.read(charBuffer).also { charsRead = it } != -1) {
         stringBuilder.append(charBuffer, 0, charsRead)
-        totalChars += charsRead
-        
-        // ✅ 每读取64KB记录一次进度
-        if (totalChars % 65536 < charsRead) {
-            val elapsed = System.currentTimeMillis() - startTime
-            val speed = if (elapsed > 0) (totalChars / 1024.0) / (elapsed / 1000.0) else 0.0
-            android.util.Log.d("TextReader", "Reading progress: ${totalChars / 1024}KB, ${String.format("%.1f", speed)} KB/s")
-        }
     }
-    
-    val totalTime = System.currentTimeMillis() - startTime
-    android.util.Log.d("TextReader", "Total read: ${totalChars / 1024}KB in ${totalTime}ms, avg speed: ${String.format("%.1f", if (totalTime > 0) (totalChars / 1024.0) / (totalTime / 1000.0) else 0.0)} KB/s")
     
     reader.close()
     return stringBuilder.toString()
+}
+
+// ✅ 基于统计的编码检测方法
+private fun detectEncodingByStatistics(data: ByteArray): String {
+    // 检查是否为纯ASCII
+    var isAscii = true
+    for (byte in data) {
+        if (byte.toInt() < 0 || byte.toInt() > 127) {
+            isAscii = false
+            break
+        }
+    }
+    if (isAscii) return "UTF-8"  // ASCII是UTF-8的子集
+    
+    // 尝试UTF-8解码
+    try {
+        val utf8Content = String(data, Charsets.UTF_8)
+        // 检查是否包含替换字符
+        if (!utf8Content.contains('\uFFFD')) {
+            // 进一步验证：检查是否有有效的多字节UTF-8序列
+            var hasMultiByte = false
+            var i = 0
+            while (i < data.size) {
+                val b = data[i].toInt() and 0xFF
+                if (b > 127) {
+                    hasMultiByte = true
+                    // 检查是否是有效的UTF-8多字节序列
+                    when {
+                        b in 0xC0..0xDF -> { // 2字节
+                            if (i + 1 < data.size && (data[i + 1].toInt() and 0xC0) == 0x80) {
+                                i += 2
+                            } else break
+                        }
+                        b in 0xE0..0xEF -> { // 3字节
+                            if (i + 2 < data.size && 
+                                (data[i + 1].toInt() and 0xC0) == 0x80 &&
+                                (data[i + 2].toInt() and 0xC0) == 0x80) {
+                                i += 3
+                            } else break
+                        }
+                        b in 0xF0..0xF7 -> { // 4字节
+                            if (i + 3 < data.size && 
+                                (data[i + 1].toInt() and 0xC0) == 0x80 &&
+                                (data[i + 2].toInt() and 0xC0) == 0x80 &&
+                                (data[i + 3].toInt() and 0xC0) == 0x80) {
+                                i += 4
+                            } else break
+                        }
+                        else -> break
+                    }
+                } else {
+                    i++
+                }
+            }
+            if (hasMultiByte && i >= data.size - 10) {
+                return "UTF-8"  // 有效的UTF-8
+            }
+        }
+    } catch (e: Exception) {
+        // UTF-8解码失败
+    }
+    
+    // 尝试GBK/GB2312检测（中文常用）
+    try {
+        val gbkContent = String(data, Charset.forName("GBK"))
+        // GBK中文字符通常在特定范围内
+        var chineseCharCount = 0
+        for (char in gbkContent) {
+            if (char.toInt() in 0x4E00..0x9FFF) {  // CJK统一汉字
+                chineseCharCount++
+            }
+        }
+        if (chineseCharCount > 10) {
+            return "GBK"  // 检测到较多中文字符
+        }
+    } catch (e: Exception) {
+        // GBK解码失败
+    }
+    
+    // 尝试Big5（繁体中文）
+    try {
+        val big5Content = String(data, Charset.forName("Big5"))
+        var traditionalChineseCount = 0
+        for (char in big5Content) {
+            if (char.toInt() in 0x4E00..0x9FFF) {
+                traditionalChineseCount++
+            }
+        }
+        if (traditionalChineseCount > 10) {
+            return "Big5"
+        }
+    } catch (e: Exception) {
+        // Big5解码失败
+    }
+    
+    // 默认返回UTF-8
+    return "UTF-8"
 }
 
 // ✅ 文本阅读器主题枚举
@@ -145,7 +233,14 @@ fun TextReaderScreen(
     onError: (String) -> Unit,
     addLog: (String) -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    
+    // ✅ 加载用户设置
+    val prefs = context.getSharedPreferences("text_reader_prefs", android.content.Context.MODE_PRIVATE)
+    val savedFontSize = prefs.getInt("font_size", 20)  // 默认20sp
+    val savedTheme = prefs.getString("theme", "LIGHT") ?: "LIGHT"
+    val savedReadMode = prefs.getString("read_mode", "SCROLL") ?: "SCROLL"
     
     // ✅ 文本内容状态
     var textContent by remember { mutableStateOf("") }
@@ -155,15 +250,15 @@ fun TextReaderScreen(
     // ✅ 关键优化：将文本按行分割，用于LazyColumn懒加载
     var textLines by remember { mutableStateOf<List<String>>(emptyList()) }
     
-    // ✅ 阅读设置
-    var currentTheme by remember { mutableStateOf(TextReaderTheme.LIGHT) }
-    var fontSize by remember { mutableStateOf(16) }
+    // ✅ 阅读设置（从保存的设置加载）
+    var currentTheme by remember { mutableStateOf(TextReaderTheme.valueOf(savedTheme)) }
+    var fontSize by remember { mutableStateOf(savedFontSize) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
-    var showLogs by remember { mutableStateOf(false) }  // ✅ 新增：日志显示开关
+    var showLogs by remember { mutableStateOf(false) }
     
-    // ✅ 阅读模式：PAGE(翻页) 或 SCROLL(滑动)
-    var readMode by remember { mutableStateOf("SCROLL") }  // "PAGE" 或 "SCROLL"
+    // ✅ 阅读模式：PAGE(翻页) 或 SCROLL(滑动)（从保存的设置加载）
+    var readMode by remember { mutableStateOf(savedReadMode) }
     
     // ✅ 翻页模式的状态
     var currentPage by remember { mutableStateOf(0) }
@@ -187,6 +282,16 @@ fun TextReaderScreen(
         }
         // 同时发送到全局日志
         addLog(message)
+    }
+    
+    // ✅ 保存用户设置
+    fun saveSettings() {
+        prefs.edit()
+            .putInt("font_size", fontSize)
+            .putString("theme", currentTheme.name)
+            .putString("read_mode", readMode)
+            .apply()
+        addLocalLog("[TextReader] Settings saved: fontSize=$fontSize, theme=${currentTheme.name}, mode=$readMode")
     }
     
     // 加载文本文件
@@ -485,7 +590,7 @@ fun TextReaderScreen(
                                         onDragEnd = { },
                                         onHorizontalDrag = { change, dragAmount ->
                                             change.consume()
-                                            if (Math.abs(dragAmount) > 50) {  // 滑动阈值
+                                            if (Math.abs(dragAmount) > 30) {  // ✅ 降低阈值到30，更灵敏
                                                 if (dragAmount > 0 && currentPage > 0) {
                                                     // 向右滑动 → 上一页
                                                     currentPage--
@@ -600,7 +705,10 @@ fun TextReaderScreen(
         // ✅ 设置对话框
         if (showSettings) {
             AlertDialog(
-                onDismissRequest = { showSettings = false },
+                onDismissRequest = { 
+                    saveSettings()  // ✅ 关闭时保存设置
+                    showSettings = false 
+                },
                 title = { Text("阅读设置") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -610,14 +718,20 @@ fun TextReaderScreen(
                             ThemeButton(
                                 label = "滑动",
                                 isSelected = readMode == "SCROLL",
-                                onClick = { readMode = "SCROLL" },
+                                onClick = { 
+                                    readMode = "SCROLL"
+                                    saveSettings()  // ✅ 实时保存
+                                },
                                 backgroundColor = if (readMode == "SCROLL") MaterialTheme.colorScheme.primary else Color.Gray,
                                 textColor = Color.White
                             )
                             ThemeButton(
                                 label = "翻页",
                                 isSelected = readMode == "PAGE",
-                                onClick = { readMode = "PAGE" },
+                                onClick = { 
+                                    readMode = "PAGE"
+                                    saveSettings()  // ✅ 实时保存
+                                },
                                 backgroundColor = if (readMode == "PAGE") MaterialTheme.colorScheme.primary else Color.Gray,
                                 textColor = Color.White
                             )
@@ -629,21 +743,30 @@ fun TextReaderScreen(
                             ThemeButton(
                                 label = "白天",
                                 isSelected = currentTheme == TextReaderTheme.LIGHT,
-                                onClick = { currentTheme = TextReaderTheme.LIGHT },
+                                onClick = { 
+                                    currentTheme = TextReaderTheme.LIGHT
+                                    saveSettings()  // ✅ 实时保存
+                                },
                                 backgroundColor = Color(0xFFF5F5F5),
                                 textColor = Color(0xFF333333)
                             )
                             ThemeButton(
                                 label = "夜晚",
                                 isSelected = currentTheme == TextReaderTheme.DARK,
-                                onClick = { currentTheme = TextReaderTheme.DARK },
+                                onClick = { 
+                                    currentTheme = TextReaderTheme.DARK
+                                    saveSettings()  // ✅ 实时保存
+                                },
                                 backgroundColor = Color(0xFF1A1A1A),
                                 textColor = Color(0xFFE0E0E0)
                             )
                             ThemeButton(
                                 label = "护眼",
                                 isSelected = currentTheme == TextReaderTheme.EYE_CARE,
-                                onClick = { currentTheme = TextReaderTheme.EYE_CARE },
+                                onClick = { 
+                                    currentTheme = TextReaderTheme.EYE_CARE
+                                    saveSettings()  // ✅ 实时保存
+                                },
                                 backgroundColor = Color(0xFFF5E6D3),
                                 textColor = Color(0xFF5C4B37)
                             )
@@ -656,11 +779,21 @@ fun TextReaderScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = { if (fontSize > 12) fontSize-- }) {
+                            IconButton(onClick = { 
+                                if (fontSize > 12) {
+                                    fontSize--
+                                    saveSettings()  // ✅ 实时保存
+                                }
+                            }) {
                                 Icon(Icons.Default.Remove, contentDescription = "Decrease")
                             }
                             Text("$fontSize", fontSize = 16.sp)
-                            IconButton(onClick = { if (fontSize < 24) fontSize++ }) {
+                            IconButton(onClick = { 
+                                if (fontSize < 32) {  // ✅ 扩大范围到32sp
+                                    fontSize++
+                                    saveSettings()  // ✅ 实时保存
+                                }
+                            }) {
                                 Icon(Icons.Default.Add, contentDescription = "Increase")
                             }
                         }
@@ -680,22 +813,56 @@ fun TextReaderScreen(
                 onDismissRequest = { showToc = false },
                 title = { Text("目录 (${tableOfContents.size}章)") },
                 text = {
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 400.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(tableOfContents) { (title, lineNumber) ->
+                    Column {
+                        // ✅ 阅读进度条
+                        if (readMode == "PAGE" && totalPages > 0) {
+                            Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                                Text(
+                                    text = "阅读进度: ${currentPage + 1} / $totalPages 页",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = (currentPage + 1).toFloat() / totalPages,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else if (textLines.isNotEmpty()) {
+                            // 滑动模式显示行进度
                             Text(
-                                text = title,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        // TODO: 跳转到对应行
-                                        showToc = false
-                                        addLog("[TextReader] Jump to chapter: $title")
-                                    }
-                                    .padding(8.dp),
-                                fontSize = 14.sp,
+                                text = "总行数: ${textLines.size}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                        
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 400.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(tableOfContents) { (title, lineNumber) ->
+                                Text(
+                                    text = title,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            // ✅ 跳转到对应章节
+                                            if (readMode == "PAGE") {
+                                                // 翻页模式：计算章节所在页
+                                                val targetPage = lineNumber / 20  // 每页20行
+                                                currentPage = targetPage.coerceIn(0, totalPages - 1)
+                                                addLog("[TextReader] Jump to chapter '$title' at page ${currentPage + 1}")
+                                            } else {
+                                                // TODO: 滑动模式需要LazyColumn支持滚动到指定位置
+                                                addLog("[TextReader] Jump to chapter '$title' at line $lineNumber")
+                                            }
+                                            showToc = false
+                                        }
+                                        .padding(8.dp),
+                                    fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
