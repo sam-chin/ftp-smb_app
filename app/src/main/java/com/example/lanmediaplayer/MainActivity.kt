@@ -447,11 +447,16 @@ fun MainScreen(
     
     fun openWithSystemApp(file: MediaFile) {
         addLog("Opening with system app: ${file.name}")
+        
+        // ✅ 关键修复：保存context引用，避免在协程中失效
+        val currentContext = context
+        
         try {
             coroutineScope.launch {
                 // 使用外部存储目录，让文件持久化保存
-                val externalDir = context.getExternalFilesDir(null)
+                val externalDir = currentContext.getExternalFilesDir(null)
                 if (externalDir == null) {
+                    addLog("❌ External storage not available")
                     onError("External storage not available")
                     return@launch
                 }
@@ -459,14 +464,22 @@ fun MainScreen(
                 // 创建子目录存放下载的文件
                 val downloadDir = java.io.File(externalDir, "downloads")
                 if (!downloadDir.exists()) {
-                    downloadDir.mkdirs()
+                    val created = downloadDir.mkdirs()
+                    if (!created) {
+                        addLog("❌ Failed to create download directory")
+                        onError("Failed to create download directory")
+                        return@launch
+                    }
                 }
                 
                 val destFile = java.io.File(downloadDir, file.name)
                 
                 // 如果文件已存在，先删除
                 if (destFile.exists()) {
-                    destFile.delete()
+                    val deleted = destFile.delete()
+                    if (!deleted) {
+                        addLog("⚠️ Failed to delete existing file")
+                    }
                 }
                 
                 addLog("Downloading file to: ${destFile.absolutePath}")
@@ -474,28 +487,44 @@ fun MainScreen(
                 val inputStream = mediaController.getFileStream(file.path, selectedProtocol)
                 
                 if (inputStream == null) {
+                    addLog("❌ Failed to get file stream")
                     onError("Failed to get file stream")
                     return@launch
                 }
                 
                 // 下载文件到外部存储
-                java.io.FileOutputStream(destFile).use { output ->
-                    inputStream.use { input ->
-                        input.copyTo(output)
+                try {
+                    java.io.FileOutputStream(destFile).use { output ->
+                        inputStream.use { input ->
+                            input.copyTo(output)
+                        }
                     }
+                } catch (e: Exception) {
+                    addLog("❌ Download failed: ${e.message}")
+                    e.printStackTrace()
+                    onError("Download failed: ${e.message}")
+                    return@launch
                 }
                 
-                addLog("File downloaded successfully: ${destFile.absolutePath}")
+                addLog("✅ File downloaded successfully: ${destFile.absolutePath}")
                 addLog("File size: ${destFile.length()} bytes")
                 
                 val mimeType = getMimeType(file.name)
+                addLog("MIME type: $mimeType")
                 
                 // 使用 FileProvider 获取 content:// URI（兼容 Android 7.0+）
-                val contentUri = androidx.core.content.FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    destFile
-                )
+                val contentUri = try {
+                    androidx.core.content.FileProvider.getUriForFile(
+                        currentContext,
+                        "${currentContext.packageName}.fileprovider",
+                        destFile
+                    )
+                } catch (e: Exception) {
+                    addLog("❌ FileProvider error: ${e.message}")
+                    e.printStackTrace()
+                    onError("Failed to create file URI: ${e.message}")
+                    return@launch
+                }
                 
                 addLog("Content URI: $contentUri")
                 
@@ -506,15 +535,16 @@ fun MainScreen(
                 }
                 
                 try {
-                    context.startActivity(intent)
-                    addLog("System app launched successfully")
+                    currentContext.startActivity(intent)
+                    addLog("✅ System app launched successfully")
                 } catch (e: Exception) {
-                    addLog("No app found to handle this file type: ${e.message}")
+                    addLog("❌ No app found to handle this file type: ${e.message}")
+                    e.printStackTrace()
                     onError("No app found to open this file type")
                 }
             }
         } catch (e: Exception) {
-            addLog("Open error: ${e.message}")
+            addLog("❌ Open error: ${e.message}")
             e.printStackTrace()
             onError("Failed to open file: ${e.message}")
         }
