@@ -72,6 +72,7 @@ import com.lanmedia.player.controller.MediaController
 import com.lanmedia.player.controller.MediaFile
 import com.lanmedia.player.controller.NetworkProtocol
 import com.lanmedia.player.ui.theme.LanMediaPlayerTheme
+import com.lanmedia.player.ui.theme.DarkBackgroundGradient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -964,7 +965,9 @@ fun MainScreen(
                 currentScreen = Screen.Connection
                 addLog("Disconnected from server")
             },
-            isLoading = isLoading
+            isLoading = isLoading,
+            isDarkTheme = isDarkTheme,  // ✅ 传递主题状态
+            onThemeToggle = onThemeToggle  // ✅ 传递主题切换回调
         )
         
         Screen.Player -> PlayerScreen(
@@ -1368,7 +1371,9 @@ fun FileBrowserScreen(
     onBackClick: () -> Unit,
     onRefreshShares: (() -> Unit)? = null,  // SMB根目录时显示刷新按钮
     onDisconnect: () -> Unit,
-    isLoading: Boolean
+    isLoading: Boolean,
+    isDarkTheme: Boolean = true,  // ✅ 新增：主题状态
+    onThemeToggle: () -> Unit = {}  // ✅ 新增：主题切换回调
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
