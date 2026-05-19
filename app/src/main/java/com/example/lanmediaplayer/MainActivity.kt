@@ -133,14 +133,11 @@ class MainActivity : ComponentActivity() {
             var isDarkTheme by remember { mutableStateOf(true) }
             
             LanMediaPlayerTheme(darkTheme = isDarkTheme) {
-                // ✅ 关键修复：在整个应用级别设置背景色，避免白屏
+                // ✅ 关键修复：使用纯色背景，避免渐变渲染延迟
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            if (isDarkTheme) MaterialTheme.colorScheme.background
-                            else MaterialTheme.colorScheme.background
-                        )
+                        .background(Color(0xFF0F0F1E))  // ✅ 深色纯色背景，与DarkBackgroundGradient起始色相同
                 ) {
                     // ✅ 启动画面状态
                     var showSplash by remember { mutableStateOf(true) }
@@ -251,12 +248,12 @@ fun SplashScreen(onSplashFinished: () -> Unit) {
     val alpha = remember { Animatable(0f) }
     
     LaunchedEffect(Unit) {
-        // ✅ 快速淡入动画（300ms）
+        // ✅ 超快速淡入动画（150ms）
         alpha.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing)
         )
-        // ✅ 立即消失，不等待（总耗时约300-500ms）
+        // ✅ 立即消失，总耗时约150-200ms
         onSplashFinished()
     }
     
@@ -1615,6 +1612,8 @@ fun PlayerScreen(
     
     // 添加状态用于显示拖动进度提示
     var isDragging by remember { mutableStateOf(false) }
+    var dragStartPosition by remember { mutableStateOf(0f) }  // ✅ 记录起始位置
+    var dragStartPositionTime by remember { mutableStateOf(0L) }  // ✅ 记录起始时间
     var dragPositionText by remember { mutableStateOf("") }
     
     // 格式化时间为 mm:ss 格式
@@ -1678,6 +1677,7 @@ fun PlayerScreen(
                         when (event.action) {
                             android.view.MotionEvent.ACTION_DOWN -> {
                                 isDragging = false
+                                dragStartPosition = event.x  // ✅ 记录起始位置
                                 showControls = true
                                 // 强制显示 ExoPlayer 控制器
                                 showController()
@@ -1687,29 +1687,37 @@ fun PlayerScreen(
                                 val player = getPlayer()
                                 if (player != null && player.duration > 0) {
                                     // 检测水平滑动
-                                    val historySize = event.historySize
-                                    if (historySize > 0) {
-                                        val currentX = event.x
-                                        val previousX = event.getHistoricalX(0)
-                                        val deltaX = currentX - previousX
+                                    val deltaX = event.x - dragStartPosition
+                                    
+                                    // ✅ 关键修改：每滑动30像素快进/快退15秒（更灵敏，易控制）
+                                    val pixelsPerStep = 30f  // ✅ 每30像素为一个步进
+                                    val secondsPerStep = 15L  // 每个步进15秒
+                                    
+                                    if (Math.abs(deltaX) > pixelsPerStep / 2) {  // 至少滑动15像素才触发
+                                        isDragging = true
+                                        val duration = player.duration
                                         
-                                        // 只有当水平移动距离足够大时才调整进度
-                                        if (Math.abs(deltaX) > 5) {
-                                            isDragging = true
-                                            val currentPosition = player.currentPosition
-                                            val duration = player.duration
-                                            
-                                            // 计算进度调整量：每像素调整15毫秒（更灵敏）
-                                            val adjustMs = (deltaX * 15).toLong()
-                                            val newPosition = (currentPosition + adjustMs).coerceIn(0, duration)
-                                            
-                                            player.seekTo(newPosition)
-                                            
-                                            // 更新拖动提示文字
-                                            val newTime = formatTime(newPosition)
-                                            val totalTime = formatTime(duration)
-                                            dragPositionText = "$newTime / $totalTime"
+                                        // 计算应该调整的时间：根据滑动距离计算步进数
+                                        val steps = (deltaX / pixelsPerStep).toInt()
+                                        val adjustMs = (steps * secondsPerStep * 1000).toLong()
+                                        
+                                        // 基于起始时间计算新位置（避免累积误差）
+                                        val startPositionTime = if (dragStartPositionTime == 0L) {
+                                            // 第一次计算时记录起始时间
+                                            dragStartPositionTime = player.currentPosition
+                                            player.currentPosition
+                                        } else {
+                                            dragStartPositionTime
                                         }
+                                        
+                                        val newPosition = (startPositionTime + adjustMs).coerceIn(0, duration)
+                                        
+                                        player.seekTo(newPosition)
+                                        
+                                        // 更新拖动提示文字
+                                        val newTime = formatTime(newPosition)
+                                        val totalTime = formatTime(duration)
+                                        dragPositionText = "$newTime / $totalTime"
                                     }
                                 }
                                 true
@@ -1717,6 +1725,8 @@ fun PlayerScreen(
                             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                                 if (isDragging) {
                                     isDragging = false
+                                    dragStartPosition = 0f
+                                    dragStartPositionTime = 0L
                                     dragPositionText = ""
                                     // 拖动结束后启动自动隐藏计时器
                                 }

@@ -58,7 +58,12 @@ fun TextReaderScreen(
     
     // 加载文本文件
     LaunchedEffect(textFile) {
-        if (textFile == null) return@LaunchedEffect
+        if (textFile == null) {
+            errorMessage = "No file selected"
+            isLoading = false
+            addLog("[TextReader] ❌ textFile is null")
+            return@LaunchedEffect
+        }
         
         isLoading = true
         errorMessage = null
@@ -66,6 +71,7 @@ fun TextReaderScreen(
         try {
             addLog("[TextReader] Loading file: ${textFile.name}")
             addLog("[TextReader] File path: ${textFile.path}")
+            addLog("[TextReader] Protocol: $selectedProtocol")
             
             // ✅ 关键修复：检查SMB连接状态
             if (selectedProtocol is com.lanmedia.player.controller.NetworkProtocol.SMB) {
@@ -145,27 +151,82 @@ fun TextReaderScreen(
     
     Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
         if (isLoading) {
-            // 加载指示器
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("加载中...", color = textColor, fontSize = 14.sp)
+            // ✅ 加载指示器 - 添加返回按钮
+            Column(modifier = Modifier.fillMaxSize()) {
+                // TopAppBar with back button
+                TopAppBar(
+                    title = { 
+                        Text(
+                            textFile?.name ?: "文本阅读",
+                            color = textColor,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = textColor)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = backgroundColor
+                    )
+                )
+                
+                // Loading content
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("加载中...", color = textColor, fontSize = 14.sp)
+                    }
                 }
             }
         } else if (errorMessage != null) {
-            // 错误提示
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Error, contentDescription = null, tint = Color.Red, modifier = Modifier.size(48.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(errorMessage!!, color = Color.Red, fontSize = 16.sp)
+            // ✅ 错误提示 - 添加返回按钮
+            Column(modifier = Modifier.fillMaxSize()) {
+                // TopAppBar with back button
+                TopAppBar(
+                    title = { 
+                        Text(
+                            "错误",
+                            color = textColor,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = textColor)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = backgroundColor
+                    )
+                )
+                
+                // Error content
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Error, contentDescription = null, tint = Color.Red, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(errorMessage!!, color = Color.Red, fontSize = 16.sp, modifier = Modifier.padding(horizontal = 32.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = onBackClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Text("返回")
+                        }
+                    }
                 }
             }
         } else {
