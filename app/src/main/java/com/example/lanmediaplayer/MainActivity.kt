@@ -1689,11 +1689,11 @@ fun PlayerScreen(
                                     // 检测水平滑动
                                     val deltaX = event.x - dragStartPosition
                                     
-                                    // ✅ 关键修改：每滑动30像素快进/快退15秒（更灵敏，易控制）
-                                    val pixelsPerStep = 30f  // ✅ 每30像素为一个步进
+                                    // ✅ 关键修改：每滑动50像素快进/快退15秒（平衡灵敏度和精确控制）
+                                    val pixelsPerStep = 50f  // ✅ 每50像素为一个步进
                                     val secondsPerStep = 15L  // 每个步进15秒
                                     
-                                    if (Math.abs(deltaX) > pixelsPerStep / 2) {  // 至少滑动15像素才触发
+                                    if (Math.abs(deltaX) > pixelsPerStep / 2) {  // 至少滑动25像素才触发
                                         isDragging = true
                                         val duration = player.duration
                                         

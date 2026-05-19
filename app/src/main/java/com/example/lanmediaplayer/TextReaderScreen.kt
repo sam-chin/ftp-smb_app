@@ -52,16 +52,31 @@ fun TextReaderScreen(
     var fontSize by remember { mutableStateOf(16) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
+    var showLogs by remember { mutableStateOf(false) }  // ✅ 新增：日志显示开关
     
     // ✅ 目录(简单实现:按章节标题提取)
     var tableOfContents by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
+    
+    // ✅ 本地日志列表（用于在界面上显示）
+    var localLogs by remember { mutableStateOf<List<String>>(emptyList()) }
+    
+    // ✅ 包装addLog，同时更新本地日志
+    val wrappedAddLog: (String) -> Unit = { message ->
+        addLog(message)  // 调用外部的addLog（添加到MainActivity的debugLogs）
+        // ✅ 同时添加到本地日志列表
+        localLogs = localLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
+        // 保持最近100条日志
+        if (localLogs.size > 100) {
+            localLogs = localLogs.drop(localLogs.size - 100)
+        }
+    }
     
     // 加载文本文件
     LaunchedEffect(textFile) {
         if (textFile == null) {
             errorMessage = "No file selected"
             isLoading = false
-            addLog("[TextReader] ❌ textFile is null")
+            wrappedAddLog("[TextReader] ❌ textFile is null")
             return@LaunchedEffect
         }
         
@@ -69,9 +84,9 @@ fun TextReaderScreen(
         errorMessage = null
         
         try {
-            addLog("[TextReader] Loading file: ${textFile.name}")
-            addLog("[TextReader] File path: ${textFile.path}")
-            addLog("[TextReader] Protocol: $selectedProtocol")
+            wrappedAddLog("[TextReader] Loading file: ${textFile.name}")
+            wrappedAddLog("[TextReader] File path: ${textFile.path}")
+            wrappedAddLog("[TextReader] Protocol: $selectedProtocol")
             
             // ✅ 关键修复：检查SMB连接状态
             if (selectedProtocol is com.lanmedia.player.controller.NetworkProtocol.SMB) {
@@ -79,14 +94,14 @@ fun TextReaderScreen(
                 if (smbClient == null) {
                     errorMessage = "SMB client not initialized"
                     isLoading = false
-                    addLog("[TextReader] ❌ SMB client is null")
+                    wrappedAddLog("[TextReader] ❌ SMB client is null")
                     return@LaunchedEffect
                 }
                 
                 if (!smbClient.isConnected()) {
                     errorMessage = "SMB connection lost, please reconnect"
                     isLoading = false
-                    addLog("[TextReader] ❌ SMB connection lost")
+                    wrappedAddLog("[TextReader] ❌ SMB connection lost")
                     return@LaunchedEffect
                 }
                 
@@ -94,18 +109,21 @@ fun TextReaderScreen(
                 if (!smbClient.hasSelectedShare()) {
                     errorMessage = "No share selected. Please select a shared folder first."
                     isLoading = false
-                    addLog("[TextReader] ❌ No SMB share selected")
+                    wrappedAddLog("[TextReader] ❌ No SMB share selected")
                     return@LaunchedEffect
                 }
             }
             
             // 获取文件流
+            wrappedAddLog("[TextReader] Calling getFileStream with path: ${textFile.path}")
             val inputStream = mediaController.getFileStream(textFile.path, selectedProtocol)
             
             if (inputStream == null) {
-                errorMessage = "Failed to open file (returned null stream)"
+                errorMessage = "Failed to open file: ${textFile.name}\nPath: ${textFile.path}"
                 isLoading = false
-                addLog("[TextReader] ❌ getFileStream returned null")
+                wrappedAddLog("[TextReader] ❌ getFileStream returned null for path: ${textFile.path}")
+                wrappedAddLog("[TextReader] File name: ${textFile.name}")
+                wrappedAddLog("[TextReader] Protocol: $selectedProtocol")
                 return@LaunchedEffect
             }
             
@@ -126,12 +144,15 @@ fun TextReaderScreen(
             tableOfContents = toc
             
             isLoading = false
-            addLog("[TextReader] File loaded: ${lines.size} lines, ${toc.size} chapters")
+            wrappedAddLog("[TextReader] File loaded: ${lines.size} lines, ${toc.size} chapters")
             
         } catch (e: Exception) {
-            errorMessage = "Error loading file: ${e.message}"
+            val errorMsg = e.message ?: "Unknown error (${e.javaClass.simpleName})"
+            errorMessage = "Error loading file: $errorMsg\nFile: ${textFile.name}"
             isLoading = false
-            addLog("[TextReader] Error: ${e.message}")
+            wrappedAddLog("[TextReader] Error: $errorMsg")
+            wrappedAddLog("[TextReader] Exception type: ${e.javaClass.name}")
+            wrappedAddLog("[TextReader] File path: ${textFile.path}")
             e.printStackTrace()
         }
     }
@@ -248,6 +269,15 @@ fun TextReaderScreen(
                         }
                     },
                     actions = {
+                        // ✅ 日志按钮
+                        IconButton(onClick = { showLogs = !showLogs }) {
+                            Icon(
+                                imageVector = if (showLogs) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (showLogs) "Hide logs" else "Show logs",
+                                tint = textColor
+                            )
+                        }
+                        
                         // 目录按钮
                         if (tableOfContents.isNotEmpty()) {
                             IconButton(onClick = { showToc = true }) {
@@ -281,6 +311,32 @@ fun TextReaderScreen(
                             .verticalScroll(rememberScrollState())
                             .padding(16.dp)
                     )
+                }
+                
+                // ✅ 日志显示面板
+                if (showLogs && localLogs.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .background(Color.Black.copy(alpha = 0.8f))
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp)
+                        ) {
+                            items(localLogs) { log ->
+                                Text(
+                                    text = log,
+                                    color = Color.Green,
+                                    fontSize = 10.sp,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 }
                 
                 // 底部信息栏

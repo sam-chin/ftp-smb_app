@@ -590,14 +590,17 @@ class SmbClient(
                 
                 log("[SMB-JCIFS] fileName from JCIFS: '$fileName'")
                 
+                // ✅ 关键修复：JCIFS在某些情况下会返回"父目录名+文件名"的格式
+                // 例如在/小说目录下，可能返回"小说《肉蒲团》.txt"而不是"《肉蒲团》.txt"
+                // 策略：总是剥离父目录名前缀，因为在子目录下文件名不应包含父目录名
                 if (normalizedPath.isNotEmpty()) {
                     val lastSegment = normalizedPath.substringAfterLast('/')
                     if (lastSegment.isNotEmpty() && fileName.startsWith(lastSegment)) {
                         val afterSegment = fileName.substring(lastSegment.length)
-                        if (afterSegment.isNotEmpty() && !afterSegment.startsWith("/")) {
-                            log("[SMB-JCIFS] JCIFS returned filename with lastSegment prefix! Stripping '$lastSegment' from '$fileName'")
+                        if (afterSegment.isNotEmpty()) {
+                            log("[SMB-JCIFS] Stripping directory prefix '$lastSegment' from '$fileName'")
                             fileName = afterSegment
-                            log("[SMB-JCIFS] After strip: '$fileName'")
+                            log("[SMB-JCIFS] Final fileName after strip: '$fileName'")
                         }
                     }
                 }
