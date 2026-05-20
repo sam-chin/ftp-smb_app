@@ -1091,8 +1091,8 @@ class MediaController(private val context: Context, private val logCallback: ((S
                                 else -> "播放失败: ${error.message}"
                             }
                             
-                            // ✅ 通知上层显示错误
-                            withContext(Dispatchers.Main) {
+                            // ✅ 通知上层显示错误（使用Handler切换到主线程）
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 callback.onError(friendlyMessage)
                             }
                         }
