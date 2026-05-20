@@ -524,17 +524,36 @@ class SmbClient(
             if (!isConnected()) {
                 log("[SMB-JCIFS] ⚠️ Connection lost in listFiles, attempting to reconnect...")
                 
-                // ✅ 尝试自动重连
-                if (host.isNotEmpty() && username.isNotEmpty()) {
-                    log("[SMB-JCIFS] Auto-reconnecting to $host...")
-                    val reconnected = connectInternal(host, share, username, password, domain)
-                    if (!reconnected) {
-                        log("[SMB-JCIFS] ❌ Auto-reconnect failed in listFiles")
+                // ✅ 关键修复：先断开旧连接，清理资源
+                try {
+                    disconnect()
+                    log("[SMB-JCIFS] Old connection cleaned up")
+                } catch (e: Exception) {
+                    log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
+                }
+                
+                // ✅ 尝试自动重连（最多3次）
+                var reconnected = false
+                for (attempt in 1..3) {
+                    if (host.isNotEmpty() && username.isNotEmpty()) {
+                        log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
+                        reconnected = connectInternal(host, share, username, password, domain)
+                        if (reconnected) {
+                            log("[SMB-JCIFS] ✅ Auto-reconnect successful on attempt $attempt")
+                            break
+                        } else {
+                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed, retrying...")
+                            // 等待1秒后重试
+                            kotlinx.coroutines.delay(1000)
+                        }
+                    } else {
+                        log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
                         return@withContext emptyList()
                     }
-                    log("[SMB-JCIFS] ✅ Auto-reconnect successful in listFiles")
-                } else {
-                    log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
+                }
+                
+                if (!reconnected) {
+                    log("[SMB-JCIFS] ❌ Auto-reconnect failed after 3 attempts")
                     return@withContext emptyList()
                 }
             }
@@ -711,18 +730,37 @@ class SmbClient(
             if (!isConnected()) {
                 log("[SMB-JCIFS] ⚠️ Connection lost, attempting to reconnect...")
                 
-                // ✅ 尝试自动重连
-                if (host.isNotEmpty() && username.isNotEmpty()) {
-                    log("[SMB-JCIFS] Auto-reconnecting to $host...")
-                    val reconnected = connectInternal(host, share, username, password, domain)
-                    if (!reconnected) {
-                        log("[SMB-JCIFS] ❌ Auto-reconnect failed")
-                        throw SmbConnectionLostException("SMB connection lost and auto-reconnect failed")
+                // ✅ 关键修复：先断开旧连接，清理资源
+                try {
+                    disconnect()
+                    log("[SMB-JCIFS] Old connection cleaned up")
+                } catch (e: Exception) {
+                    log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
+                }
+                
+                // ✅ 尝试自动重连（最多3次）
+                var reconnected = false
+                for (attempt in 1..3) {
+                    if (host.isNotEmpty() && username.isNotEmpty()) {
+                        log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
+                        reconnected = connectInternal(host, share, username, password, domain)
+                        if (reconnected) {
+                            log("[SMB-JCIFS] ✅ Auto-reconnect successful on attempt $attempt")
+                            break
+                        } else {
+                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed, retrying...")
+                            // 等待1秒后重试
+                            kotlinx.coroutines.delay(1000)
+                        }
+                    } else {
+                        log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
+                        throw SmbConnectionLostException("SMB connection lost")
                     }
-                    log("[SMB-JCIFS] ✅ Auto-reconnect successful")
-                } else {
-                    log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
-                    throw SmbConnectionLostException("SMB connection lost")
+                }
+                
+                if (!reconnected) {
+                    log("[SMB-JCIFS] ❌ Auto-reconnect failed after 3 attempts")
+                    throw SmbConnectionLostException("SMB connection lost and auto-reconnect failed after 3 attempts")
                 }
             }
             
@@ -791,6 +829,43 @@ class SmbClient(
     suspend fun getFileSize(remotePath: String): Long = withContext(Dispatchers.IO) {
         try {
             log("[SMB-JCIFS] getFileSize called with path: '$remotePath'")
+            
+            // ✅ 检查连接状态，如果断开则尝试重连
+            if (!isConnected()) {
+                log("[SMB-JCIFS] ⚠️ Connection lost in getFileSize, attempting to reconnect...")
+                
+                // ✅ 关键修复：先断开旧连接，清理资源
+                try {
+                    disconnect()
+                    log("[SMB-JCIFS] Old connection cleaned up")
+                } catch (e: Exception) {
+                    log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
+                }
+                
+                // ✅ 尝试自动重连（最多3次）
+                var reconnected = false
+                for (attempt in 1..3) {
+                    if (host.isNotEmpty() && username.isNotEmpty()) {
+                        log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
+                        reconnected = connectInternal(host, share, username, password, domain)
+                        if (reconnected) {
+                            log("[SMB-JCIFS] ✅ Auto-reconnect successful on attempt $attempt")
+                            break
+                        } else {
+                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed, retrying...")
+                            kotlinx.coroutines.delay(1000)
+                        }
+                    } else {
+                        log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
+                        return@withContext 0L
+                    }
+                }
+                
+                if (!reconnected) {
+                    log("[SMB-JCIFS] ❌ Auto-reconnect failed after 3 attempts")
+                    return@withContext 0L
+                }
+            }
             
             // ✅ 关键修复：检查是否已选择共享目录
             if (baseUrl.isEmpty()) {

@@ -352,12 +352,32 @@ class HttpProxyServer(
         
         log("📤 Starting stream: expected $expectedSize bytes")
         
-        inputStream.use { input ->
-            while (input.read(buffer).also { bytesRead = it } != -1) {
-                outputStream.write(buffer, 0, bytesRead)
-                outputStream.flush()
-                totalBytesRead += bytesRead
+        try {
+            inputStream.use { input ->
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    outputStream.write(buffer, 0, bytesRead)
+                    outputStream.flush()
+                    totalBytesRead += bytesRead
+                }
             }
+        } catch (e: Exception) {
+            // ✅ 关键修复：检测SMB断连错误
+            val errorMessage = e.message ?: ""
+            when {
+                errorMessage.contains("socket closed", ignoreCase = true) ||
+                errorMessage.contains("Connection reset", ignoreCase = true) ||
+                errorMessage.contains("Broken pipe", ignoreCase = true) ||
+                errorMessage.contains("accept error", ignoreCase = true) -> {
+                    log("❌ SMB connection lost during streaming at $totalBytesRead/$expectedSize bytes")
+                    log("⚠️ This is likely due to SMB server timeout or network issue")
+                    log("💡 Try refreshing the file list to reconnect")
+                }
+                else -> {
+                    log("❌ Stream error at $totalBytesRead/$expectedSize bytes: ${e.message}")
+                    e.printStackTrace()
+                }
+            }
+            throw e  // 重新抛出，让上层处理
         }
         
         log("✅ Streamed $totalBytesRead bytes (expected: $expectedSize)")

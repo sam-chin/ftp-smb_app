@@ -1019,7 +1019,6 @@ fun MainScreen(
                 mediaController.stopPlayback()
                 currentScreen = Screen.FileBrowser
             },
-            onError = onError,
             addLog = { message ->
                 debugLogs = debugLogs + "${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} - $message"
             }
@@ -1665,12 +1664,12 @@ fun PlayerScreen(
     castController: CastController,
     connectionPrefs: ConnectionPreferences,
     onBackClick: () -> Unit,
-    onError: (String) -> Unit,
     addLog: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showCastDialog by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }  // 控制按钮显示状态
+    var showErrorDialog by remember { mutableStateOf<String?>(null) }  // ✅ 错误提示对话框
     
     // ✅ 关键修复：拦截系统返回手势，实现逐级返回
     BackHandler(enabled = true) {
@@ -1911,11 +1910,63 @@ fun PlayerScreen(
                                 (context as? MainActivity)?.setCastingState(true)
                                 addLog("[VideoPlayer] Cast successful, will start service when app goes to background")
                             } else {
-                                onError(message)
+                                showErrorDialog = message  // ✅ 显示错误对话框
                             }
                         }
                     } else {
-                        onError("No media playing")
+                        showErrorDialog = "No media playing"  // ✅ 显示错误对话框
+                    }
+                }
+            )
+        }
+        
+        // ✅ 错误提示对话框
+        showErrorDialog?.let { errorMessage ->
+            AlertDialog(
+                onDismissRequest = { showErrorDialog = null },
+                title = { Text("播放错误") },
+                text = { 
+                    Column {
+                        Text(errorMessage)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // ✅ 如果是SMB断连，显示自动重连提示
+                        if (errorMessage.contains("SMB连接已断开")) {
+                            Text(
+                                text = "\nApp正在尝试自动重连...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // ✅ 重试按钮
+                        TextButton(onClick = { 
+                            showErrorDialog = null
+                            // ✅ 重新播放当前媒体（会触发自动重连）
+                            val currentFile = mediaController.getCurrentMediaFile()
+                            if (currentFile != null) {
+                                addLog("Retrying playback after error...")
+                                mediaController.playMedia(currentFile, object : MediaController.MediaCallback {
+                                    override fun onFilesLoaded(files: List<MediaFile>) {}
+                                    override fun onError(message: String) {
+                                        showErrorDialog = message
+                                    }
+                                    override fun onPlaybackStateChanged(state: Int) {}
+                                })
+                            }
+                        }) {
+                            Text("重试")
+                        }
+                        // ✅ 返回按钮
+                        TextButton(onClick = { 
+                            showErrorDialog = null
+                            mediaController.stopPlayback()
+                            onBackClick()
+                        }) {
+                            Text("返回")
+                        }
                     }
                 }
             )

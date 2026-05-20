@@ -1078,6 +1078,23 @@ class MediaController(private val context: Context, private val logCallback: ((S
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             log("[Controller] Player error: ${error.message}")
                             log("[Controller] Error code: ${error.errorCode}")
+                            
+                            // ✅ 关键修复：检测SMB断连错误，提供友好提示
+                            val errorMessage = error.message ?: ""
+                            val friendlyMessage = when {
+                                errorMessage.contains("socket closed", ignoreCase = true) ||
+                                errorMessage.contains("Connection reset", ignoreCase = true) ||
+                                errorMessage.contains("Broken pipe", ignoreCase = true) ||
+                                errorMessage.contains("accept error", ignoreCase = true) -> {
+                                    "SMB连接已断开\n请返回文件列表刷新后重试"
+                                }
+                                else -> "播放失败: ${error.message}"
+                            }
+                            
+                            // ✅ 通知上层显示错误
+                            withContext(Dispatchers.Main) {
+                                callback.onError(friendlyMessage)
+                            }
                         }
                         
                         override fun onPlaybackStateChanged(state: Int) {
@@ -1185,6 +1202,11 @@ class MediaController(private val context: Context, private val logCallback: ((S
     // 获取当前媒体的真实路径（用于DLNA投屏）
     fun getCurrentMediaPath(): String? {
         return currentMediaFile?.path
+    }
+    
+    // ✅ 获取当前播放的MediaFile（用于重试）
+    fun getCurrentMediaFile(): MediaFile? {
+        return currentMediaFile
     }
     
     // 获取当前协议
