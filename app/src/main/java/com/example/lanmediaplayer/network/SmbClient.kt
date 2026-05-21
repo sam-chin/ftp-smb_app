@@ -446,7 +446,7 @@ class SmbClient(
             log("[SMB-JCIFS] Error type: ${e.javaClass.simpleName}")
             log("[SMB-JCIFS] Error message: ${e.message}")
             e.printStackTrace()
-            return@withTimeoutOrNull false
+            false  // 返回false表示连接失败
         }
     }
     
