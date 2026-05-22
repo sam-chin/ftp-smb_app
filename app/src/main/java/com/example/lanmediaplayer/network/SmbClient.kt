@@ -414,7 +414,7 @@ class SmbClient(
                 cachedConnectionStatus = true
                 lastConnectionCheckTime = System.currentTimeMillis()
                 
-                return@withContext true
+                true
             } else if (availableShares.isNotEmpty() && detectedShare.isNotEmpty()) {
                 this@SmbClient.share = detectedShare
                 this@SmbClient.domain = detectedDomain
@@ -425,7 +425,7 @@ class SmbClient(
                 cachedConnectionStatus = true
                 lastConnectionCheckTime = System.currentTimeMillis()
                 
-                return@withContext true
+                true
             } else if (availableShares.isNotEmpty()) {
                 // 成功枚举到共享目录，但没有选择具体共享
                 // ❌ 关键修复：不设置share为空，而是返回false，让上层代码提示用户选择共享
@@ -436,10 +436,10 @@ class SmbClient(
                 log("[SMB-JCIFS] Available shares: ${availableShares.joinToString(", ")}")
                 log("[SMB-JCIFS] ⚠️ Please reconnect and specify a share name from the list above")
                 // 返回false表示需要用户重新选择共享目录
-                return@withContext false
+                false
             } else {
                 log("[SMB-JCIFS] === Connection failed ===")
-                return@withContext false
+                false
             }
         } catch (e: Exception) {
             log("[SMB-JCIFS] === Connection error ===")
