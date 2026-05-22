@@ -2308,6 +2308,9 @@ fun ImageViewerScreen(
     // ✅ 跟踪当前页面的缩放状态
     var isCurrentPageZoomed by remember { mutableStateOf(false) }
     
+    // ✅ 图片旋转功能：0度、90度、180度、270度
+    var imageRotation by remember { mutableStateOf(0) }
+    
     // ✅ 关键修复：使用WindowInsets添加安全区域，避免内容被系统栏遮挡
     Box(
         modifier = Modifier
@@ -2343,8 +2346,43 @@ fun ImageViewerScreen(
                         if (page == pagerState.currentPage) {
                             isCurrentPageZoomed = zoomed
                         }
-                    }
+                    },
+                    rotation = imageRotation.toFloat()  // ✅ 传递旋转角度
                 )
+            }
+            
+            // ✅ 显示旋转角度提示（当旋转时）
+            AnimatedVisibility(
+                visible = imageRotation != 0 && !isCurrentPageZoomed,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 80.dp)
+                        .background(
+                            Color.Black.copy(alpha = 0.6f),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RotateRight,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "旋转: ${imageRotation}°",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
             
             // ✅ 底部控制栏 - 毛玻璃效果
@@ -2484,23 +2522,43 @@ fun ImageViewerScreen(
             }
         }
         
-        // ✅ 投屏按钮 - 毛玻璃效果
+        // ✅ 右上角按钮组 - 毛玻璃效果
         AnimatedVisibility(
             visible = !isCurrentPageZoomed,
             enter = fadeIn(animationSpec = tween(300)),
             exit = fadeOut(animationSpec = tween(300)),
             modifier = Modifier.align(Alignment.TopEnd)
         ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .padding(16.dp)
+                    .padding(end = 16.dp, top = 16.dp)  // ✅ 添加顶部安全边距
                     .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // ✅ 旋转按钮
+                IconButton(
+                    onClick = { 
+                        // 循环切换旋转角度：0 -> 90 -> 180 -> 270 -> 0
+                        imageRotation = (imageRotation + 90) % 360
+                        addLog("Image rotation: ${imageRotation}°")
+                    }
+                ) {
+                    Icon(
+                        Icons.Default.RotateRight,
+                        contentDescription = "Rotate",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                
+                // 投屏按钮
                 IconButton(onClick = { showCastDialog = true }) {
                     Icon(
                         Icons.Default.Cast,
                         contentDescription = "Cast",
-                        tint = Color.White
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -2840,7 +2898,8 @@ fun CastDeviceDialog(
 fun ImageLoader(
     imageUrl: String,
     contentDescription: String,
-    onZoomChange: (Boolean) -> Unit = {}  // ✅ 通知父组件缩放状态变化
+    onZoomChange: (Boolean) -> Unit = {},  // ✅ 通知父组件缩放状态变化
+    rotation: Float = 0f  // ✅ 旋转角度
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -2869,7 +2928,8 @@ fun ImageLoader(
                     scaleX = scale,
                     scaleY = scale,
                     translationX = offsetX,
-                    translationY = offsetY
+                    translationY = offsetY,
+                    rotationZ = rotation  // ✅ 应用旋转
                 ),
             contentScale = ContentScale.Fit,
             onState = { state ->
