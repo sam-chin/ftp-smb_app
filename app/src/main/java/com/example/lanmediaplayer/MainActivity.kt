@@ -45,7 +45,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -1740,9 +1740,6 @@ fun PlayerScreen(
                     useController = true  // 使用 ExoPlayer 内置控制器（支持进度条拖动）
                     controllerShowTimeoutMs = 3000  // 控制器3秒后自动隐藏
                     
-                    // ✅ 应用视频旋转
-                    setVideoSurfaceViewRotation(videoRotation.toFloat())
-                    
                     // 监听控制器可见性变化，同步自定义按钮的显示状态
                     setControllerVisibilityListener(object : androidx.media3.ui.PlayerControlView.VisibilityListener {
                         override fun onVisibilityChange(visibility: Int) {
@@ -1815,7 +1812,9 @@ fun PlayerScreen(
                     }
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(rotationZ = videoRotation.toFloat())  // ✅ 应用视频旋转
         )
         
         // 返回按钮 - 优化样式
@@ -1857,7 +1856,7 @@ fun PlayerScreen(
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        Icons.Default.RotateRight,
+                        Icons.Default.Refresh,
                         contentDescription = "Rotate",
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
@@ -1934,7 +1933,7 @@ fun PlayerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.RotateRight,
+                        imageVector = Icons.Default.Refresh,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.8f),
                         modifier = Modifier.size(20.dp)
@@ -2370,7 +2369,7 @@ fun ImageViewerScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.RotateRight,
+                            imageVector = Icons.Default.Refresh,
                             contentDescription = null,
                             tint = Color.White.copy(alpha = 0.8f),
                             modifier = Modifier.size(20.dp)
@@ -2545,7 +2544,7 @@ fun ImageViewerScreen(
                     }
                 ) {
                     Icon(
-                        Icons.Default.RotateRight,
+                        Icons.Default.Refresh,
                         contentDescription = "Rotate",
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
