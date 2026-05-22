@@ -1826,7 +1826,7 @@ fun PlayerScreen(
             IconButton(
                 onClick = onBackClick,
                 modifier = Modifier
-                    .padding(8.dp)
+                    .padding(start = 8.dp, top = 8.dp)  // ✅ 添加顶部安全边距
                     .size(40.dp)  // 固定大小，更紧凑
             ) {
                 Icon(
@@ -2471,7 +2471,7 @@ fun ImageViewerScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .padding(16.dp)
+                    .padding(start = 16.dp, top = 16.dp)  // ✅ 添加顶部安全边距
                     .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
             ) {
                 IconButton(onClick = onBackClick) {
