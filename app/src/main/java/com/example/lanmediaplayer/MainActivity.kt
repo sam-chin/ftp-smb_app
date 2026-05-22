@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -3148,7 +3149,7 @@ fun FileOperationMenu(
                 if (canOpenWith) {
                     ListItem(
                         headlineContent = { Text("Open with...") },
-                        leadingContent = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Default.Share, contentDescription = null) },
                         modifier = Modifier.clickable { onDismiss(); onOpenWith() }
                     )
                 }
