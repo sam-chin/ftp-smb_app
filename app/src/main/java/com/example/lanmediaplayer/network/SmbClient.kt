@@ -251,16 +251,31 @@ class SmbClient(
         // ✅ 关键修复：整个重连过程最多15秒，防止无限等待
         val result = withTimeoutOrNull(15000) {
             try {
-                // ✅ 关键修复：连接前彻底清理旧资源，避免TCP/SMB会话残留
+                // ✅ WiFi切换AP后快速重连优化：彻底清理旧资源
                 if (context != null || baseUrl.isNotEmpty()) {
                     log("[SMB-JCIFS] ⚠️ Detected existing connection, forcing cleanup before reconnect...")
                     forceDisconnect()
-                    // ✅ 视频播放快速重连：减少等待时间到200ms（原500ms）
-                    delay(200)
+                    // ✅ 视频播放快速重连：减少等待时间到100ms（原200ms）
+                    delay(100)
                 }
                 
                 // ✅ 强制使用IPv4协议栈（解决澎湃OS问题）
                 java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
+                
+                // ✅ WiFi切换AP后优化：清除DNS缓存，避免使用旧的IP地址
+                try {
+                    val inetAddressClass = Class.forName("java.net.InetAddress")
+                    val cacheField = inetAddressClass.getDeclaredField("addressCache")
+                    cacheField.isAccessible = true
+                    val cache = cacheField.get(null)
+                    if (cache != null) {
+                        val clearMethod = cache.javaClass.getMethod("clear")
+                        clearMethod.invoke(cache)
+                        log("[SMB-JCIFS] DNS cache cleared for fast reconnection")
+                    }
+                } catch (e: Exception) {
+                    log("[SMB-JCIFS] Failed to clear DNS cache: ${e.message}")
+                }
                 
                 log("[SMB-JCIFS] === Starting connection ===")
                 log("[SMB-JCIFS] Host: $host")
@@ -313,10 +328,10 @@ class SmbClient(
                 val properties = Properties()
                 
                 // ✅ Windows SMB 客户端稳定性优化
-                // 1. 超时配置（平衡稳定性和响应速度）
-                properties.setProperty("jcifs.smb.client.responseTimeout", "30000")  // 响应超时30秒（Windows默认）
-                properties.setProperty("jcifs.smb.client.soTimeout", "30000")        // Socket超时30秒
-                properties.setProperty("jcifs.smb.client.connTimeout", "10000")      // 连接超时10秒
+                // 1. 超时配置（WiFi切换后快速重连优化）
+                properties.setProperty("jcifs.smb.client.responseTimeout", "5000")   // ✅ 响应超时5秒（原30秒，快速失败）
+                properties.setProperty("jcifs.smb.client.soTimeout", "5000")         // ✅ Socket超时5秒（原30秒）
+                properties.setProperty("jcifs.smb.client.connTimeout", "3000")       // ✅ 连接超时3秒（原10秒，快速检测网络不可达）
                 
                 // 2. 连接保持和心跳（Windows SMB 核心特性）
                 properties.setProperty("jcifs.smb.client.keepAlive", "true")         // 启用TCP Keep-Alive
@@ -355,9 +370,9 @@ class SmbClient(
                     log("[SMB-JCIFS] Testing specified share: $baseUrl")
                     
                     try {
-                        // ✅ 视频播放快速重连：减少超时到3秒（原5秒）
+                        // ✅ WiFi切换后快速重连：减少超时到2秒（原3秒）
                         val testFile = SmbFile(baseUrl, context)
-                        val exists = withTimeoutOrNull(3000) {  // 最多等待3秒
+                        val exists = withTimeoutOrNull(2000) {  // 最多等待2秒
                             testFile.exists()
                         }
                         
@@ -369,7 +384,7 @@ class SmbClient(
                         } else if (exists == false) {
                             log("[SMB-JCIFS] Share does not exist or access denied")
                         } else {
-                            log("[SMB-JCIFS] ⚠️ Share existence check timed out after 3 seconds")
+                            log("[SMB-JCIFS] ⚠️ Share existence check timed out after 2 seconds")
                         }
                     } catch (e: Exception) {
                         log("[SMB-JCIFS] Error testing share: ${e.message}")
@@ -381,9 +396,9 @@ class SmbClient(
                         log("[SMB-JCIFS] ⚠️ Share enumeration may be slow on Windows servers")
                         log("[SMB-JCIFS] If this takes too long, please specify the share name directly")
                         
-                        // ✅ 添加超时保护，最多等待8秒
+                        // ✅ WiFi切换后快速重连：减少超时到5秒（原8秒）
                         val shares = try {
-                            withTimeoutOrNull(8000) {
+                            withTimeoutOrNull(5000) {
                                 listShares()
                             }
                         } catch (e: Exception) {
@@ -614,17 +629,17 @@ class SmbClient(
                     log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
                 }
                 
-                // ✅ 尝试自动重连（最多3次，使用指数退避策略）
+                // ✅ 尝试自动重连（最多3次，WiFi切换后快速重试）
                 var reconnected = false
                 for (attempt in 1..3) {
                     if (host.isNotEmpty() && username.isNotEmpty()) {
                         log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
                         
-                        // ✅ 关键修复：第一次立即重试，后续使用指数退避
+                        // ✅ WiFi切换后快速重连优化：减少等待时间
                         if (attempt > 1) {
-                            // 第2次等待2秒，第3次等待4秒（避免被服务器拒绝）
-                            val delayMs = (1000 * (1 shl (attempt - 1))).toLong()  // 2^1=2s, 2^2=4s
-                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (exponential backoff)...")
+                            // 第2次等待500ms，第3次等待1秒（原2s/4s，加速重连）
+                            val delayMs = if (attempt == 2) 500L else 1000L
+                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (fast reconnection)...")
                             kotlinx.coroutines.delay(delayMs)
                         }
                         
@@ -830,17 +845,17 @@ class SmbClient(
                     log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
                 }
                 
-                // ✅ 尝试自动重连（最多3次，使用指数退避策略）
+                // ✅ 尝试自动重连（最多3次，WiFi切换后快速重试）
                 var reconnected = false
                 for (attempt in 1..3) {
                     if (host.isNotEmpty() && username.isNotEmpty()) {
                         log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
                         
-                        // ✅ 关键修复：第一次立即重试，后续使用指数退避
+                        // ✅ WiFi切换后快速重连优化：减少等待时间
                         if (attempt > 1) {
-                            // 第2次等待2秒，第3次等待4秒（避免被服务器拒绝）
-                            val delayMs = (1000 * (1 shl (attempt - 1))).toLong()  // 2^1=2s, 2^2=4s
-                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (exponential backoff)...")
+                            // 第2次等待500ms，第3次等待1秒（原2s/4s，加速重连）
+                            val delayMs = if (attempt == 2) 500L else 1000L
+                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (fast reconnection)...")
                             kotlinx.coroutines.delay(delayMs)
                         }
                         
@@ -944,17 +959,17 @@ class SmbClient(
                     log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
                 }
                 
-                // ✅ 尝试自动重连（最多3次，使用指数退避策略）
+                // ✅ 尝试自动重连（最多3次，WiFi切换后快速重试）
                 var reconnected = false
                 for (attempt in 1..3) {
                     if (host.isNotEmpty() && username.isNotEmpty()) {
                         log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
                         
-                        // ✅ 关键修复：第一次立即重试，后续使用指数退避
+                        // ✅ WiFi切换后快速重连优化：减少等待时间
                         if (attempt > 1) {
-                            // 第2次等待2秒，第3次等待4秒（避免被服务器拒绝）
-                            val delayMs = (1000 * (1 shl (attempt - 1))).toLong()  // 2^1=2s, 2^2=4s
-                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (exponential backoff)...")
+                            // 第2次等待500ms，第3次等待1秒（原2s/4s，加速重连）
+                            val delayMs = if (attempt == 2) 500L else 1000L
+                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (fast reconnection)...")
                             kotlinx.coroutines.delay(delayMs)
                         }
                         
