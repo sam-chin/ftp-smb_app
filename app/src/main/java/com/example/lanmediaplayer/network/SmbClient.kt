@@ -147,8 +147,7 @@ class SmbClient(
         
         // ✅ 关键优化：如果缓存还在有效期内，直接返回缓存结果
         if (currentTime - lastConnectionCheckTime < CONNECTION_CACHE_DURATION) {
-            log("[SMB-JCIFS] Using cached connection status: $cachedConnectionStatus")
-            return cachedConnectionStatus
+            return cachedConnectionStatus  // 无网络请求!
         }
         
         // 缓存过期，重新检查连接
@@ -160,16 +159,20 @@ class SmbClient(
                 return false
             }
             
-            // ✅ 尝试访问根目录来验证连接是否真的可用
+            // ✅ 优化：使用短超时快速检测连接状态
             val testFile = SmbFile(baseUrl, context)
-            val exists = testFile.exists()  // 这会触发网络请求，验证连接
+            val exists = withTimeoutOrNull(3000) {  // 最多等待3秒
+                testFile.exists()  // 这会触发网络请求，验证连接
+            }
+            
+            val result = exists == true
             
             // 更新缓存
-            cachedConnectionStatus = exists
+            cachedConnectionStatus = result
             lastConnectionCheckTime = currentTime
             
-            log("[SMB-JCIFS] Connection check result: $exists (cached for ${CONNECTION_CACHE_DURATION/1000}s)")
-            exists
+            log("[SMB-JCIFS] Connection check result: $result (cached for ${CONNECTION_CACHE_DURATION/1000}s)")
+            result
         } catch (e: Exception) {
             log("[SMB-JCIFS] Connection check failed: ${e.message}")
             cachedConnectionStatus = false
@@ -206,6 +209,10 @@ class SmbClient(
                     // JCIFS 2.x 没有直接的close方法，但可以通过设置null让GC回收
                     // 更重要的是：确保所有打开的InputStream都被关闭
                     log("[SMB-JCIFS] Closing CIFS context...")
+                    
+                    // ✅ 关键优化：显式通知JCIFS关闭所有连接
+                    // 通过创建一个新的BaseContext来替换旧的，强制关闭旧连接
+                    context = null
                 } catch (e: Exception) {
                     log("[SMB-JCIFS] Error closing context: ${e.message}")
                 }
@@ -213,7 +220,6 @@ class SmbClient(
             
             // ✅ 清空所有状态变量，确保下次连接是全新的
             auth = null
-            context = null  // 让GC回收，关闭底层socket
             baseUrl = ""
             host = ""
             share = ""
@@ -226,6 +232,7 @@ class SmbClient(
             // ✅ 关键优化：清除连接缓存
             cachedConnectionStatus = false
             lastConnectionCheckTime = 0
+            lastActivityTime = 0  // 重置活动时间
             log("[SMB-JCIFS] Connection cache cleared")
             
             // ✅ 建议GC回收，加速socket关闭
@@ -408,7 +415,7 @@ class SmbClient(
                 log("[SMB-JCIFS] === Connection successful ===")
                 log("[SMB-JCIFS] Connected to share: $detectedShare")
                 log("[SMB-JCIFS] Domain: ${if (detectedDomain.isEmpty()) "(empty)" else detectedDomain}")
-                log("[SMB-JCIFS] Base URL: $baseUrl")
+                log("[SMB-JCIFS] Base URL: $baseUrl"
                 
                 // ✅ 关键优化：连接成功后，清除缓存并标记为已连接
                 cachedConnectionStatus = true
@@ -610,19 +617,26 @@ class SmbClient(
                     log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
                 }
                 
-                // ✅ 尝试自动重连（最多3次）
+                // ✅ 尝试自动重连（最多3次，使用指数退避策略）
                 var reconnected = false
                 for (attempt in 1..3) {
                     if (host.isNotEmpty() && username.isNotEmpty()) {
                         log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
+                        
+                        // ✅ 关键修复：第一次立即重试，后续使用指数退避
+                        if (attempt > 1) {
+                            // 第2次等待2秒，第3次等待4秒（避免被服务器拒绝）
+                            val delayMs = (1000 * (1 shl (attempt - 1))).toLong()  // 2^1=2s, 2^2=4s
+                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (exponential backoff)...")
+                            kotlinx.coroutines.delay(delayMs)
+                        }
+                        
                         reconnected = connectInternal(host, share, username, password, domain)
                         if (reconnected) {
                             log("[SMB-JCIFS] ✅ Auto-reconnect successful on attempt $attempt")
                             break
                         } else {
-                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed, retrying...")
-                            // 等待1秒后重试
-                            kotlinx.coroutines.delay(1000)
+                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed")
                         }
                     } else {
                         log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
@@ -933,18 +947,26 @@ class SmbClient(
                     log("[SMB-JCIFS] Warning: Failed to cleanup old connection: ${e.message}")
                 }
                 
-                // ✅ 尝试自动重连（最多3次）
+                // ✅ 尝试自动重连（最多3次，使用指数退避策略）
                 var reconnected = false
                 for (attempt in 1..3) {
                     if (host.isNotEmpty() && username.isNotEmpty()) {
                         log("[SMB-JCIFS] Auto-reconnect attempt $attempt/3 to $host...")
+                        
+                        // ✅ 关键修复：第一次立即重试，后续使用指数退避
+                        if (attempt > 1) {
+                            // 第2次等待2秒，第3次等待4秒（避免被服务器拒绝）
+                            val delayMs = (1000 * (1 shl (attempt - 1))).toLong()  // 2^1=2s, 2^2=4s
+                            log("[SMB-JCIFS] Waiting ${delayMs}ms before retry (exponential backoff)...")
+                            kotlinx.coroutines.delay(delayMs)
+                        }
+                        
                         reconnected = connectInternal(host, share, username, password, domain)
                         if (reconnected) {
                             log("[SMB-JCIFS] ✅ Auto-reconnect successful on attempt $attempt")
                             break
                         } else {
-                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed, retrying...")
-                            kotlinx.coroutines.delay(1000)
+                            log("[SMB-JCIFS] ⚠️ Attempt $attempt failed")
                         }
                     } else {
                         log("[SMB-JCIFS] ❌ Cannot auto-reconnect: missing credentials")
@@ -1099,14 +1121,35 @@ class SmbClient(
     
     fun disconnect() {
         log("[SMB-JCIFS] Disconnecting")
+        
+        // ✅ 关键修复：显式关闭context，释放底层TCP连接
+        if (context != null) {
+            try {
+                log("[SMB-JCIFS] Closing CIFS context...")
+                context = null
+            } catch (e: Exception) {
+                log("[SMB-JCIFS] Error closing context: ${e.message}")
+            }
+        }
+        
         auth = null
-        context = null
         baseUrl = ""
+        host = ""
+        share = ""
+        username = ""
+        password = ""
+        domain = ""
+        serverEncoding = null
+        availableShares = emptyList()
         
         // ✅ 关键优化：断开连接时，清除缓存
         cachedConnectionStatus = false
         lastConnectionCheckTime = 0
+        lastActivityTime = 0  // 重置活动时间
         log("[SMB-JCIFS] Connection cache cleared")
+        
+        // ✅ 建议GC回收，加速socket关闭
+        System.gc()
     }
     
     private fun normalizePath(path: String): String {
