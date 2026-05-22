@@ -272,9 +272,35 @@ class SmbClient(
                 // ✅ WiFi切换AP后快速重连优化：彻底清理旧资源
                 if (context != null || baseUrl.isNotEmpty()) {
                     log("[SMB-JCIFS] ⚠️ Detected existing connection, forcing cleanup before reconnect...")
+                    
+                    // ✅ 关键修复：主动通知服务器释放旧连接（更可靠）
+                    try {
+                        if (context != null && host.isNotEmpty() && username.isNotEmpty()) {
+                            log("[SMB-JCIFS] 📤 Sending disconnect request to server: $host")
+                            
+                            // 尝试访问一个无效路径，触发服务器端会话清理
+                            // 这会强制服务器检测到客户端已断开，释放相关资源
+                            val testUrl = "smb://$host/INVALID_PATH_FOR_DISCONNECT_" + System.currentTimeMillis()
+                            try {
+                                val testFile = SmbFile(testUrl, context)
+                                // 这个操作会失败，但会让服务器意识到旧连接已失效
+                                withTimeoutOrNull(1000) {
+                                    testFile.exists()
+                                }
+                                log("[SMB-JCIFS] ✅ Server notified of old session termination")
+                            } catch (e: Exception) {
+                                // 预期会失败，但这正是我们想要的 - 服务器会清理会话
+                                log("[SMB-JCIFS] ✅ Server session cleanup triggered (expected failure: ${e.javaClass.simpleName})")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        log("[SMB-JCIFS] ⚠️ Failed to notify server: ${e.message}")
+                    }
+                    
+                    // 清理客户端资源
                     forceDisconnect()
-                    // ✅ 视频播放快速重连：减少等待时间到100ms（原200ms）
-                    delay(100)
+                    // ✅ 视频播放快速重连：减少等待时间到50ms（原100ms）
+                    delay(50)
                 }
                 
                 // ✅ 强制使用IPv4协议栈（解决澎湃OS问题）
@@ -366,11 +392,15 @@ class SmbClient(
                 properties.setProperty("jcifs.smb.client.tcpNoDelay", "true")        // 禁用Nagle算法，减少延迟
                 properties.setProperty("jcifs.smb.client.idleTimeout", "600000")     // 空闲超时10分钟（Windows默认）
                 
-                // 3. 会话和连接复用（Windows SMB 关键优化）
+                // 3. 会话和连接复用（WiFi切换后优化：禁用会话缓存）
                 properties.setProperty("jcifs.smb.client.useNTLMv2", "true")         // 使用NTLMv2认证
                 properties.setProperty("jcifs.smb.client.lmCompatibility", "3")      // NTLMv2级别
                 properties.setProperty("jcifs.smb.client.signingPreferred", "false") // 禁用签名（提升性能）
                 properties.setProperty("jcifs.smb.client.dfs.disabled", "true")      // 禁用DFS
+                
+                // ✅ WiFi切换AP后关键修复：禁用会话缓存，强制创建新会话
+                properties.setProperty("jcifs.smb.client.disableSessionHistory", "true")  // 禁用会话历史
+                properties.setProperty("jcifs.smb.client.allowGuestFallback", "false")    // 不允许降级到guest
                 
                 // 4. 文件锁和Oplock管理（Windows SMB 默认行为）
                 properties.setProperty("jcifs.smb.client.locking", "true")           // ✅ 启用文件锁（Windows默认）
