@@ -1733,6 +1733,12 @@ fun PlayerScreen(
                 top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
                 bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             )
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    // ✅ 点击屏幕切换控制按钮显示/隐藏
+                    showControls = !showControls
+                })
+            }
     ) {
         AndroidView(
             factory = { ctx ->
@@ -1740,6 +1746,9 @@ fun PlayerScreen(
                     player = mediaController.getPlayer()
                     useController = true  // 使用 ExoPlayer 内置控制器（支持进度条拖动）
                     controllerShowTimeoutMs = 3000  // 控制器3秒后自动隐藏
+                    
+                    // ✅ 应用视频旋转
+                    videoSurfaceView?.rotation = videoRotation.toFloat()
                     
                     // 监听控制器可见性变化，同步自定义按钮的显示状态
                     setControllerVisibilityListener(object : androidx.media3.ui.PlayerControlView.VisibilityListener {
@@ -1813,9 +1822,11 @@ fun PlayerScreen(
                     }
                 }
             },
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(rotationZ = videoRotation.toFloat())  // ✅ 应用视频旋转
+            update = { playerView ->
+                // ✅ 当videoRotation变化时，更新旋转角度
+                playerView.videoSurfaceView?.rotation = videoRotation.toFloat()
+            },
+            modifier = Modifier.fillMaxSize()  // ✅ 移除旋转，避免影响触摸事件
         )
         
         // 返回按钮 - 优化样式
@@ -1826,7 +1837,7 @@ fun PlayerScreen(
             IconButton(
                 onClick = onBackClick,
                 modifier = Modifier
-                    .padding(start = 8.dp, top = 8.dp)  // ✅ 添加顶部安全边距
+                    .padding(start = 16.dp, top = 32.dp)  // ✅ 增加顶部安全边距，避免刘海屏遮挡
                     .size(40.dp)  // 固定大小，更紧凑
             ) {
                 Icon(
