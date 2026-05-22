@@ -1671,6 +1671,9 @@ fun PlayerScreen(
     var showControls by remember { mutableStateOf(true) }  // 控制按钮显示状态
     var showErrorDialog by remember { mutableStateOf<String?>(null) }  // ✅ 错误提示对话框
     
+    // ✅ 视频旋转功能：0度、90度、180度、270度
+    var videoRotation by remember { mutableStateOf(0) }
+    
     // ✅ 关键修复：拦截系统返回手势，实现逐级返回
     BackHandler(enabled = true) {
         mediaController.stopPlayback()
@@ -1736,6 +1739,9 @@ fun PlayerScreen(
                     player = mediaController.getPlayer()
                     useController = true  // 使用 ExoPlayer 内置控制器（支持进度条拖动）
                     controllerShowTimeoutMs = 3000  // 控制器3秒后自动隐藏
+                    
+                    // ✅ 应用视频旋转
+                    setVideoSurfaceViewRotation(videoRotation.toFloat())
                     
                     // 监听控制器可见性变化，同步自定义按钮的显示状态
                     setControllerVisibilityListener(object : androidx.media3.ui.PlayerControlView.VisibilityListener {
@@ -1837,18 +1843,39 @@ fun PlayerScreen(
             visible = showControls,
             modifier = Modifier.align(Alignment.TopEnd)
         ) {
-            IconButton(
-                onClick = { showCastDialog = true },
-                modifier = Modifier
-                    .padding(8.dp)
-                    .size(40.dp)  // 固定大小，更紧凑
+            Row(
+                modifier = Modifier.padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    Icons.Default.Cast,
-                    contentDescription = "Cast",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
+                // ✅ 旋转按钮
+                IconButton(
+                    onClick = { 
+                        // 循环切换旋转角度：0 -> 90 -> 180 -> 270 -> 0
+                        videoRotation = (videoRotation + 90) % 360
+                        addLog("Video rotation: ${videoRotation}°")
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Default.RotateRight,
+                        contentDescription = "Rotate",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                
+                // 投屏按钮
+                IconButton(
+                    onClick = { showCastDialog = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Cast,
+                        contentDescription = "Cast",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
         
@@ -1883,6 +1910,40 @@ fun PlayerScreen(
                         text = "正在快进/快退",
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        
+        // ✅ 显示旋转角度提示（当旋转时）
+        AnimatedVisibility(
+            visible = videoRotation != 0,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(bottom = 80.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.6f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.RotateRight,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "旋转: ${videoRotation}°",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
