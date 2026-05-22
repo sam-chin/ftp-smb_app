@@ -271,9 +271,9 @@ class SmbClient(
                 } else {
                     log("[SMB-JCIFS] Detected IPv4 address")
                 }
-            
-            // ✅ 小米澎湃OS诊断提示
-            log("[SMB-JCIFS] 💡 If connection fails on Xiaomi HyperOS, please check:")
+                
+                // ✅ 小米澎湃OS诊断提示
+                log("[SMB-JCIFS] 💡 If connection fails on Xiaomi HyperOS, please check:")
             log("[SMB-JCIFS]    1. Settings → Apps → LAN Media → Battery Saver → No restrictions")
             log("[SMB-JCIFS]    2. Security App → Network Assistant → Allow LAN access")
             log("[SMB-JCIFS]    3. Settings → Connection & Sharing → Private DNS → Off")
@@ -462,6 +462,7 @@ class SmbClient(
     }
     
     return@withContext result
+}
     
     fun getAvailableShares(): List<String> = availableShares
     
