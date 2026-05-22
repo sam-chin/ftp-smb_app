@@ -200,16 +200,34 @@ class SmbClient(
     fun forceDisconnect() {
         log("[SMB-JCIFS] Force disconnecting and cleaning up resources")
         try {
-            // ✅ 关键修复：先尝试关闭context，释放底层TCP连接和SMB会话
+            // ✅ WiFi切换AP后关键修复：彻底关闭JCIFS的所有底层TCP连接
             if (context != null) {
                 try {
-                    // JCIFS 2.x 没有直接的close方法，但可以通过设置null让GC回收
-                    // 更重要的是：确保所有打开的InputStream都被关闭
-                    log("[SMB-JCIFS] Closing CIFS context...")
+                    log("[SMB-JCIFS] Closing CIFS context and all underlying TCP connections...")
                     
-                    // ✅ 关键优化：显式通知JCIFS关闭所有连接
-                    // 通过创建一个新的BaseContext来替换旧的，强制关闭旧连接
+                    // ✅ 关键修复：通过反射强制关闭JCIFS内部的所有Socket连接
+                    // JCIFS的BaseContext内部有一个TransportManager，持有所有活动连接
+                    try {
+                        val contextClass = context!!.javaClass
+                        
+                        // 尝试获取transport字段（JCIFS内部连接管理器）
+                        val transportField = contextClass.getDeclaredField("transport")
+                        transportField.isAccessible = true
+                        val transport = transportField.get(context)
+                        
+                        if (transport != null) {
+                            // 调用disconnect方法关闭所有连接
+                            val disconnectMethod = transport.javaClass.getMethod("disconnect")
+                            disconnectMethod.invoke(transport)
+                            log("[SMB-JCIFS] ✅ Transport disconnected successfully")
+                        }
+                    } catch (e: Exception) {
+                        log("[SMB-JCIFS] ⚠️ Failed to close transport via reflection: ${e.message}")
+                    }
+                    
+                    // ✅ 将context设为null，允许GC回收
                     context = null
+                    
                 } catch (e: Exception) {
                     log("[SMB-JCIFS] Error closing context: ${e.message}")
                 }
@@ -262,7 +280,8 @@ class SmbClient(
                 // ✅ 强制使用IPv4协议栈（解决澎湃OS问题）
                 java.lang.System.setProperty("java.net.preferIPv4Stack", "true")
                 
-                // ✅ WiFi切换AP后优化：清除DNS缓存，避免使用旧的IP地址
+                // ✅ WiFi切换AP后关键修复：清除所有网络缓存
+                // 1. 清除DNS缓存
                 try {
                     val inetAddressClass = Class.forName("java.net.InetAddress")
                     val cacheField = inetAddressClass.getDeclaredField("addressCache")
@@ -271,10 +290,19 @@ class SmbClient(
                     if (cache != null) {
                         val clearMethod = cache.javaClass.getMethod("clear")
                         clearMethod.invoke(cache)
-                        log("[SMB-JCIFS] DNS cache cleared for fast reconnection")
+                        log("[SMB-JCIFS] ✅ DNS cache cleared")
                     }
                 } catch (e: Exception) {
-                    log("[SMB-JCIFS] Failed to clear DNS cache: ${e.message}")
+                    log("[SMB-JCIFS] ⚠️ Failed to clear DNS cache: ${e.message}")
+                }
+                
+                // 2. 清除HTTP keep-alive缓存（如果有）
+                try {
+                    System.setProperty("http.keepAlive", "false")
+                    System.setProperty("http.maxConnections", "0")
+                    log("[SMB-JCIFS] ✅ HTTP keep-alive disabled")
+                } catch (e: Exception) {
+                    log("[SMB-JCIFS] ⚠️ Failed to disable HTTP keep-alive: ${e.message}")
                 }
                 
                 log("[SMB-JCIFS] === Starting connection ===")
@@ -1134,34 +1162,10 @@ class SmbClient(
     fun disconnect() {
         log("[SMB-JCIFS] Disconnecting")
         
-        // ✅ 关键修复：显式关闭context，释放底层TCP连接
-        if (context != null) {
-            try {
-                log("[SMB-JCIFS] Closing CIFS context...")
-                context = null
-            } catch (e: Exception) {
-                log("[SMB-JCIFS] Error closing context: ${e.message}")
-            }
-        }
+        // ✅ WiFi切换AP后关键修复：调用forceDisconnect彻底清理TCP连接
+        forceDisconnect()
         
-        auth = null
-        baseUrl = ""
-        host = ""
-        share = ""
-        username = ""
-        password = ""
-        domain = ""
-        serverEncoding = null
-        availableShares = emptyList()
-        
-        // ✅ 关键优化：断开连接时，清除缓存
-        cachedConnectionStatus = false
-        lastConnectionCheckTime = 0
-        lastActivityTime = 0  // 重置活动时间
-        log("[SMB-JCIFS] Connection cache cleared")
-        
-        // ✅ 建议GC回收，加速socket关闭
-        System.gc()
+        log("[SMB-JCIFS] Disconnected successfully")
     }
     
     private fun normalizePath(path: String): String {
