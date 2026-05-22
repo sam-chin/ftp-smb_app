@@ -160,19 +160,16 @@ class SmbClient(
             }
             
             // ✅ 优化：使用短超时快速检测连接状态
+            // 注意：JCIFS的soTimeout已经配置为30秒，这里直接调用
             val testFile = SmbFile(baseUrl, context)
-            val exists = withTimeoutOrNull(3000) {  // 最多等待3秒
-                testFile.exists()  // 这会触发网络请求，验证连接
-            }
-            
-            val result = exists == true
+            val exists = testFile.exists()  // 这会触发网络请求，验证连接
             
             // 更新缓存
-            cachedConnectionStatus = result
+            cachedConnectionStatus = exists
             lastConnectionCheckTime = currentTime
             
-            log("[SMB-JCIFS] Connection check result: $result (cached for ${CONNECTION_CACHE_DURATION/1000}s)")
-            result
+            log("[SMB-JCIFS] Connection check result: $exists (cached for ${CONNECTION_CACHE_DURATION/1000}s)")
+            exists
         } catch (e: Exception) {
             log("[SMB-JCIFS] Connection check failed: ${e.message}")
             cachedConnectionStatus = false
@@ -415,7 +412,7 @@ class SmbClient(
                 log("[SMB-JCIFS] === Connection successful ===")
                 log("[SMB-JCIFS] Connected to share: $detectedShare")
                 log("[SMB-JCIFS] Domain: ${if (detectedDomain.isEmpty()) "(empty)" else detectedDomain}")
-                log("[SMB-JCIFS] Base URL: $baseUrl"
+                log("[SMB-JCIFS] Base URL: $baseUrl")
                 
                 // ✅ 关键优化：连接成功后，清除缓存并标记为已连接
                 cachedConnectionStatus = true
