@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
+import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import com.lanmedia.player.controller.CastController
@@ -262,50 +263,27 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ✅ 启动画面 - 极速模式，不增加启动时间
+// ✅ 启动画面 - 极速模式，无动画，立即显示主界面
 @Composable
 fun SplashScreen(onSplashFinished: () -> Unit) {
-    val alpha = remember { Animatable(0f) }
-    
+    // ✅ 立即完成，无任何延迟
     LaunchedEffect(Unit) {
-        // ✅ 超快速淡入动画（150ms）
-        alpha.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing)
-        )
-        // ✅ 立即消失，总耗时约150-200ms
         onSplashFinished()
     }
     
+    // ✅ 极简启动画面，只显示Logo，无文字，无动画
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackgroundGradient),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Logo图标 (使用mipmap中的ic_launcher)
-            Image(
-                painter = androidx.compose.ui.res.painterResource(id = R.mipmap.ic_launcher),
-                contentDescription = "App Logo",
-                modifier = Modifier
-                    .size(100.dp)
-                    .graphicsLayer(alpha = alpha.value),
-                contentScale = ContentScale.Fit
-            )
-            
-            // App名称
-            Text(
-                text = "LAN Media Player",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier.graphicsLayer(alpha = alpha.value)
-            )
-        }
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = R.mipmap.ic_launcher),
+            contentDescription = "App Logo",
+            modifier = Modifier.size(80.dp),  // ✅ 缩小Logo，更快渲染
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -1449,7 +1427,10 @@ fun FileBrowserScreen(
             title = { Text(title) },
             navigationIcon = {
                 if (showBackButton) {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(
+                        onClick = onBackClick,
+                        modifier = Modifier.padding(start = 8.dp, top = 8.dp)  // ✅ 增加安全边距，避免刘海屏遮挡
+                    ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -1747,8 +1728,8 @@ fun PlayerScreen(
                     useController = true  // 使用 ExoPlayer 内置控制器（支持进度条拖动）
                     controllerShowTimeoutMs = 3000  // 控制器3秒后自动隐藏
                     
-                    // ✅ 应用视频旋转
-                    videoSurfaceView?.rotation = videoRotation.toFloat()
+                    // ✅ 应用视频旋转：旋转整个PlayerView，包括控制器
+                    rotation = videoRotation.toFloat()
                     
                     // 监听控制器可见性变化，同步自定义按钮的显示状态
                     setControllerVisibilityListener(object : androidx.media3.ui.PlayerControlView.VisibilityListener {
@@ -1824,7 +1805,7 @@ fun PlayerScreen(
             },
             update = { playerView ->
                 // ✅ 当videoRotation变化时，更新旋转角度
-                playerView.videoSurfaceView?.rotation = videoRotation.toFloat()
+                playerView.rotation = videoRotation.toFloat()
             },
             modifier = Modifier.fillMaxSize()  // ✅ 移除旋转，避免影响触摸事件
         )
